@@ -173,49 +173,90 @@ function RasterSVG({LH,LV,fW,fH,rasterType,seilkreuztyp="ohne",skInterval=1,size
   const cols=Math.min(Math.max(1,Math.floor(fw/lh)),12),rows=Math.min(Math.max(1,Math.floor(fh/lv)),12);
   const pad=42,inner=size-2*pad,cell=Math.min(inner/cols,inner/rows);
   const gw=cell*cols,gh=cell*rows,ox=pad+(inner-gw)/2,oy=pad+(inner-gh)/2;
-  const L=[];
   const BL="#1565C0";
-  const a=(x1,y1,x2,y2,c="#AAA",w=.7)=>L.push({x1,y1,x2,y2,c,w});
-  // Horizontal + vertical lines
-  if(rasterType==="gitter"||rasterType==="vertikal")for(let c=0;c<=cols;c++)a(ox+c*cell,oy,ox+c*cell,oy+gh,"#AAA",.8);
-  if(rasterType==="gitter"||rasterType==="horizontal")for(let r=0;r<=rows;r++)a(ox,oy+r*cell,ox+gw,oy+r*cell,"#AAA",.8);
-  // Diagonal lines — ONLY for diagonal mode, NOT for gitter
-  const hasDiag=rasterType==="diagonal";
-  if(hasDiag)for(let c=0;c<cols;c++)for(let r=0;r<rows;r++){
-    a(ox+c*cell,oy+r*cell,ox+(c+1)*cell,oy+(r+1)*cell,"#C0C0C0",.5);
-    a(ox+(c+1)*cell,oy+r*cell,ox+c*cell,oy+(r+1)*cell,"#C0C0C0",.5);}
-  // Anchor points (red circles at grid intersections)
-  const pts=[];for(let c=0;c<=cols;c++)for(let r=0;r<=rows;r++)pts.push({x:ox+c*cell,y:oy+r*cell});
-  // Seilkreuz positions (blue squares)
+  const hasSK=seilkreuztyp&&seilkreuztyp!=="ohne";
+  
+  // In the real system, seils run between anchors. Seilkreuze sit on the seil
+  // at every crossing point. For a gitter, each cell of the main raster gets
+  // one additional seil between each pair of anchors, creating sub-crossings.
+  // The Seilkreuze are at those sub-crossings (center of each cell).
+  
+  // For gitter with Seilkreuze: we draw a finer sub-grid.
+  // Each main cell gets subdivided: seils run from anchor to anchor,
+  // and the Seilkreuz sits where H and V seils cross between anchors.
+  const lines=[];
+  const addLine=(x1,y1,x2,y2,c="#AAA",w=.7)=>lines.push({x1,y1,x2,y2,c,w});
+
+  if(rasterType==="gitter"||rasterType==="vertikal"){
+    for(let c=0;c<=cols;c++) addLine(ox+c*cell,oy,ox+c*cell,oy+gh,"#BBB",.8);
+    // If Seilkreuze: add intermediate vertical seils through cell centers
+    if(hasSK&&(rasterType==="gitter"))
+      for(let c=0;c<cols;c++) addLine(ox+(c+0.5)*cell,oy,ox+(c+0.5)*cell,oy+gh,"#D0D0D0",.5);
+  }
+  if(rasterType==="gitter"||rasterType==="horizontal"){
+    for(let r=0;r<=rows;r++) addLine(ox,oy+r*cell,ox+gw,oy+r*cell,"#BBB",.8);
+    // If Seilkreuze: add intermediate horizontal seils through cell centers
+    if(hasSK&&(rasterType==="gitter"))
+      for(let r=0;r<rows;r++) addLine(ox,oy+(r+0.5)*cell,ox+gw,oy+(r+0.5)*cell,"#D0D0D0",.5);
+  }
+  // Diagonal lines (only diagonal mode)
+  if(rasterType==="diagonal"){
+    for(let c=0;c<cols;c++)for(let r=0;r<rows;r++){
+      addLine(ox+c*cell,oy+r*cell,ox+(c+1)*cell,oy+(r+1)*cell,"#C0C0C0",.5);
+      addLine(ox+(c+1)*cell,oy+r*cell,ox+c*cell,oy+(r+1)*cell,"#C0C0C0",.5);
+    }
+  }
+  
+  // Anchor points (Iso-Bar ECO) at main grid nodes
+  const anchors=[];
+  for(let c=0;c<=cols;c++)for(let r=0;r<=rows;r++)
+    anchors.push({x:ox+c*cell,y:oy+r*cell});
+  
+  // Seilkreuz positions
   const skPts=[];
-  const ski=Math.max(1,Math.round(skInterval));
-  if(seilkreuztyp&&seilkreuztyp!=="ohne"){
-    if(hasDiag){
-      // Diagonal mode: Seilkreuze at cell centers (where diagonals cross)
-      for(let c=0;c<cols;c++)for(let r=0;r<rows;r++){
-        if(c%ski===0&&r%ski===0){
-          skPts.push({x:ox+(c+0.5)*cell,y:oy+(r+0.5)*cell});}}}
-    else if(rasterType==="gitter"){
-      // Gitter mode: Seilkreuze at midpoints of horizontal seils between two anchors
-      // They sit on the seil between anchor points, NOT on the anchors
-      for(let c=0;c<cols;c++)for(let r=0;r<rows;r++){
-        if(c%ski===0&&r%ski===0){
-          // midpoint of each cell = between 4 surrounding anchors
-          skPts.push({x:ox+(c+0.5)*cell,y:oy+(r+0.5)*cell});
-        }}}}
-  const numAnker=pts.length;
+  if(hasSK){
+    if(rasterType==="gitter"){
+      // Seilkreuze at ALL sub-grid crossings that are NOT anchor points:
+      // 1. Center of each cell (where intermediate H and V seils cross)
+      for(let c=0;c<cols;c++)for(let r=0;r<rows;r++)
+        skPts.push({x:ox+(c+0.5)*cell,y:oy+(r+0.5)*cell});
+      // 2. Mid-points on horizontal seils (between two horizontal anchors)
+      for(let c=0;c<cols;c++)for(let r=0;r<=rows;r++)
+        skPts.push({x:ox+(c+0.5)*cell,y:oy+r*cell});
+      // 3. Mid-points on vertical seils (between two vertical anchors)
+      for(let c=0;c<=cols;c++)for(let r=0;r<rows;r++)
+        skPts.push({x:ox+c*cell,y:oy+(r+0.5)*cell});
+    } else if(rasterType==="diagonal"){
+      // Diagonal: Seilkreuze at cell centers where diagonals cross
+      for(let c=0;c<cols;c++)for(let r=0;r<rows;r++)
+        skPts.push({x:ox+(c+0.5)*cell,y:oy+(r+0.5)*cell});
+    }
+  }
+
+  const numAnker=anchors.length;
   const numSK=skPts.length;
+  const aR=Math.max(3,Math.min(5.5,cell*0.13));
+  const sqS=Math.max(2.5,Math.min(4.5,cell*0.10));
+
   const DH=(x1,x2,y,l)=><g key={`h${l}`}><line x1={x1} y1={y} x2={x2} y2={y} stroke={BK} strokeWidth=".5"/><line x1={x1} y1={y-3} x2={x1} y2={y+3} stroke={BK} strokeWidth=".5"/><line x1={x2} y1={y-3} x2={x2} y2={y+3} stroke={BK} strokeWidth=".5"/><text x={(x1+x2)/2} y={y+10} textAnchor="middle" fontSize="8" fill={BK} fontFamily="sans-serif">{l}</text></g>;
   const DV=(x,y1,y2,l)=><g key={`v${l}`}><line x1={x} y1={y1} x2={x} y2={y2} stroke={BK} strokeWidth=".5"/><line x1={x-3} y1={y1} x2={x+3} y2={y1} stroke={BK} strokeWidth=".5"/><line x1={x-3} y1={y2} x2={x+3} y2={y2} stroke={BK} strokeWidth=".5"/><text x={x-4} y={(y1+y2)/2} textAnchor="end" fontSize="8" fill={BK} fontFamily="sans-serif" transform={`rotate(-90,${x-4},${(y1+y2)/2})`}>{l}</text></g>;
-  const sqSize=Math.max(3,Math.min(6,cell*0.18));
+
   return(<svg viewBox={`0 0 ${size} ${size}`} width="100%" style={{maxWidth:size}}>
-    {L.map((l,i)=><line key={i} x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2} stroke={l.c} strokeWidth={l.w}/>)}
-    {skPts.map((p,i)=><rect key={`sk${i}`} x={p.x-sqSize} y={p.y-sqSize} width={sqSize*2} height={sqSize*2} fill={BL} rx={1}/>)}
-    {pts.map((p,i)=><circle key={i} cx={p.x} cy={p.y} r={Math.max(3,Math.min(5,cell*0.14))} fill={R}/>)}
+    {/* Seil lines */}
+    {lines.map((l,i)=><line key={i} x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2} stroke={l.c} strokeWidth={l.w}/>)}
+    {/* Seilkreuze (blue squares) — drawn UNDER anchors */}
+    {skPts.map((p,i)=><rect key={`sk${i}`} x={p.x-sqS} y={p.y-sqS} width={sqS*2} height={sqS*2} fill={BL} rx={.5} opacity={.85}/>)}
+    {/* Anker / Iso-Bar ECO (red circles) — drawn ON TOP */}
+    {anchors.map((p,i)=><g key={`a${i}`}>
+      <circle cx={p.x} cy={p.y} r={aR} fill={R}/>
+      <circle cx={p.x} cy={p.y} r={aR*.45} fill={WH} opacity={.6}/>
+    </g>)}
+    {/* Dimension lines */}
     {DH(ox,ox+cell,oy+gh+12,`LH=${lh.toFixed(1).replace(".",",")}m`)}
     {gw>cell*1.2&&DH(ox,ox+gw,oy+gh+26,`${Math.min(fw,cols*lh).toFixed(1).replace(".",",")} m`)}
     {DV(ox-12,oy,oy+cell,`LV=${lv.toFixed(1).replace(".",",")}m`)}
     {gh>cell*1.2&&DV(ox-26,oy,oy+gh,`${Math.min(fh,rows*lv).toFixed(1).replace(".",",")} m`)}
+    {/* Legend */}
     <text x={ox+gw/2} y={size-2} textAnchor="middle" fontSize="7.5" fill={GL} fontFamily="sans-serif">
       <tspan fill={R}>●</tspan> {numAnker} Anker{numSK>0&&<>{" "}<tspan fill={BL}>■</tspan> {numSK} Seilkreuze</>} = {numAnker+numSK} Punkte
     </text>
@@ -409,8 +450,15 @@ function MaterialSection({d,mat}){
     const anker=(cols+1)*(rows+1);
     let sk=0;
     if(fSK&&fSK!=="ohne"){
-      // Seilkreuze sit in cell centers (between 4 anchors)
-      sk=cols*rows;
+      if(fRaster==="gitter"){
+        // Seilkreuze at: cell centers + H-midpoints + V-midpoints
+        const cellCenters=cols*rows;
+        const hMids=cols*(rows+1);
+        const vMids=(cols+1)*rows;
+        sk=cellCenters+hMids+vMids;
+      } else if(fRaster==="diagonal"){
+        sk=cols*rows; // cell centers only
+      }
     }
     totalAnker+=anker;totalSK+=sk;totalArea+=fw*fh;
     return{name:f.name,breite:fw,hoehe:fh,area:fw*fh,anker,sk,cols:cols+1,rows:rows+1};
