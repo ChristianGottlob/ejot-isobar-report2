@@ -62,16 +62,51 @@ const FLL_PLANTS=[
 ];
 const FORMS={"S":"Schlinger","RB":"Blattstielranker","RS":"Sprossranker","K":"Spreizklimmer","WK":"Wurzelkletterer","RH":"Haftscheibenranker"};
 const FLL_LK={1:{fl:6,sm:6,li:6,psi:.55},2:{fl:11,sm:14,li:13,psi:.60},3:{fl:15,sm:19,li:18,psi:.60},4:{fl:17,sm:26,li:20,psi:.65},5:{fl:24,sm:42,li:28,psi:.70}};
-const RASTER=[{id:"gitter",l:"Gitterförmig",d:"H+V+Diag."},{id:"vertikal",l:"Vertikal",d:"Nur vertikal"},{id:"horizontal",l:"Horizontal",d:"Nur horizontal"},{id:"diagonal",l:"Diagonal",d:"Diagonalnetz"}];
+const RASTER=[{id:"gitter",l:"Gitter",d:"H+V+Diag."},{id:"vertikal",l:"Vertikal",d:"Nur vertikal"},{id:"horizontal",l:"Horizontal",d:"Nur horizontal"},{id:"diagonal",l:"Diagonal",d:"Diagonalnetz"}];
+
+// ─── SET Products ───────────────────────────────────────
+const SETS=[
+  {id:"eco200",l:"SET EJOT Iso-Bar ECO 200",art:"8779200110",nutzBeton:160,nutzMW:120,len:200},
+  {id:"eco260",l:"SET EJOT Iso-Bar ECO 260",art:"8779260110",nutzBeton:220,nutzMW:180,len:260},
+  {id:"eco320",l:"SET EJOT Iso-Bar ECO 320",art:"8779320110",nutzBeton:280,nutzMW:240,len:320},
+  {id:"eco380",l:"SET EJOT Iso-Bar ECO 380",art:"8779380110",nutzBeton:340,nutzMW:300,len:380},
+];
+
+// ─── Seilkreuze ─────────────────────────────────────────
+const SEILKREUZE=[
+  {id:"ohne",l:"Ohne Seilkreuze",art:""},
+  {id:"sk90a4",l:"Seilkreuz 90° - A4",art:"8779888006"},
+  {id:"skverst",l:"Seilkreuz verstellbar - A4",art:"8779888003"},
+  {id:"sk90k",l:"Seilkreuz 90° - Kunststoff",art:"8779888002"},
+];
+
+// ─── Verankerungsgründe (gem. Z-21.8-2083) ──────────────
+const UNTERGRUENDE=[
+  {id:"beton_c2025",l:"Beton C20/25",typ:"beton",druckf:"20",rohd:"2.4",nrk:"5.0",vrk:"3.0",gamma:"1.8"},
+  {id:"beton_c2530",l:"Beton C25/30",typ:"beton",druckf:"25",rohd:"2.4",nrk:"5.0",vrk:"3.0",gamma:"1.8"},
+  {id:"beton_c3037",l:"Beton C30/37",typ:"beton",druckf:"30",rohd:"2.4",nrk:"5.0",vrk:"3.0",gamma:"1.8"},
+  {id:"beton_c5060",l:"Beton C50/60",typ:"beton",druckf:"50",rohd:"2.4",nrk:"5.0",vrk:"3.0",gamma:"1.8"},
+  {id:"ks_vollstein",l:"Kalksand-Vollstein KS",typ:"mw",druckf:"12",rohd:"1.8",nrk:"3.1",vrk:"1.3",gamma:"2.5"},
+  {id:"vollziegel",l:"Vollziegel Mz",typ:"mw",druckf:"12",rohd:"1.9",nrk:"2.2",vrk:"0.5",gamma:"2.5"},
+  {id:"lbv",l:"Leichtbetonvollstein V",typ:"mw",druckf:"2",rohd:"0.65",nrk:"1.2",vrk:"1.2",gamma:"2.5"},
+  {id:"hbl",l:"Hohlblock Leichtbeton Hbl",typ:"mw",druckf:"2",rohd:"0.5",nrk:"0.8",vrk:"1.2",gamma:"2.5"},
+  {id:"ksl",l:"Kalksandlochstein KSL",typ:"mw",druckf:"12",rohd:"1.5",nrk:"1.9",vrk:"1.3",gamma:"2.5"},
+  {id:"hlz1",l:"Hochlochziegel I Hlz",typ:"mw",druckf:"12",rohd:"0.9",nrk:"1.9",vrk:"0.5",gamma:"2.5"},
+  {id:"hlz2",l:"Hochlochziegel II Hlz",typ:"mw",druckf:"24",rohd:"1.07",nrk:"3.2",vrk:"0.5",gamma:"2.5"},
+  {id:"pp",l:"Porenbeton PP",typ:"mw",druckf:"4",rohd:"0.5",nrk:"3.3",vrk:"0.7",gamma:"2.0"},
+  {id:"naturstein",l:"Naturstein (ohne Zulassung)",typ:"natur",druckf:"",rohd:"",nrk:"",vrk:"",gamma:""},
+  {id:"custom",l:"– Manuell –",typ:"custom",druckf:"",rohd:"",nrk:"",vrk:"",gamma:""},
+];
 
 // ─── PDF Parser ─────────────────────────────────────────
 function parsePdf(t){
   const d={bauvorhaben:"",ort_plz:"",datum:new Date().toLocaleDateString("de-DE"),dokNr:`VB-ISO-${new Date().toISOString().slice(0,10).replace(/-/g,"")}-001`,version:"V1.0",bearbeiter:"",
-    produkt:"EJOT Iso-Bar ECO",verankerungsgrund:"",wdvs_dicke:"",gebaeudehoehe:"",gelaendekategorie:"",druckfestigkeit:"",rohdichte:"",verankerungstiefe:"",dicke_klebschicht:"10",
-    pflanze_botanisch:"",pflanze_deutsch:"",lastklasse:"3",seilfuehrung:"gitter",psi:"0.60",
-    ws:"",nek:"",ned_z:"",ned_d:"",ved:"",vrd:"",LH:"",LV:"",stk_m2:"",
+    produkt:"eco260",verankerungsgrund:"ks_vollstein",wdvs_dicke:"",gebaeudehoehe:"",gelaendekategorie:"",druckfestigkeit:"12",rohdichte:"1.8",verankerungstiefe:"",dicke_klebschicht:"10",
+    pflanze_botanisch:"",pflanze_deutsch:"",lastklasse:"3",seilfuehrung:"gitter",seilkreuztyp:"ohne",psi:"0.60",
+    ws:"",nek:"",ned_z:"",ned_d:"",ved:"",vrd:"",LH:"0.9",LV:"0.9",stk_m2:"",
     nw_zug:"",nw_druck:"",nw_quer:"",nw_kombi:"",
-    fassadenlaenge:"10",fassadenhoehe:"",windlastzone:"",geometrie_art:""};
+    fassadenlaenge:"10",fassadenhoehe:"",windlastzone:"",geometrie_art:"",
+    fassaden:[{name:"Fassade 1",breite:"10",hoehe:"6"}]};
   const f=(p)=>{const m=t.match(new RegExp(p,"im"));return m?m[1].trim():""};
   d.bauvorhaben=f("Bauvorhaben\\s+(.+?)(?:\\s{2,}|$)");
   d.ort_plz=f("Ort\\s*/\\s*PLZ\\s+(.+?)(?:\\s{2,}|$)");
@@ -543,15 +578,32 @@ export default function App(){
     <Field label="Bauvorhaben" value={d.bauvorhaben} onChange={setter("bauvorhaben")}/>
     <Field label="Ort / PLZ" value={d.ort_plz} onChange={setter("ort_plz")}/></div></Sec>
 
-  <Sec title="System & Untergrund"><div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-    <Field label="Produkt" value={d.produkt} onChange={setter("produkt")}/>
-    <Field label="Verankerungsgrund" value={d.verankerungsgrund} onChange={setter("verankerungsgrund")}/>
-    <Field label="WDVS-Dicke t_WDVS" value={d.wdvs_dicke} onChange={setter("wdvs_dicke")} unit="mm" half/>
-    <Field label="Gebäudehöhe h" value={d.gebaeudehoehe} onChange={setter("gebaeudehoehe")} unit="m" half/>
-    <Field label="Druckfestigkeit σ" value={d.druckfestigkeit} onChange={setter("druckfestigkeit")} unit="N/mm²" half/>
-    <Field label="Verankerungstiefe h_ef,min" value={d.verankerungstiefe} onChange={setter("verankerungstiefe")} unit="mm" half/>
-    <Field label="Geländekategorie" value={d.gelaendekategorie} onChange={setter("gelaendekategorie")} half/>
-    <Field label="Windlastzone" value={d.windlastzone} onChange={setter("windlastzone")} half/></div></Sec>
+  <Sec title="System"><div>
+    <label style={{fontSize:10,color:GY,display:"block",marginBottom:2}}>SET Produkt</label>
+    <select value={d.produkt} onChange={e=>{
+      const s=SETS.find(x=>x.id===e.target.value);
+      setD(x=>({...x,produkt:e.target.value}));
+    }} style={{width:"100%",padding:"6px 7px",fontSize:12,fontWeight:600,border:`1px solid ${BD}`,borderRadius:4,background:WH,fontFamily:"inherit",marginBottom:8}}>
+      {SETS.map(s=><option key={s.id} value={s.id}>{s.l} ({s.art})</option>)}</select>
+    {(()=>{const s=SETS.find(x=>x.id===d.produkt);return s?<div style={{padding:"6px 10px",background:RL,borderRadius:4,border:`1px solid ${RM}`,marginBottom:10,fontSize:11,fontWeight:600,color:R}}>
+      → {s.l} ({s.art}) {d.verankerungsgrund&&UNTERGRUENDE.find(u=>u.id===d.verankerungsgrund)?.typ==="beton"?`${s.nutzBeton}mm Nutzlänge`:`${s.nutzMW}mm MW`}
+    </div>:null})()}
+    <label style={{fontSize:10,color:GY,display:"block",marginBottom:2}}>Verankerungsgrund (gem. Z-21.8-2083)</label>
+    <select value={d.verankerungsgrund} onChange={e=>{
+      const u=UNTERGRUENDE.find(x=>x.id===e.target.value);
+      if(u&&u.typ!=="custom")setD(x=>({...x,verankerungsgrund:e.target.value,druckfestigkeit:u.druckf,rohdichte:u.rohd}));
+      else setter("verankerungsgrund")(e.target.value);
+    }} style={{width:"100%",padding:"6px 7px",fontSize:12,fontWeight:600,border:`1px solid ${BD}`,borderRadius:4,background:WH,fontFamily:"inherit",marginBottom:8}}>
+      {UNTERGRUENDE.map(u=><option key={u.id} value={u.id}>{u.l}</option>)}</select>
+    <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+      <Field label="WDVS-Dicke t_WDVS" value={d.wdvs_dicke} onChange={setter("wdvs_dicke")} unit="mm" half/>
+      <Field label="Dicke Klebschicht t_tol" value={d.dicke_klebschicht} onChange={setter("dicke_klebschicht")} unit="mm" half/>
+      <Field label="Verankerungstiefe h_ef,min" value={d.verankerungstiefe} onChange={setter("verankerungstiefe")} unit="mm" half/>
+      <Field label="Gebäudehöhe h" value={d.gebaeudehoehe} onChange={setter("gebaeudehoehe")} unit="m" half/>
+      <Field label="Druckfestigkeit σ" value={d.druckfestigkeit} onChange={setter("druckfestigkeit")} unit="N/mm²" half/>
+      <Field label="Rohdichte ρ" value={d.rohdichte} onChange={setter("rohdichte")} unit="kg/dm³" half/>
+      <Field label="Geländekategorie" value={d.gelaendekategorie} onChange={setter("gelaendekategorie")} half/>
+      <Field label="Windlastzone" value={d.windlastzone} onChange={setter("windlastzone")} half/></div></div></Sec>
 
   <Sec title="Pflanze (FLL Tab. 15)">
     <div style={{marginBottom:8}}>
@@ -579,24 +631,66 @@ export default function App(){
     <Field label="Max. Abstand LV" value={d.LV} onChange={setter("LV")} unit="m" half/>
     <Field label="ISO-Bar ECO pro m²" value={d.stk_m2} onChange={setter("stk_m2")} unit="Stk" half/></div></Sec>
 
-  <Sec title="Nachweise (≤ 1,0)"><div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-    <Field label="N_Ed,z / N_Rd (Zug)" value={d.nw_zug} onChange={setter("nw_zug")} half/>
-    <Field label="N_Ed,d / N_Rd,d (Druck)" value={d.nw_druck} onChange={setter("nw_druck")} half/>
-    <Field label="V_Ed / V_Rd (Querkraft)" value={d.nw_quer} onChange={setter("nw_quer")} half/>
-    <Field label="Kombination (max)" value={d.nw_kombi} onChange={setter("nw_kombi")} half/></div></Sec>
-
-  <Sec title="Fassade & Raster">
+  <Sec title="Nachweise (≤ 1,0)" accent>
     <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10}}>
-      <Field label="Fassadenlänge" value={d.fassadenlaenge} onChange={setter("fassadenlaenge")} unit="m" half/>
-      <Field label="Fassadenhöhe" value={d.fassadenhoehe} onChange={setter("fassadenhoehe")} unit="m" half/></div>
+      <Field label="N_Ed,z / N_Rd (Zug)" value={d.nw_zug} onChange={setter("nw_zug")} half/>
+      <Field label="N_Ed,d / N_Rd,d (Druck)" value={d.nw_druck} onChange={setter("nw_druck")} half/>
+      <Field label="V_Ed / V_Rd (Querkraft)" value={d.nw_quer} onChange={setter("nw_quer")} half/>
+      <Field label="Kombination (max)" value={d.nw_kombi} onChange={setter("nw_kombi")} half/></div>
+    {(pf(d.nw_zug)||pf(d.nw_druck)||pf(d.nw_quer)||pf(d.nw_kombi))>0&&<div style={{border:`1px solid ${BD}`,borderRadius:4,padding:12,background:BG}}>
+      <div style={{fontWeight:700,fontSize:10,textTransform:"uppercase",letterSpacing:.5,marginBottom:8,color:BK}}>Ausnutzungsgrad</div>
+      <NwBar label="Zug, N_Ed,z / N_Rd" value={d.nw_zug}/>
+      <NwBar label="Druck, N_Ed,d / N_Rd,d" value={d.nw_druck}/>
+      <NwBar label="Quer, V_Ed / V_Rd" value={d.nw_quer}/>
+      <NwBar label="Kombination (max)" value={d.nw_kombi}/>
+      {maxNw>0&&<div style={{marginTop:6,fontSize:10,fontWeight:700,color:maxNw<=1?GN:R}}>
+        {maxNw<=1?"✓ Alle Nachweise erfüllt":`✗ Überschreitung! max: ${maxNw.toFixed(2)}`}</div>}
+    </div>}</Sec>
+
+  <Sec title="Raster & Seilkreuze">
     <label style={{fontSize:10,color:GY,marginBottom:3,display:"block"}}>Seilführung</label>
     <div style={{display:"flex",gap:5,marginBottom:10}}>
       {RASTER.map(r=><button key={r.id} onClick={()=>setter("seilfuehrung")(r.id)}
         style={{padding:"5px 12px",fontSize:10,borderRadius:4,cursor:"pointer",border:d.seilfuehrung===r.id?`2px solid ${R}`:`1px solid ${BD}`,
           background:d.seilfuehrung===r.id?RL:WH,color:d.seilfuehrung===r.id?R:DK,fontWeight:d.seilfuehrung===r.id?700:400}}>{r.l}</button>)}</div>
-    <div style={{background:BG,borderRadius:5,padding:10,textAlign:"center"}}>
-      <RasterSVG LH={d.LH} LV={d.LV} fW={d.fassadenlaenge} fH={d.fassadenhoehe} rasterType={d.seilfuehrung} size={300}/>
-      <div style={{fontSize:9,color:GL,marginTop:4}}>Schematisch – {RASTER.find(r=>r.id===d.seilfuehrung)?.d}</div></div></Sec>
+    <label style={{fontSize:10,color:GY,marginBottom:3,display:"block"}}>Seilkreuztyp</label>
+    <div style={{display:"flex",gap:5,marginBottom:10}}>
+      {SEILKREUZE.map(sk=><button key={sk.id} onClick={()=>setter("seilkreuztyp")(sk.id)}
+        style={{padding:"5px 12px",fontSize:10,borderRadius:4,cursor:"pointer",border:d.seilkreuztyp===sk.id?`2px solid ${R}`:`1px solid ${BD}`,
+          background:d.seilkreuztyp===sk.id?RL:WH,color:d.seilkreuztyp===sk.id?R:DK,fontWeight:d.seilkreuztyp===sk.id?700:400}}>
+        {sk.l}{sk.art?<span style={{fontSize:8,color:GL,marginLeft:4}}>({sk.art})</span>:null}</button>)}</div>
+    <div style={{display:"flex",gap:12,marginBottom:10}}>
+      <div style={{flex:1}}>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:8}}>
+          <Field label="Max. Abstand LH" value={d.LH} onChange={setter("LH")} unit="m" half/>
+          <Field label="Max. Abstand LV" value={d.LV} onChange={setter("LV")} unit="m" half/></div></div>
+      <div style={{flex:1,background:BG,borderRadius:5,padding:10,textAlign:"center"}}>
+        <RasterSVG LH={d.LH} LV={d.LV} fW={d.fassadenlaenge} fH={d.fassadenhoehe} rasterType={d.seilfuehrung} size={250}/>
+        <div style={{fontSize:9,color:GL,marginTop:4}}>Schematisch – {RASTER.find(r=>r.id===d.seilfuehrung)?.d}</div></div></div></Sec>
+
+  <Sec title="Fassadenflächen">
+    {(d.fassaden||[]).map((f,i)=><div key={i} style={{display:"flex",gap:8,alignItems:"end",marginBottom:6}}>
+      <div style={{flex:2,minWidth:140}}>
+        <label style={{fontSize:10,color:GY,display:"block",marginBottom:1}}>Name</label>
+        <input value={f.name} onChange={e=>{const fa=[...(d.fassaden||[])];fa[i]={...fa[i],name:e.target.value};setD(x=>({...x,fassaden:fa}));}}
+          style={{width:"100%",padding:"6px 7px",fontSize:12,fontWeight:600,border:`1px solid ${BD}`,borderRadius:4,background:WH,fontFamily:"inherit"}}/></div>
+      <div style={{flex:1}}>
+        <label style={{fontSize:10,color:GY,display:"block",marginBottom:1}}>Breite</label>
+        <div style={{display:"flex",border:`1px solid ${BD}`,borderRadius:4}}>
+          <input value={f.breite} onChange={e=>{const fa=[...(d.fassaden||[])];fa[i]={...fa[i],breite:e.target.value};setD(x=>({...x,fassaden:fa,fassadenlaenge:fa[0]?.breite||x.fassadenlaenge}));}}
+            style={{flex:1,border:"none",padding:"6px 7px",fontSize:12,fontWeight:600,background:"transparent",outline:"none",fontFamily:"inherit",minWidth:0}}/>
+          <span style={{padding:"0 7px",fontSize:9.5,color:GL,alignSelf:"center"}}>m</span></div></div>
+      <div style={{flex:1}}>
+        <label style={{fontSize:10,color:GY,display:"block",marginBottom:1}}>Höhe</label>
+        <div style={{display:"flex",border:`1px solid ${BD}`,borderRadius:4}}>
+          <input value={f.hoehe} onChange={e=>{const fa=[...(d.fassaden||[])];fa[i]={...fa[i],hoehe:e.target.value};setD(x=>({...x,fassaden:fa,fassadenhoehe:fa[0]?.hoehe||x.fassadenhoehe}));}}
+            style={{flex:1,border:"none",padding:"6px 7px",fontSize:12,fontWeight:600,background:"transparent",outline:"none",fontFamily:"inherit",minWidth:0}}/>
+          <span style={{padding:"0 7px",fontSize:9.5,color:GL,alignSelf:"center"}}>m</span></div></div>
+      {(d.fassaden||[]).length>1&&<button onClick={()=>{const fa=[...(d.fassaden||[])];fa.splice(i,1);setD(x=>({...x,fassaden:fa}));}}
+        style={{padding:"6px 8px",fontSize:11,border:`1px solid ${BD}`,borderRadius:4,background:WH,cursor:"pointer",color:R,fontWeight:700}}>✕</button>}
+    </div>)}
+    <button onClick={()=>setD(x=>({...x,fassaden:[...(x.fassaden||[]),{name:`Fassade ${(x.fassaden||[]).length+1}`,breite:"10",hoehe:"6"}]}))}
+      style={{padding:"5px 14px",fontSize:10,border:`1px dashed ${BD}`,borderRadius:4,background:WH,cursor:"pointer",color:GY,marginTop:4}}>+ Fläche</button></Sec>
 </>}
 
 {/* ═══ PREVIEW ═══ */}
