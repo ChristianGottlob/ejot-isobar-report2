@@ -175,6 +175,7 @@ function RasterSVG({LH,LV,fW,fH,rasterType,seilkreuztyp="ohne",skInterval=1,size
   const gw=cell*cols,gh=cell*rows,ox=pad+(inner-gw)/2,oy=pad+(inner-gh)/2;
   const BL="#1565C0";
   const hasSK=seilkreuztyp&&seilkreuztyp!=="ohne";
+  const halfCell=cell/2;
   
   // In the real system, seils run between anchors. Seilkreuze sit on the seil
   // at every crossing point. For a gitter, each cell of the main raster gets
@@ -251,13 +252,16 @@ function RasterSVG({LH,LV,fW,fH,rasterType,seilkreuztyp="ohne",skInterval=1,size
       <circle cx={p.x} cy={p.y} r={aR} fill={R}/>
       <circle cx={p.x} cy={p.y} r={aR*.45} fill={WH} opacity={.6}/>
     </g>)}
-    {/* Dimension lines */}
-    {DH(ox,ox+cell,oy+gh+12,`LH=${lh.toFixed(1).replace(".",",")}m`)}
-    {gw>cell*1.2&&DH(ox,ox+gw,oy+gh+26,`${Math.min(fw,cols*lh).toFixed(1).replace(".",",")} m`)}
-    {DV(ox-12,oy,oy+cell,`LV=${lv.toFixed(1).replace(".",",")}m`)}
-    {gh>cell*1.2&&DV(ox-26,oy,oy+gh,`${Math.min(fh,rows*lv).toFixed(1).replace(".",",")} m`)}
+    {/* Dimension lines - bottom */}
+    {DH(ox,ox+cell,oy+gh+10,`LH=${lh.toFixed(1).replace(".",",")}m`)}
+    {hasSK&&rasterType==="gitter"&&DH(ox,ox+halfCell,oy+gh+22,`${(lh/2).toFixed(2).replace(".",",")}m`)}
+    {gw>cell*1.2&&DH(ox,ox+gw,oy+gh+(hasSK?34:24),`${Math.min(fw,cols*lh).toFixed(1).replace(".",",")} m`)}
+    {/* Dimension lines - left */}
+    {DV(ox-10,oy,oy+cell,`LV=${lv.toFixed(1).replace(".",",")}m`)}
+    {hasSK&&rasterType==="gitter"&&DV(ox-22,oy,oy+halfCell,`${(lv/2).toFixed(2).replace(".",",")}m`)}
+    {gh>cell*1.2&&DV(ox-(hasSK?34:24),oy,oy+gh,`${Math.min(fh,rows*lv).toFixed(1).replace(".",",")} m`)}
     {/* Legend */}
-    <text x={ox+gw/2} y={size-2} textAnchor="middle" fontSize="7.5" fill={GL} fontFamily="sans-serif">
+    <text x={ox+gw/2} y={size-2} textAnchor="middle" fontSize="7" fill={GL} fontFamily="sans-serif">
       <tspan fill={R}>●</tspan> {numAnker} Anker{numSK>0&&<>{" "}<tspan fill={BL}>■</tspan> {numSK} Seilkreuze</>} = {numAnker+numSK} Punkte
     </text>
   </svg>);
@@ -320,12 +324,15 @@ function PreviewSection({d,maxNw,mat}){
           <div style={{fontSize:8.5,color:GL,marginTop:5}}>Dok-Nr.: {d.dokNr} · Bearbeiter: {d.bearbeiter||"–"}</div></div>
         <div style={{flex:1,border:`1px solid ${BD}`,borderRadius:4,padding:12}}>
           <div style={{fontWeight:700,fontSize:10.5,textTransform:"uppercase",letterSpacing:.5,marginBottom:6,color:BK}}>System</div>
-          <KV l="Produkt" v={d.produkt} b/><KV l="Verankerungsgrund" v={d.verankerungsgrund} b/>
+          <KV l="Produkt" v={(SETS.find(s=>s.id===d.produkt)||{}).l||d.produkt} b/>
+          <KV l="Artikelnummer" v={(SETS.find(s=>s.id===d.produkt)||{}).art||"–"}/>
+          <KV l="Verankerungsgrund" v={(UNTERGRUENDE.find(u=>u.id===d.verankerungsgrund)||{}).l||d.verankerungsgrund} b/>
           <KV l="WDVS-Dicke" v={d.wdvs_dicke?`${d.wdvs_dicke} mm`:""} b/>
           <KV l="Gebäudehöhe" v={d.gebaeudehoehe?`${d.gebaeudehoehe} m`:""} b/></div></div>
       <div style={{border:`1px solid ${RM}`,borderRadius:4,padding:12,marginBottom:14}}>
         <div style={{fontWeight:700,fontSize:10.5,textTransform:"uppercase",letterSpacing:.5,marginBottom:8,color:R}}>Kernergebnisse</div>
-        {[["Max. horizontaler Abstand (LH)",d.LH?`${d.LH} m`:"–"],["Max. vertikaler Abstand (LV)",d.LV?`${d.LV} m`:"–"],
+        {[["Produkt",(SETS.find(s=>s.id===d.produkt)||{}).l||d.produkt],
+          ["Max. horizontaler Abstand (LH)",d.LH?`${d.LH} m`:"–"],["Max. vertikaler Abstand (LV)",d.LV?`${d.LV} m`:"–"],
           ["Erforderliche ISO-Bar ECO pro m²",d.stk_m2||"–"]].map(([k,v])=>
           <div key={k} style={{display:"flex",justifyContent:"space-between",marginBottom:5,fontSize:13}}>
             <span style={{color:DK}}>{k}</span><span style={{fontWeight:700,fontSize:14,color:BK}}>{v}</span></div>)}</div>
@@ -567,7 +574,7 @@ export default function App(){
       await new Promise(r=>setTimeout(r,300));
       const el=ref.current;
       const canvas=await html2canvas(el,{
-        scale:2,useCORS:true,backgroundColor:"#FFFFFF",logging:false,windowWidth:920,
+        scale:3,useCORS:true,backgroundColor:"#FFFFFF",logging:false,windowWidth:920,
       });
       const imgW=canvas.width;
       const imgH=canvas.height;
