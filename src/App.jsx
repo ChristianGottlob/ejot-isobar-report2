@@ -571,20 +571,36 @@ export default function App(){
     if(!ref.current)return;
     setExporting(sectionId);
     try{
-      await new Promise(r=>setTimeout(r,300));
       const el=ref.current;
+      // Temporarily move element on-screen for html2canvas to capture properly
+      const origStyle=el.parentElement.style.cssText;
+      el.parentElement.style.cssText="position:absolute;left:0;top:0;width:880px;z-index:9999;background:#FFF;font-family:'Segoe UI',system-ui,sans-serif;";
+      await new Promise(r=>setTimeout(r,400));
+      
       const canvas=await html2canvas(el,{
-        scale:3,useCORS:true,backgroundColor:"#FFFFFF",logging:false,windowWidth:920,
+        scale:4,
+        useCORS:true,
+        backgroundColor:"#FFFFFF",
+        logging:false,
+        windowWidth:920,
+        imageTimeout:0,
+        removeContainer:false,
       });
+      
+      // Restore off-screen position
+      el.parentElement.style.cssText=origStyle;
+      
+      const imgData=canvas.toDataURL("image/png",1.0);
       const imgW=canvas.width;
       const imgH=canvas.height;
-      const pdfW=210;const margin=8;const contentW=pdfW-2*margin;
+      const pdfW=210;const margin=6;const contentW=pdfW-2*margin;
       const ratio=contentW/imgW;
       const contentH=imgH*ratio;
       const pdfH=297;
-      const pdf=new jsPDF({orientation:"portrait",unit:"mm",format:"a4"});
+      const pdf=new jsPDF({orientation:"portrait",unit:"mm",format:"a4",compress:true});
       const pageContentH=pdfH-2*margin;
       const totalPages=Math.ceil(contentH/pageContentH);
+      
       for(let page=0;page<totalPages;page++){
         if(page>0)pdf.addPage();
         const srcY=page*pageContentH/ratio;
@@ -595,8 +611,8 @@ export default function App(){
         tmpCanvas.height=Math.round(srcH);
         const ctx=tmpCanvas.getContext("2d");
         ctx.drawImage(canvas,0,Math.round(srcY),imgW,Math.round(srcH),0,0,imgW,Math.round(srcH));
-        const sliceData=tmpCanvas.toDataURL("image/png");
-        pdf.addImage(sliceData,"PNG",margin,margin,contentW,destH);
+        const sliceData=tmpCanvas.toDataURL("image/png",1.0);
+        pdf.addImage(sliceData,"PNG",margin,margin,contentW,destH,"","FAST");
       }
       pdf.save(filename);
     }catch(err){
@@ -870,10 +886,16 @@ export default function App(){
       </div>
 
 {/* ═══ OFF-SCREEN PDF RENDER CONTAINERS ═══ */}
-<div style={{position:"fixed",left:"-9999px",top:0,width:880,zIndex:-1,background:WH,fontFamily:"'Segoe UI',system-ui,sans-serif"}}>
-  <div ref={previewRef} style={{background:WH,width:880}}><PreviewSection d={d} maxNw={maxNw} mat={mat}/></div>
-  <div ref={anlagenRef} style={{background:WH,width:880}}><AnlagenSection d={d} usable={usable}/></div>
-  <div ref={materialRef} style={{background:WH,width:880}}><MaterialSection d={d} mat={mat}/></div>
+<div style={{position:"absolute",left:"-9999px",top:0,overflow:"hidden",pointerEvents:"none"}}>
+  <div style={{width:880,background:WH,fontFamily:"'Segoe UI',system-ui,sans-serif"}}>
+    <div ref={previewRef} style={{background:WH,width:880,padding:0}}><PreviewSection d={d} maxNw={maxNw} mat={mat}/></div>
+  </div>
+  <div style={{width:880,background:WH,fontFamily:"'Segoe UI',system-ui,sans-serif"}}>
+    <div ref={anlagenRef} style={{background:WH,width:880,padding:0}}><AnlagenSection d={d} usable={usable}/></div>
+  </div>
+  <div style={{width:880,background:WH,fontFamily:"'Segoe UI',system-ui,sans-serif"}}>
+    <div ref={materialRef} style={{background:WH,width:880,padding:0}}><MaterialSection d={d} mat={mat}/></div>
+  </div>
 </div>
 
 </div>);
