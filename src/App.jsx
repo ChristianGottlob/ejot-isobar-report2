@@ -189,16 +189,20 @@ function RasterSVG({LH,LV,fW,fH,rasterType,seilkreuztyp="ohne",skInterval=1,size
   // Seilkreuz positions (blue squares)
   const skPts=[];
   const ski=Math.max(1,Math.round(skInterval));
-  if(seilkreuztyp&&seilkreuztyp!=="ohne"&&hasDiag){
-    // Diagonal mode: Seilkreuze in cell centers (diagonal crossing)
-    for(let c=0;c<cols;c++)for(let r=0;r<rows;r++){
-      if(c%ski===0&&r%ski===0){
-        skPts.push({x:ox+(c+0.5)*cell,y:oy+(r+0.5)*cell});}}}
-  else if(seilkreuztyp&&seilkreuztyp!=="ohne"&&rasterType==="gitter"){
-    // Gitter mode: Seilkreuze at interior 90° crossing points
-    for(let c=1;c<cols;c++)for(let r=1;r<rows;r++){
-      if((c-1)%ski===0&&(r-1)%ski===0){
-        skPts.push({x:ox+c*cell,y:oy+r*cell});}}}
+  if(seilkreuztyp&&seilkreuztyp!=="ohne"){
+    if(hasDiag){
+      // Diagonal mode: Seilkreuze at cell centers (where diagonals cross)
+      for(let c=0;c<cols;c++)for(let r=0;r<rows;r++){
+        if(c%ski===0&&r%ski===0){
+          skPts.push({x:ox+(c+0.5)*cell,y:oy+(r+0.5)*cell});}}}
+    else if(rasterType==="gitter"){
+      // Gitter mode: Seilkreuze at midpoints of horizontal seils between two anchors
+      // They sit on the seil between anchor points, NOT on the anchors
+      for(let c=0;c<cols;c++)for(let r=0;r<rows;r++){
+        if(c%ski===0&&r%ski===0){
+          // midpoint of each cell = between 4 surrounding anchors
+          skPts.push({x:ox+(c+0.5)*cell,y:oy+(r+0.5)*cell});
+        }}}}
   const numAnker=pts.length;
   const numSK=skPts.length;
   const DH=(x1,x2,y,l)=><g key={`h${l}`}><line x1={x1} y1={y} x2={x2} y2={y} stroke={BK} strokeWidth=".5"/><line x1={x1} y1={y-3} x2={x1} y2={y+3} stroke={BK} strokeWidth=".5"/><line x1={x2} y1={y-3} x2={x2} y2={y+3} stroke={BK} strokeWidth=".5"/><text x={(x1+x2)/2} y={y+10} textAnchor="middle" fontSize="8" fill={BK} fontFamily="sans-serif">{l}</text></g>;
@@ -398,12 +402,15 @@ function MaterialSection({d,mat}){
   let totalAnker=0,totalSK=0,totalArea=0;
   const facadeStats=fassaden.map(f=>{
     const fw=pf(f.breite)||0,fh=pf(f.hoehe)||0;
-    const cols=Math.floor(fw/lh),rows=Math.floor(fh/lv);
+    const flh=pf(f.lh)||lh, flv=pf(f.lv)||lv;
+    const fRaster=f.seilfuehrung||d.seilfuehrung||"gitter";
+    const fSK=f.seilkreuztyp||d.seilkreuztyp||"ohne";
+    const cols=Math.floor(fw/flh),rows=Math.floor(fh/flv);
     const anker=(cols+1)*(rows+1);
     let sk=0;
-    if(d.seilkreuztyp&&d.seilkreuztyp!=="ohne"){
-      if(d.seilfuehrung==="diagonal")sk=cols*rows;
-      else if(d.seilfuehrung==="gitter")sk=Math.max(0,(cols-1))*Math.max(0,(rows-1));
+    if(fSK&&fSK!=="ohne"){
+      // Seilkreuze sit in cell centers (between 4 anchors)
+      sk=cols*rows;
     }
     totalAnker+=anker;totalSK+=sk;totalArea+=fw*fh;
     return{name:f.name,breite:fw,hoehe:fh,area:fw*fh,anker,sk,cols:cols+1,rows:rows+1};
@@ -714,59 +721,80 @@ export default function App(){
         {maxNw<=1?"✓ Alle Nachweise erfüllt":`✗ Überschreitung! max: ${maxNw.toFixed(2)}`}</div>}
     </div>}</Sec>
 
-  <Sec title="Raster & Seilkreuze">
-    <label style={{fontSize:10,color:GY,marginBottom:3,display:"block"}}>Seilführung</label>
-    <div style={{display:"flex",gap:5,marginBottom:10}}>
-      {RASTER.map(r=><button key={r.id} onClick={()=>setter("seilfuehrung")(r.id)}
-        style={{padding:"5px 12px",fontSize:10,borderRadius:4,cursor:"pointer",border:d.seilfuehrung===r.id?`2px solid ${R}`:`1px solid ${BD}`,
-          background:d.seilfuehrung===r.id?RL:WH,color:d.seilfuehrung===r.id?R:DK,fontWeight:d.seilfuehrung===r.id?700:400}}>{r.l}</button>)}</div>
-    <label style={{fontSize:10,color:GY,marginBottom:3,display:"block"}}>Seilkreuztyp</label>
-    <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:4}}>
-      {SEILKREUZE.map(sk=><button key={sk.id} onClick={()=>setter("seilkreuztyp")(sk.id)}
-        style={{padding:"5px 12px",fontSize:10,borderRadius:4,cursor:"pointer",border:d.seilkreuztyp===sk.id?`2px solid ${R}`:`1px solid ${BD}`,
-          background:d.seilkreuztyp===sk.id?RL:WH,color:d.seilkreuztyp===sk.id?R:DK,fontWeight:d.seilkreuztyp===sk.id?700:400}}>
-        {sk.l}{sk.art?<span style={{fontSize:8,color:GL,marginLeft:4}}>({sk.art})</span>:null}</button>)}</div>
-    {d.seilkreuztyp&&d.seilkreuztyp!=="ohne"&&<div style={{padding:"5px 10px",background:"#E3F2FD",borderRadius:4,border:"1px solid #90CAF940",marginBottom:10,fontSize:10,color:"#1565C0"}}>
-      {(d.seilfuehrung==="gitter"||d.seilfuehrung==="diagonal")?"Seilkreuz in Zellmitte (Kreuzung der Diagonalen)":"Seilkreuz an Gitter-Kreuzungspunkten (innere Knoten)"}</div>}
-    <div style={{display:"flex",gap:12,marginBottom:10}}>
-      <div style={{flex:1}}>
-        <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:8}}>
-          <Field label="Max. Abstand LH" value={d.LH} onChange={setter("LH")} unit="m" half/>
-          <Field label="Max. Abstand LV" value={d.LV} onChange={setter("LV")} unit="m" half/></div>
-        <Field label="ISO-Bar ECO pro m²" value={d.stk_m2} onChange={setter("stk_m2")} unit="Stk" half/></div>
-      <div style={{flex:1,background:BG,borderRadius:5,padding:10,textAlign:"center"}}>
-        <RasterSVG LH={d.LH} LV={d.LV} fW={d.fassadenlaenge} fH={d.fassadenhoehe} rasterType={d.seilfuehrung} seilkreuztyp={d.seilkreuztyp} size={280}/>
-        <div style={{fontSize:9,color:GL,marginTop:4}}>Schematisch – {RASTER.find(r=>r.id===d.seilfuehrung)?.d}</div></div></div></Sec>
+  <Sec title="Raster-Vorgaben">
+    <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+      <Field label="Max. Abstand LH (Standard)" value={d.LH} onChange={setter("LH")} unit="m" half/>
+      <Field label="Max. Abstand LV (Standard)" value={d.LV} onChange={setter("LV")} unit="m" half/>
+      <Field label="ISO-Bar ECO pro m²" value={d.stk_m2} onChange={setter("stk_m2")} unit="Stk" half/></div></Sec>
 
   <Sec title="Fassadenflächen">
-    {(d.fassaden||[]).map((f,i)=><div key={i} style={{marginBottom:10}}>
-      <div style={{display:"flex",gap:8,alignItems:"end",marginBottom:4}}>
-        <div style={{flex:2,minWidth:140}}>
-          <label style={{fontSize:10,color:GY,display:"block",marginBottom:1}}>Name</label>
-          <input value={f.name} onChange={e=>{const fa=[...(d.fassaden||[])];fa[i]={...fa[i],name:e.target.value};setD(x=>({...x,fassaden:fa}));}}
-            style={{width:"100%",padding:"6px 7px",fontSize:12,fontWeight:600,border:`1px solid ${BD}`,borderRadius:4,background:WH,fontFamily:"inherit"}}/></div>
-        <div style={{flex:1}}>
-          <label style={{fontSize:10,color:GY,display:"block",marginBottom:1}}>Breite</label>
-          <div style={{display:"flex",border:`1px solid ${BD}`,borderRadius:4}}>
-            <input value={f.breite} onChange={e=>{const fa=[...(d.fassaden||[])];fa[i]={...fa[i],breite:e.target.value};setD(x=>({...x,fassaden:fa,fassadenlaenge:fa[0]?.breite||x.fassadenlaenge}));}}
-              style={{flex:1,border:"none",padding:"6px 7px",fontSize:12,fontWeight:600,background:"transparent",outline:"none",fontFamily:"inherit",minWidth:0}}/>
-            <span style={{padding:"0 7px",fontSize:9.5,color:GL,alignSelf:"center"}}>m</span></div></div>
-        <div style={{flex:1}}>
-          <label style={{fontSize:10,color:GY,display:"block",marginBottom:1}}>Höhe</label>
-          <div style={{display:"flex",border:`1px solid ${BD}`,borderRadius:4}}>
-            <input value={f.hoehe} onChange={e=>{const fa=[...(d.fassaden||[])];fa[i]={...fa[i],hoehe:e.target.value};setD(x=>({...x,fassaden:fa,fassadenhoehe:fa[0]?.hoehe||x.fassadenhoehe}));}}
-              style={{flex:1,border:"none",padding:"6px 7px",fontSize:12,fontWeight:600,background:"transparent",outline:"none",fontFamily:"inherit",minWidth:0}}/>
-            <span style={{padding:"0 7px",fontSize:9.5,color:GL,alignSelf:"center"}}>m</span></div></div>
-        {(d.fassaden||[]).length>1&&<button onClick={()=>{const fa=[...(d.fassaden||[])];fa.splice(i,1);setD(x=>({...x,fassaden:fa}));}}
-          style={{padding:"6px 8px",fontSize:11,border:`1px solid ${BD}`,borderRadius:4,background:WH,cursor:"pointer",color:R,fontWeight:700}}>✕</button>}
-      </div>
-      {/* Raster preview per facade */}
-      <div style={{background:BG,borderRadius:4,padding:10,textAlign:"center",maxWidth:400,margin:"0 auto"}}>
-        <RasterSVG LH={d.LH} LV={d.LV} fW={f.breite||"3"} fH={f.hoehe||"3"} rasterType={d.seilfuehrung} seilkreuztyp={d.seilkreuztyp} size={340}/>
-        <div style={{fontSize:9.5,color:DK,fontWeight:600,marginTop:2}}>{f.name}: {f.breite||"–"} × {f.hoehe||"–"} m = {((pf(f.breite)||0)*(pf(f.hoehe)||0)).toFixed(1)} m²</div>
-      </div>
-    </div>)}
-    <button onClick={()=>setD(x=>({...x,fassaden:[...(x.fassaden||[]),{name:`Fassade ${(x.fassaden||[]).length+1}`,breite:"10",hoehe:"6"}]}))}
+    {(d.fassaden||[]).map((f,i)=>{
+      const fRaster=f.seilfuehrung||d.seilfuehrung||"gitter";
+      const fSK=f.seilkreuztyp||d.seilkreuztyp||"ohne";
+      const fLH=f.lh||d.LH||"0.9";
+      const fLV=f.lv||d.LV||"0.9";
+      const updateF=(key,val)=>{const fa=[...(d.fassaden||[])];fa[i]={...fa[i],[key]:val};setD(x=>({...x,fassaden:fa,
+        ...(i===0?{fassadenlaenge:fa[0].breite,fassadenhoehe:fa[0].hoehe}:{})}));};
+      return(<div key={i} style={{border:`1px solid ${BD}`,borderRadius:6,padding:12,marginBottom:12,background:i%2===0?WH:"#FAFAF8"}}>
+        <div style={{display:"flex",gap:8,alignItems:"end",marginBottom:8}}>
+          <div style={{flex:2,minWidth:140}}>
+            <label style={{fontSize:10,color:GY,display:"block",marginBottom:1}}>Name</label>
+            <input value={f.name} onChange={e=>updateF("name",e.target.value)}
+              style={{width:"100%",padding:"6px 7px",fontSize:12,fontWeight:700,border:`1px solid ${BD}`,borderRadius:4,background:WH,fontFamily:"inherit"}}/></div>
+          <div style={{flex:1}}>
+            <label style={{fontSize:10,color:GY,display:"block",marginBottom:1}}>Breite</label>
+            <div style={{display:"flex",border:`1px solid ${BD}`,borderRadius:4,background:WH}}>
+              <input value={f.breite} onChange={e=>updateF("breite",e.target.value)}
+                style={{flex:1,border:"none",padding:"6px 7px",fontSize:12,fontWeight:600,background:"transparent",outline:"none",fontFamily:"inherit",minWidth:0}}/>
+              <span style={{padding:"0 7px",fontSize:9.5,color:GL,alignSelf:"center"}}>m</span></div></div>
+          <div style={{flex:1}}>
+            <label style={{fontSize:10,color:GY,display:"block",marginBottom:1}}>Höhe</label>
+            <div style={{display:"flex",border:`1px solid ${BD}`,borderRadius:4,background:WH}}>
+              <input value={f.hoehe} onChange={e=>updateF("hoehe",e.target.value)}
+                style={{flex:1,border:"none",padding:"6px 7px",fontSize:12,fontWeight:600,background:"transparent",outline:"none",fontFamily:"inherit",minWidth:0}}/>
+              <span style={{padding:"0 7px",fontSize:9.5,color:GL,alignSelf:"center"}}>m</span></div></div>
+          {(d.fassaden||[]).length>1&&<button onClick={()=>{const fa=[...(d.fassaden||[])];fa.splice(i,1);setD(x=>({...x,fassaden:fa}));}}
+            style={{padding:"6px 8px",fontSize:11,border:`1px solid ${BD}`,borderRadius:4,background:WH,cursor:"pointer",color:R,fontWeight:700}}>✕</button>}
+        </div>
+
+        {/* Per-facade raster config */}
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:6}}>
+          <div style={{flex:1,minWidth:200}}>
+            <label style={{fontSize:10,color:GY,marginBottom:2,display:"block"}}>Seilführung</label>
+            <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:6}}>
+              {RASTER.map(r=><button key={r.id} onClick={()=>updateF("seilfuehrung",r.id)}
+                style={{padding:"4px 10px",fontSize:9,borderRadius:4,cursor:"pointer",border:fRaster===r.id?`2px solid ${R}`:`1px solid ${BD}`,
+                  background:fRaster===r.id?RL:WH,color:fRaster===r.id?R:DK,fontWeight:fRaster===r.id?700:400}}>{r.l}</button>)}</div>
+            <label style={{fontSize:10,color:GY,marginBottom:2,display:"block"}}>Seilkreuztyp</label>
+            <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:6}}>
+              {SEILKREUZE.filter(sk=>sk.id==="ohne"||sk.id==="sk90a4"||sk.id==="skverst").map(sk=><button key={sk.id} onClick={()=>updateF("seilkreuztyp",sk.id)}
+                style={{padding:"4px 10px",fontSize:9,borderRadius:4,cursor:"pointer",border:fSK===sk.id?`2px solid ${R}`:`1px solid ${BD}`,
+                  background:fSK===sk.id?RL:WH,color:fSK===sk.id?R:DK,fontWeight:fSK===sk.id?700:400}}>
+                {sk.l}{sk.art?<span style={{fontSize:7,color:GL,marginLeft:3}}>({sk.art})</span>:null}</button>)}</div>
+            {fSK!=="ohne"&&<div style={{padding:"4px 8px",background:"#E3F2FD",borderRadius:3,border:"1px solid #90CAF940",fontSize:9,color:"#1565C0",marginBottom:6}}>
+              Seilkreuz in Zellmitte (zwischen 4 Ankern)</div>}
+            <div style={{display:"flex",gap:8}}>
+              <div style={{flex:1}}>
+                <label style={{fontSize:9,color:GY}}>LH</label>
+                <div style={{display:"flex",border:`1px solid ${BD}`,borderRadius:4,background:WH}}>
+                  <input value={f.lh||d.LH||"0.9"} onChange={e=>updateF("lh",e.target.value)}
+                    style={{flex:1,border:"none",padding:"4px 6px",fontSize:11,fontWeight:600,background:"transparent",outline:"none",fontFamily:"inherit",minWidth:0}}/>
+                  <span style={{padding:"0 5px",fontSize:8,color:GL,alignSelf:"center"}}>m</span></div></div>
+              <div style={{flex:1}}>
+                <label style={{fontSize:9,color:GY}}>LV</label>
+                <div style={{display:"flex",border:`1px solid ${BD}`,borderRadius:4,background:WH}}>
+                  <input value={f.lv||d.LV||"0.9"} onChange={e=>updateF("lv",e.target.value)}
+                    style={{flex:1,border:"none",padding:"4px 6px",fontSize:11,fontWeight:600,background:"transparent",outline:"none",fontFamily:"inherit",minWidth:0}}/>
+                  <span style={{padding:"0 5px",fontSize:8,color:GL,alignSelf:"center"}}>m</span></div></div></div>
+          </div>
+          <div style={{flex:1,minWidth:280,background:BG,borderRadius:5,padding:8,textAlign:"center"}}>
+            <RasterSVG LH={fLH} LV={fLV} fW={f.breite||"3"} fH={f.hoehe||"3"} rasterType={fRaster} seilkreuztyp={fSK} size={320}/>
+            <div style={{fontSize:9.5,color:DK,fontWeight:600,marginTop:2}}>{f.name}: {f.breite||"–"} × {f.hoehe||"–"} m = {((pf(f.breite)||0)*(pf(f.hoehe)||0)).toFixed(1)} m²</div>
+          </div>
+        </div>
+      </div>);
+    })}
+    <button onClick={()=>setD(x=>({...x,fassaden:[...(x.fassaden||[]),{name:`Fassade ${(x.fassaden||[]).length+1}`,breite:"10",hoehe:"6",seilfuehrung:x.seilfuehrung||"gitter",seilkreuztyp:x.seilkreuztyp||"ohne"}]}))}
       style={{padding:"5px 14px",fontSize:10,border:`1px dashed ${BD}`,borderRadius:4,background:WH,cursor:"pointer",color:GY,marginTop:4}}>+ Fläche</button></Sec>
 </>}
 
