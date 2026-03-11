@@ -168,29 +168,52 @@ function Sub({children:s}){
   return <>{p}</>;
 }
 
-function RasterSVG({LH,LV,fW,fH,rasterType,size=300}){
+function RasterSVG({LH,LV,fW,fH,rasterType,seilkreuztyp="ohne",skInterval=1,size=300}){
   const lh=pf(LH)||.9,lv=pf(LV)||.9,fw=pf(fW)||3,fh=pf(fH)||3;
-  const cols=Math.min(Math.max(1,Math.floor(fw/lh)),7),rows=Math.min(Math.max(1,Math.floor(fh/lv)),7);
+  const cols=Math.min(Math.max(1,Math.floor(fw/lh)),12),rows=Math.min(Math.max(1,Math.floor(fh/lv)),12);
   const pad=42,inner=size-2*pad,cell=Math.min(inner/cols,inner/rows);
   const gw=cell*cols,gh=cell*rows,ox=pad+(inner-gw)/2,oy=pad+(inner-gh)/2;
   const L=[];
+  const BL="#1565C0";
   const a=(x1,y1,x2,y2,c="#AAA",w=.7)=>L.push({x1,y1,x2,y2,c,w});
+  // Horizontal + vertical lines
   if(rasterType==="gitter"||rasterType==="vertikal")for(let c=0;c<=cols;c++)a(ox+c*cell,oy,ox+c*cell,oy+gh,"#AAA",.8);
   if(rasterType==="gitter"||rasterType==="horizontal")for(let r=0;r<=rows;r++)a(ox,oy+r*cell,ox+gw,oy+r*cell,"#AAA",.8);
-  if(rasterType==="gitter"||rasterType==="diagonal")for(let c=0;c<cols;c++)for(let r=0;r<rows;r++){
-    a(ox+c*cell,oy+r*cell,ox+(c+1)*cell,oy+(r+1)*cell,"#D5D5D5",.4);
-    a(ox+(c+1)*cell,oy+r*cell,ox+c*cell,oy+(r+1)*cell,"#D5D5D5",.4);}
+  // Diagonal lines
+  const hasDiag=rasterType==="gitter"||rasterType==="diagonal";
+  if(hasDiag)for(let c=0;c<cols;c++)for(let r=0;r<rows;r++){
+    a(ox+c*cell,oy+r*cell,ox+(c+1)*cell,oy+(r+1)*cell,"#C0C0C0",.5);
+    a(ox+(c+1)*cell,oy+r*cell,ox+c*cell,oy+(r+1)*cell,"#C0C0C0",.5);}
+  // Anchor points (red circles at grid intersections)
   const pts=[];for(let c=0;c<=cols;c++)for(let r=0;r<=rows;r++)pts.push({x:ox+c*cell,y:oy+r*cell});
+  // Seilkreuz positions (blue squares at cell centers / diagonal crossings)
+  const skPts=[];
+  const ski=Math.max(1,Math.round(skInterval));
+  if(seilkreuztyp&&seilkreuztyp!=="ohne"&&hasDiag){
+    for(let c=0;c<cols;c++)for(let r=0;r<rows;r++){
+      if(c%ski===0&&r%ski===0){
+        skPts.push({x:ox+(c+0.5)*cell,y:oy+(r+0.5)*cell});}}}
+  else if(seilkreuztyp&&seilkreuztyp!=="ohne"&&rasterType==="gitter"){
+    // For grid: at interior line crossings
+    for(let c=1;c<cols;c++)for(let r=1;r<rows;r++){
+      if((c-1)%ski===0&&(r-1)%ski===0){
+        skPts.push({x:ox+c*cell,y:oy+r*cell});}}}
+  const numAnker=pts.length;
+  const numSK=skPts.length;
   const DH=(x1,x2,y,l)=><g key={`h${l}`}><line x1={x1} y1={y} x2={x2} y2={y} stroke={BK} strokeWidth=".5"/><line x1={x1} y1={y-3} x2={x1} y2={y+3} stroke={BK} strokeWidth=".5"/><line x1={x2} y1={y-3} x2={x2} y2={y+3} stroke={BK} strokeWidth=".5"/><text x={(x1+x2)/2} y={y+10} textAnchor="middle" fontSize="8" fill={BK} fontFamily="sans-serif">{l}</text></g>;
   const DV=(x,y1,y2,l)=><g key={`v${l}`}><line x1={x} y1={y1} x2={x} y2={y2} stroke={BK} strokeWidth=".5"/><line x1={x-3} y1={y1} x2={x+3} y2={y1} stroke={BK} strokeWidth=".5"/><line x1={x-3} y1={y2} x2={x+3} y2={y2} stroke={BK} strokeWidth=".5"/><text x={x-4} y={(y1+y2)/2} textAnchor="end" fontSize="8" fill={BK} fontFamily="sans-serif" transform={`rotate(-90,${x-4},${(y1+y2)/2})`}>{l}</text></g>;
+  const sqSize=Math.max(3,Math.min(6,cell*0.18));
   return(<svg viewBox={`0 0 ${size} ${size}`} width="100%" style={{maxWidth:size}}>
     {L.map((l,i)=><line key={i} x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2} stroke={l.c} strokeWidth={l.w}/>)}
-    {pts.map((p,i)=><circle key={i} cx={p.x} cy={p.y} r={4.5} fill={R}/>)}
-    {DH(ox,ox+cell,oy+gh+12,`LH=${lh.toFixed(1).replace(".",",")} m`)}
+    {skPts.map((p,i)=><rect key={`sk${i}`} x={p.x-sqSize} y={p.y-sqSize} width={sqSize*2} height={sqSize*2} fill={BL} rx={1}/>)}
+    {pts.map((p,i)=><circle key={i} cx={p.x} cy={p.y} r={Math.max(3,Math.min(5,cell*0.14))} fill={R}/>)}
+    {DH(ox,ox+cell,oy+gh+12,`LH=${lh.toFixed(1).replace(".",",")}m`)}
     {gw>cell*1.2&&DH(ox,ox+gw,oy+gh+26,`${Math.min(fw,cols*lh).toFixed(1).replace(".",",")} m`)}
-    {DV(ox-12,oy,oy+cell,`LV=${lv.toFixed(1).replace(".",",")} m`)}
+    {DV(ox-12,oy,oy+cell,`LV=${lv.toFixed(1).replace(".",",")}m`)}
     {gh>cell*1.2&&DV(ox-26,oy,oy+gh,`${Math.min(fh,rows*lv).toFixed(1).replace(".",",")} m`)}
-    <text x={ox+gw/2} y={size-2} textAnchor="middle" fontSize="7.5" fill={GL} fontFamily="sans-serif">Punkte: {cols+1}×{rows+1} = {(cols+1)*(rows+1)} Stk.</text>
+    <text x={ox+gw/2} y={size-2} textAnchor="middle" fontSize="7.5" fill={GL} fontFamily="sans-serif">
+      <tspan fill={R}>●</tspan> {numAnker} Anker{numSK>0&&<>{" "}<tspan fill={BL}>■</tspan> {numSK} Seilkreuze</>} = {numAnker+numSK} Punkte
+    </text>
   </svg>);
 }
 
@@ -275,7 +298,7 @@ function PreviewSection({d,maxNw,mat}){
           <div style={{fontSize:8.5,color:GL,marginTop:8}}>Zulassungsbezug: Z-21.8-2083</div></div>
         <div style={{flex:1,border:`1px solid ${BD}`,borderRadius:4,padding:12}}>
           <div style={{fontWeight:700,fontSize:10.5,textTransform:"uppercase",letterSpacing:.5,marginBottom:6,color:BK}}>Raster ({RASTER.find(r=>r.id===d.seilfuehrung)?.l})</div>
-          <RasterSVG LH={d.LH} LV={d.LV} fW={d.fassadenlaenge||"3"} fH={d.fassadenhoehe||"3"} rasterType={d.seilfuehrung} size={240}/>
+          <RasterSVG LH={d.LH} LV={d.LV} fW={d.fassadenlaenge||"3"} fH={d.fassadenhoehe||"3"} rasterType={d.seilfuehrung} seilkreuztyp={d.seilkreuztyp} size={240}/>
           <div style={{fontSize:8.5,color:GL,marginTop:4}}>Schematisch – ersetzt keine Ausführungsplanung.</div></div></div>
       <div style={{border:`1px solid ${BD}`,borderRadius:4,padding:12}}>
         <div style={{fontWeight:700,fontSize:10.5,textTransform:"uppercase",letterSpacing:.5,marginBottom:6,color:BK}}>Lasten &amp; Widerstände</div>
@@ -381,7 +404,7 @@ function MaterialSection({d,mat}){
           <KV l="Raster" v={`${mat.cols} × ${mat.rows} Punkte`}/>
           <KV l="Seilführung" v={RASTER.find(r=>r.id===d.seilfuehrung)?.l}/></div>
         <div style={{flex:1}}>
-          <RasterSVG LH={d.LH} LV={d.LV} fW={d.fassadenlaenge} fH={d.fassadenhoehe} rasterType={d.seilfuehrung} size={240}/></div></div>
+          <RasterSVG LH={d.LH} LV={d.LV} fW={d.fassadenlaenge} fH={d.fassadenhoehe} rasterType={d.seilfuehrung} seilkreuztyp={d.seilkreuztyp} size={240}/></div></div>
       <div style={{border:`1px solid ${RM}`,borderRadius:4,padding:12,marginBottom:14}}>
         <div style={{fontWeight:700,fontSize:10.5,textTransform:"uppercase",letterSpacing:.5,marginBottom:8,color:R}}>Stückliste (überschlägig)</div>
         <table style={{width:"100%",borderCollapse:"collapse",fontSize:11.5}}>
@@ -654,40 +677,50 @@ export default function App(){
         style={{padding:"5px 12px",fontSize:10,borderRadius:4,cursor:"pointer",border:d.seilfuehrung===r.id?`2px solid ${R}`:`1px solid ${BD}`,
           background:d.seilfuehrung===r.id?RL:WH,color:d.seilfuehrung===r.id?R:DK,fontWeight:d.seilfuehrung===r.id?700:400}}>{r.l}</button>)}</div>
     <label style={{fontSize:10,color:GY,marginBottom:3,display:"block"}}>Seilkreuztyp</label>
-    <div style={{display:"flex",gap:5,marginBottom:10}}>
+    <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:4}}>
       {SEILKREUZE.map(sk=><button key={sk.id} onClick={()=>setter("seilkreuztyp")(sk.id)}
         style={{padding:"5px 12px",fontSize:10,borderRadius:4,cursor:"pointer",border:d.seilkreuztyp===sk.id?`2px solid ${R}`:`1px solid ${BD}`,
           background:d.seilkreuztyp===sk.id?RL:WH,color:d.seilkreuztyp===sk.id?R:DK,fontWeight:d.seilkreuztyp===sk.id?700:400}}>
         {sk.l}{sk.art?<span style={{fontSize:8,color:GL,marginLeft:4}}>({sk.art})</span>:null}</button>)}</div>
+    {d.seilkreuztyp&&d.seilkreuztyp!=="ohne"&&<div style={{padding:"5px 10px",background:"#E3F2FD",borderRadius:4,border:"1px solid #90CAF940",marginBottom:10,fontSize:10,color:"#1565C0"}}>
+      {(d.seilfuehrung==="gitter"||d.seilfuehrung==="diagonal")?"Seilkreuz in Zellmitte (Kreuzung der Diagonalen)":"Seilkreuz an Gitter-Kreuzungspunkten (innere Knoten)"}</div>}
     <div style={{display:"flex",gap:12,marginBottom:10}}>
       <div style={{flex:1}}>
         <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:8}}>
           <Field label="Max. Abstand LH" value={d.LH} onChange={setter("LH")} unit="m" half/>
-          <Field label="Max. Abstand LV" value={d.LV} onChange={setter("LV")} unit="m" half/></div></div>
+          <Field label="Max. Abstand LV" value={d.LV} onChange={setter("LV")} unit="m" half/></div>
+        <Field label="ISO-Bar ECO pro m²" value={d.stk_m2} onChange={setter("stk_m2")} unit="Stk" half/></div>
       <div style={{flex:1,background:BG,borderRadius:5,padding:10,textAlign:"center"}}>
-        <RasterSVG LH={d.LH} LV={d.LV} fW={d.fassadenlaenge} fH={d.fassadenhoehe} rasterType={d.seilfuehrung} size={250}/>
+        <RasterSVG LH={d.LH} LV={d.LV} fW={d.fassadenlaenge} fH={d.fassadenhoehe} rasterType={d.seilfuehrung} seilkreuztyp={d.seilkreuztyp} size={280}/>
         <div style={{fontSize:9,color:GL,marginTop:4}}>Schematisch – {RASTER.find(r=>r.id===d.seilfuehrung)?.d}</div></div></div></Sec>
 
   <Sec title="Fassadenflächen">
-    {(d.fassaden||[]).map((f,i)=><div key={i} style={{display:"flex",gap:8,alignItems:"end",marginBottom:6}}>
-      <div style={{flex:2,minWidth:140}}>
-        <label style={{fontSize:10,color:GY,display:"block",marginBottom:1}}>Name</label>
-        <input value={f.name} onChange={e=>{const fa=[...(d.fassaden||[])];fa[i]={...fa[i],name:e.target.value};setD(x=>({...x,fassaden:fa}));}}
-          style={{width:"100%",padding:"6px 7px",fontSize:12,fontWeight:600,border:`1px solid ${BD}`,borderRadius:4,background:WH,fontFamily:"inherit"}}/></div>
-      <div style={{flex:1}}>
-        <label style={{fontSize:10,color:GY,display:"block",marginBottom:1}}>Breite</label>
-        <div style={{display:"flex",border:`1px solid ${BD}`,borderRadius:4}}>
-          <input value={f.breite} onChange={e=>{const fa=[...(d.fassaden||[])];fa[i]={...fa[i],breite:e.target.value};setD(x=>({...x,fassaden:fa,fassadenlaenge:fa[0]?.breite||x.fassadenlaenge}));}}
-            style={{flex:1,border:"none",padding:"6px 7px",fontSize:12,fontWeight:600,background:"transparent",outline:"none",fontFamily:"inherit",minWidth:0}}/>
-          <span style={{padding:"0 7px",fontSize:9.5,color:GL,alignSelf:"center"}}>m</span></div></div>
-      <div style={{flex:1}}>
-        <label style={{fontSize:10,color:GY,display:"block",marginBottom:1}}>Höhe</label>
-        <div style={{display:"flex",border:`1px solid ${BD}`,borderRadius:4}}>
-          <input value={f.hoehe} onChange={e=>{const fa=[...(d.fassaden||[])];fa[i]={...fa[i],hoehe:e.target.value};setD(x=>({...x,fassaden:fa,fassadenhoehe:fa[0]?.hoehe||x.fassadenhoehe}));}}
-            style={{flex:1,border:"none",padding:"6px 7px",fontSize:12,fontWeight:600,background:"transparent",outline:"none",fontFamily:"inherit",minWidth:0}}/>
-          <span style={{padding:"0 7px",fontSize:9.5,color:GL,alignSelf:"center"}}>m</span></div></div>
-      {(d.fassaden||[]).length>1&&<button onClick={()=>{const fa=[...(d.fassaden||[])];fa.splice(i,1);setD(x=>({...x,fassaden:fa}));}}
-        style={{padding:"6px 8px",fontSize:11,border:`1px solid ${BD}`,borderRadius:4,background:WH,cursor:"pointer",color:R,fontWeight:700}}>✕</button>}
+    {(d.fassaden||[]).map((f,i)=><div key={i} style={{marginBottom:10}}>
+      <div style={{display:"flex",gap:8,alignItems:"end",marginBottom:4}}>
+        <div style={{flex:2,minWidth:140}}>
+          <label style={{fontSize:10,color:GY,display:"block",marginBottom:1}}>Name</label>
+          <input value={f.name} onChange={e=>{const fa=[...(d.fassaden||[])];fa[i]={...fa[i],name:e.target.value};setD(x=>({...x,fassaden:fa}));}}
+            style={{width:"100%",padding:"6px 7px",fontSize:12,fontWeight:600,border:`1px solid ${BD}`,borderRadius:4,background:WH,fontFamily:"inherit"}}/></div>
+        <div style={{flex:1}}>
+          <label style={{fontSize:10,color:GY,display:"block",marginBottom:1}}>Breite</label>
+          <div style={{display:"flex",border:`1px solid ${BD}`,borderRadius:4}}>
+            <input value={f.breite} onChange={e=>{const fa=[...(d.fassaden||[])];fa[i]={...fa[i],breite:e.target.value};setD(x=>({...x,fassaden:fa,fassadenlaenge:fa[0]?.breite||x.fassadenlaenge}));}}
+              style={{flex:1,border:"none",padding:"6px 7px",fontSize:12,fontWeight:600,background:"transparent",outline:"none",fontFamily:"inherit",minWidth:0}}/>
+            <span style={{padding:"0 7px",fontSize:9.5,color:GL,alignSelf:"center"}}>m</span></div></div>
+        <div style={{flex:1}}>
+          <label style={{fontSize:10,color:GY,display:"block",marginBottom:1}}>Höhe</label>
+          <div style={{display:"flex",border:`1px solid ${BD}`,borderRadius:4}}>
+            <input value={f.hoehe} onChange={e=>{const fa=[...(d.fassaden||[])];fa[i]={...fa[i],hoehe:e.target.value};setD(x=>({...x,fassaden:fa,fassadenhoehe:fa[0]?.hoehe||x.fassadenhoehe}));}}
+              style={{flex:1,border:"none",padding:"6px 7px",fontSize:12,fontWeight:600,background:"transparent",outline:"none",fontFamily:"inherit",minWidth:0}}/>
+            <span style={{padding:"0 7px",fontSize:9.5,color:GL,alignSelf:"center"}}>m</span></div></div>
+        {(d.fassaden||[]).length>1&&<button onClick={()=>{const fa=[...(d.fassaden||[])];fa.splice(i,1);setD(x=>({...x,fassaden:fa}));}}
+          style={{padding:"6px 8px",fontSize:11,border:`1px solid ${BD}`,borderRadius:4,background:WH,cursor:"pointer",color:R,fontWeight:700}}>✕</button>}
+      </div>
+      {/* Mini raster preview per facade */}
+      <div style={{background:BG,borderRadius:4,padding:6,textAlign:"center"}}>
+        <RasterSVG LH={d.LH} LV={d.LV} fW={f.breite||"3"} fH={f.hoehe||"3"} rasterType={d.seilfuehrung} seilkreuztyp={d.seilkreuztyp} size={180}/>
+        <div style={{fontSize:8,color:GL}}>{f.name}: {f.breite||"–"} × {f.hoehe||"–"} m = {((pf(f.breite)||0)*(pf(f.hoehe)||0)).toFixed(1)} m²</div>
+      </div>
     </div>)}
     <button onClick={()=>setD(x=>({...x,fassaden:[...(x.fassaden||[]),{name:`Fassade ${(x.fassaden||[]).length+1}`,breite:"10",hoehe:"6"}]}))}
       style={{padding:"5px 14px",fontSize:10,border:`1px dashed ${BD}`,borderRadius:4,background:WH,cursor:"pointer",color:GY,marginTop:4}}>+ Fläche</button></Sec>
