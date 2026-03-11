@@ -144,9 +144,9 @@ function calcMaterial(d){
   const pts=(cols+1)*(rows+1);
   const area=fw*fh;
   const seilV=(cols+1)*fh, seilH=(rows+1)*fw;
-  const seilD=d.seilfuehrung==="gitter"||d.seilfuehrung==="diagonal"?cols*rows*Math.sqrt(lh*lh+lv*lv)*2:0;
+  const seilD=d.seilfuehrung==="diagonal"?cols*rows*Math.sqrt(lh*lh+lv*lv)*2:0;
   const seilGes=((d.seilfuehrung==="vertikal"?seilV:0)+(d.seilfuehrung==="horizontal"?seilH:0)
-    +(d.seilfuehrung==="gitter"?seilV+seilH+seilD:0)+(d.seilfuehrung==="diagonal"?seilD:0));
+    +(d.seilfuehrung==="gitter"?seilV+seilH:0)+(d.seilfuehrung==="diagonal"?seilD:0));
   const kreuze90=d.seilfuehrung==="gitter"?(cols-1)*(rows-1):0;
   const kreuzeVar=d.seilfuehrung==="gitter"||d.seilfuehrung==="diagonal"?cols*rows*2:0;
   return {pts,area,cols:cols+1,rows:rows+1,seilV:seilV.toFixed(1),seilH:seilH.toFixed(1),seilD:seilD.toFixed(1),
@@ -179,22 +179,23 @@ function RasterSVG({LH,LV,fW,fH,rasterType,seilkreuztyp="ohne",skInterval=1,size
   // Horizontal + vertical lines
   if(rasterType==="gitter"||rasterType==="vertikal")for(let c=0;c<=cols;c++)a(ox+c*cell,oy,ox+c*cell,oy+gh,"#AAA",.8);
   if(rasterType==="gitter"||rasterType==="horizontal")for(let r=0;r<=rows;r++)a(ox,oy+r*cell,ox+gw,oy+r*cell,"#AAA",.8);
-  // Diagonal lines
-  const hasDiag=rasterType==="gitter"||rasterType==="diagonal";
+  // Diagonal lines — ONLY for diagonal mode, NOT for gitter
+  const hasDiag=rasterType==="diagonal";
   if(hasDiag)for(let c=0;c<cols;c++)for(let r=0;r<rows;r++){
     a(ox+c*cell,oy+r*cell,ox+(c+1)*cell,oy+(r+1)*cell,"#C0C0C0",.5);
     a(ox+(c+1)*cell,oy+r*cell,ox+c*cell,oy+(r+1)*cell,"#C0C0C0",.5);}
   // Anchor points (red circles at grid intersections)
   const pts=[];for(let c=0;c<=cols;c++)for(let r=0;r<=rows;r++)pts.push({x:ox+c*cell,y:oy+r*cell});
-  // Seilkreuz positions (blue squares at cell centers / diagonal crossings)
+  // Seilkreuz positions (blue squares)
   const skPts=[];
   const ski=Math.max(1,Math.round(skInterval));
   if(seilkreuztyp&&seilkreuztyp!=="ohne"&&hasDiag){
+    // Diagonal mode: Seilkreuze in cell centers (diagonal crossing)
     for(let c=0;c<cols;c++)for(let r=0;r<rows;r++){
       if(c%ski===0&&r%ski===0){
         skPts.push({x:ox+(c+0.5)*cell,y:oy+(r+0.5)*cell});}}}
   else if(seilkreuztyp&&seilkreuztyp!=="ohne"&&rasterType==="gitter"){
-    // For grid: at interior line crossings
+    // Gitter mode: Seilkreuze at interior 90° crossing points
     for(let c=1;c<cols;c++)for(let r=1;r<rows;r++){
       if((c-1)%ski===0&&(r-1)%ski===0){
         skPts.push({x:ox+c*cell,y:oy+r*cell});}}}
@@ -391,6 +392,24 @@ function AnlagenSection({d,usable}){
 }
 
 function MaterialSection({d,mat}){
+  // Calculate per-facade totals
+  const fassaden=d.fassaden||[{name:"Fassade 1",breite:d.fassadenlaenge||"10",hoehe:d.fassadenhoehe||"6"}];
+  const lh=pf(d.LH)||.9,lv=pf(d.LV)||.9;
+  let totalAnker=0,totalSK=0,totalArea=0;
+  const facadeStats=fassaden.map(f=>{
+    const fw=pf(f.breite)||0,fh=pf(f.hoehe)||0;
+    const cols=Math.floor(fw/lh),rows=Math.floor(fh/lv);
+    const anker=(cols+1)*(rows+1);
+    let sk=0;
+    if(d.seilkreuztyp&&d.seilkreuztyp!=="ohne"){
+      if(d.seilfuehrung==="diagonal")sk=cols*rows;
+      else if(d.seilfuehrung==="gitter")sk=Math.max(0,(cols-1))*Math.max(0,(rows-1));
+    }
+    totalAnker+=anker;totalSK+=sk;totalArea+=fw*fh;
+    return{name:f.name,breite:fw,hoehe:fh,area:fw*fh,anker,sk,cols:cols+1,rows:rows+1};
+  });
+  const setInfo=SETS.find(s=>s.id===d.produkt);
+  const skInfo=SEILKREUZE.find(s=>s.id===d.seilkreuztyp);
   return(<div style={{background:WH}}>
     <div style={{borderTop:`3px solid ${R}`,padding:"16px 24px"}}>
       <PageHead title="Materialbedarfsermittlung" subtitle="Überschlägige Mengenermittlung auf Basis der Vorbemessung"/>
@@ -398,13 +417,37 @@ function MaterialSection({d,mat}){
       <div style={{display:"flex",gap:12,marginBottom:14}}>
         <div style={{flex:1,border:`1px solid ${BD}`,borderRadius:4,padding:12}}>
           <div style={{fontWeight:700,fontSize:10.5,textTransform:"uppercase",letterSpacing:.5,marginBottom:8,color:BK}}>Eingangswerte</div>
-          <KV l="Fassadenfläche" v={`${(pf(d.fassadenlaenge)*pf(d.fassadenhoehe)).toFixed(1)} m²`} b/>
-          <KV l="Fassade (L × H)" v={`${d.fassadenlaenge||"–"} × ${d.fassadenhoehe||"–"} m`}/>
+          <KV l="Gesamtfläche" v={`${totalArea.toFixed(1)} m²`} b/>
+          <KV l="Fassaden" v={`${fassaden.length} Stk.`}/>
           <KV l="LH / LV" v={`${d.LH||"–"} / ${d.LV||"–"} m`}/>
-          <KV l="Raster" v={`${mat.cols} × ${mat.rows} Punkte`}/>
-          <KV l="Seilführung" v={RASTER.find(r=>r.id===d.seilfuehrung)?.l}/></div>
+          <KV l="Seilführung" v={RASTER.find(r=>r.id===d.seilfuehrung)?.l}/>
+          <KV l="Seilkreuztyp" v={skInfo?.l||"–"}/>
+          {setInfo&&<KV l="SET Produkt" v={setInfo.l} b/>}</div>
         <div style={{flex:1}}>
           <RasterSVG LH={d.LH} LV={d.LV} fW={d.fassadenlaenge} fH={d.fassadenhoehe} rasterType={d.seilfuehrung} seilkreuztyp={d.seilkreuztyp} size={240}/></div></div>
+
+      {/* Per-facade breakdown */}
+      {fassaden.length>1&&<div style={{border:`1px solid ${BD}`,borderRadius:4,padding:12,marginBottom:14}}>
+        <div style={{fontWeight:700,fontSize:10.5,textTransform:"uppercase",letterSpacing:.5,marginBottom:8,color:BK}}>Aufschlüsselung je Fassade</div>
+        <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+          <thead><tr>{["Fassade","B × H","Fläche","Anker","Seilkreuze","Gesamt"].map(h=>
+            <th key={h} style={{background:BG,fontWeight:700,padding:"4px 8px",textAlign:"left",borderBottom:`1px solid ${BD}`,fontSize:10}}>{h}</th>)}</tr></thead>
+          <tbody>
+            {facadeStats.map((f,i)=><tr key={i}>
+              <td style={{padding:"3px 8px",borderBottom:`1px solid ${BD}`,fontWeight:600}}>{f.name}</td>
+              <td style={{padding:"3px 8px",borderBottom:`1px solid ${BD}`}}>{f.breite} × {f.hoehe} m</td>
+              <td style={{padding:"3px 8px",borderBottom:`1px solid ${BD}`}}>{f.area.toFixed(1)} m²</td>
+              <td style={{padding:"3px 8px",borderBottom:`1px solid ${BD}`,fontWeight:700,color:R}}>{f.anker}</td>
+              <td style={{padding:"3px 8px",borderBottom:`1px solid ${BD}`,fontWeight:700,color:"#1565C0"}}>{f.sk}</td>
+              <td style={{padding:"3px 8px",borderBottom:`1px solid ${BD}`,fontWeight:700}}>{f.anker+f.sk}</td></tr>)}
+            <tr style={{background:BG}}>
+              <td style={{padding:"4px 8px",fontWeight:700}} colSpan={2}>Gesamt</td>
+              <td style={{padding:"4px 8px",fontWeight:700}}>{totalArea.toFixed(1)} m²</td>
+              <td style={{padding:"4px 8px",fontWeight:700,color:R}}>{totalAnker}</td>
+              <td style={{padding:"4px 8px",fontWeight:700,color:"#1565C0"}}>{totalSK}</td>
+              <td style={{padding:"4px 8px",fontWeight:700}}>{totalAnker+totalSK}</td></tr>
+          </tbody></table></div>}
+
       <div style={{border:`1px solid ${RM}`,borderRadius:4,padding:12,marginBottom:14}}>
         <div style={{fontWeight:700,fontSize:10.5,textTransform:"uppercase",letterSpacing:.5,marginBottom:8,color:R}}>Stückliste (überschlägig)</div>
         <table style={{width:"100%",borderCollapse:"collapse",fontSize:11.5}}>
@@ -412,17 +455,18 @@ function MaterialSection({d,mat}){
             <th key={h} style={{background:BG,fontWeight:700,padding:"5px 8px",textAlign:"left",borderBottom:`1px solid ${BD}`,fontSize:10.5}}>{h}</th>)}</tr></thead>
           <tbody>
             {[
-              ["1","EJOT Iso-Bar ECO (Ankerpunkt)",mat.pts,"Stk",`${d.produkt}`],
+              ["1",setInfo?setInfo.l:"EJOT Iso-Bar ECO (Ankerpunkt)",String(totalAnker||mat.pts),"Stk",setInfo?`Art. ${setInfo.art}`:""],
               ["2",`Seil Edelstahl V4A ø4mm – vertikal`,mat.seilV,"m",`${mat.cols} Stränge × ${d.fassadenhoehe||"–"} m`],
               ["3",`Seil Edelstahl V4A ø4mm – horizontal`,mat.seilH,"m",`${mat.rows} Stränge × ${d.fassadenlaenge||"–"} m`],
-              ...(d.seilfuehrung==="gitter"||d.seilfuehrung==="diagonal"?[["4","Seil Edelstahl V4A ø4mm – diagonal",mat.seilD,"m","2× pro Feld"]]:[] ),
+              ...(d.seilfuehrung==="diagonal"?[["4","Seil Edelstahl V4A ø4mm – diagonal",mat.seilD,"m","2× pro Feld"]]:[]),
               ["5","Seil gesamt (alle Richtungen)",mat.seilGes,"m","inkl. Verschnitt ca. +10%"],
-              ["6","Seilkreuz 90° (Kreuzungspunkte)",String(mat.kreuze90),"Stk","nur bei Gitter"],
-              ["7","Abstandssockel 95mm",String(mat.sockel95),"Stk","ca. 70% der Punkte"],
-              ["8","Abstandssockel 150mm",String(mat.sockel150),"Stk","ca. 30% der Punkte"],
-              ["9","Endkappen / Seilhülsen",String(mat.endkappen),"Stk","2 pro Ankerpunkt"],
-            ].map(([p,b,m,e,h])=><tr key={p}>
-              <td style={{padding:"4px 8px",borderBottom:`1px solid ${BD}`,fontWeight:700,color:R,width:30}}>{p}</td>
+              ...(totalSK>0&&skInfo?[["6",`${skInfo.l}`,String(totalSK),"Stk",skInfo.art?`Art. ${skInfo.art}`:"alle Fassaden"]]:[]),
+              ...(totalSK===0&&d.seilfuehrung==="gitter"?[["6","Seilkreuz 90° (Kreuzungspunkte)",String(mat.kreuze90),"Stk","nur bei Gitter"]]:[]),
+              [totalSK>0?"7":"7","Abstandssockel 95mm",String(mat.sockel95),"Stk","ca. 70% der Punkte"],
+              [totalSK>0?"8":"8","Abstandssockel 150mm",String(mat.sockel150),"Stk","ca. 30% der Punkte"],
+              [totalSK>0?"9":"9","Endkappen / Seilhülsen",String(mat.endkappen),"Stk","2 pro Ankerpunkt"],
+            ].map(([p,b,m,e,h],idx)=><tr key={idx}>
+              <td style={{padding:"4px 8px",borderBottom:`1px solid ${BD}`,fontWeight:700,color:R,width:30}}>{idx+1}</td>
               <td style={{padding:"4px 8px",borderBottom:`1px solid ${BD}`}}>{b}</td>
               <td style={{padding:"4px 8px",borderBottom:`1px solid ${BD}`,fontWeight:700,textAlign:"right"}}>{m}</td>
               <td style={{padding:"4px 8px",borderBottom:`1px solid ${BD}`}}>{e}</td>
@@ -716,10 +760,10 @@ export default function App(){
         {(d.fassaden||[]).length>1&&<button onClick={()=>{const fa=[...(d.fassaden||[])];fa.splice(i,1);setD(x=>({...x,fassaden:fa}));}}
           style={{padding:"6px 8px",fontSize:11,border:`1px solid ${BD}`,borderRadius:4,background:WH,cursor:"pointer",color:R,fontWeight:700}}>✕</button>}
       </div>
-      {/* Mini raster preview per facade */}
-      <div style={{background:BG,borderRadius:4,padding:6,textAlign:"center"}}>
-        <RasterSVG LH={d.LH} LV={d.LV} fW={f.breite||"3"} fH={f.hoehe||"3"} rasterType={d.seilfuehrung} seilkreuztyp={d.seilkreuztyp} size={180}/>
-        <div style={{fontSize:8,color:GL}}>{f.name}: {f.breite||"–"} × {f.hoehe||"–"} m = {((pf(f.breite)||0)*(pf(f.hoehe)||0)).toFixed(1)} m²</div>
+      {/* Raster preview per facade */}
+      <div style={{background:BG,borderRadius:4,padding:10,textAlign:"center",maxWidth:400,margin:"0 auto"}}>
+        <RasterSVG LH={d.LH} LV={d.LV} fW={f.breite||"3"} fH={f.hoehe||"3"} rasterType={d.seilfuehrung} seilkreuztyp={d.seilkreuztyp} size={340}/>
+        <div style={{fontSize:9.5,color:DK,fontWeight:600,marginTop:2}}>{f.name}: {f.breite||"–"} × {f.hoehe||"–"} m = {((pf(f.breite)||0)*(pf(f.hoehe)||0)).toFixed(1)} m²</div>
       </div>
     </div>)}
     <button onClick={()=>setD(x=>({...x,fassaden:[...(x.fassaden||[]),{name:`Fassade ${(x.fassaden||[]).length+1}`,breite:"10",hoehe:"6"}]}))}
