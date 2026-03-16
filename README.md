@@ -18,13 +18,6 @@ npm install
 npm run dev
 ```
 
-## Deploy auf Vercel
-
-1. Repository auf GitHub pushen
-2. In Vercel mit GitHub verbinden
-3. Framework: Vite erkennt Vercel automatisch
-4. Fertig – die App läuft unter der zugewiesenen URL
-
 ## Tech Stack
 
 - React 18 + Vite
