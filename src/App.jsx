@@ -139,11 +139,13 @@ function parsePdf(t){
 
 // ─── Material calculator ────────────────────────────────
 function calcMaterial(d){
-  const lh=pf(d.LH)||.9,lv=pf(d.LV)||.9,fw=pf(d.fassadenlaenge)||10,fh=pf(d.fassadenhoehe)||10;
+  const f0=(d.fassaden||[])[0]||{};
+  const lh=pf(f0.lh||d.LH)||.9,lv=pf(f0.lv||d.LV)||.9;
+  const fw=pf(f0.breite||d.fassadenlaenge)||10,fh=pf(f0.hoehe||d.fassadenhoehe)||10;
   const cols=Math.floor(fw/lh),rows=Math.floor(fh/lv);
   const pts=(cols+1)*(rows+1);
   const area=fw*fh;
-  const rt=d.seilfuehrung||"gitter";
+  const rt=f0.seilfuehrung||d.seilfuehrung||"gitter";
   const hasV=rt==="gitter"||rt==="vertikal";
   const hasH=rt==="gitter"||rt==="horizontal";
   const hasD=rt==="diagonal";
@@ -316,6 +318,13 @@ function PageHead({title,subtitle}){
 
 // ─── PDF Section Components (reusable for on-screen + off-screen) ───
 function PreviewSection({d,maxNw,mat}){
+  const f0=(d.fassaden||[])[0]||{};
+  const prvRaster=f0.seilfuehrung||d.seilfuehrung||"gitter";
+  const prvSK=f0.seilkreuztyp||d.seilkreuztyp||"ohne";
+  const prvLH=f0.lh||d.LH||"0.9";
+  const prvLV=f0.lv||d.LV||"0.9";
+  const prvW=f0.breite||d.fassadenlaenge||"3";
+  const prvH=f0.hoehe||d.fassadenhoehe||"3";
   return(<div style={{background:WH}}>
     <div style={{borderTop:`3px solid ${R}`,padding:"16px 24px"}}>
       <PageHead title="Vorbemessung Fassadenbegrünung" subtitle="ISO-Bar ECO, Vorab-Auslegung (ohne Ausführungsplanung)"/>
@@ -354,8 +363,8 @@ function PreviewSection({d,maxNw,mat}){
           <NwBar label="Quer, V_Ed / V_Rd" value={d.nw_quer}/><NwBar label="Kombination (max)" value={d.nw_kombi}/>
           <div style={{fontSize:8.5,color:GL,marginTop:8}}>Zulassungsbezug: Z-21.8-2083</div></div>
         <div style={{flex:1,border:`1px solid ${BD}`,borderRadius:4,padding:12}}>
-          <div style={{fontWeight:700,fontSize:10.5,textTransform:"uppercase",letterSpacing:.5,marginBottom:6,color:BK}}>Raster ({RASTER.find(r=>r.id===d.seilfuehrung)?.l})</div>
-          <RasterSVG LH={d.LH} LV={d.LV} fW={d.fassadenlaenge||"3"} fH={d.fassadenhoehe||"3"} rasterType={d.seilfuehrung} seilkreuztyp={d.seilkreuztyp} size={240}/>
+          <div style={{fontWeight:700,fontSize:10.5,textTransform:"uppercase",letterSpacing:.5,marginBottom:6,color:BK}}>Raster ({RASTER.find(r=>r.id===prvRaster)?.l})</div>
+          <RasterSVG LH={prvLH} LV={prvLV} fW={prvW} fH={prvH} rasterType={prvRaster} seilkreuztyp={prvSK} size={240}/>
           <div style={{fontSize:8.5,color:GL,marginTop:4}}>Schematisch – ersetzt keine Ausführungsplanung.</div></div></div>
       <div style={{border:`1px solid ${BD}`,borderRadius:4,padding:12}}>
         <div style={{fontWeight:700,fontSize:10.5,textTransform:"uppercase",letterSpacing:.5,marginBottom:6,color:BK}}>Lasten &amp; Widerstände</div>
@@ -451,6 +460,13 @@ function MaterialSection({d,mat}){
   // Calculate per-facade totals
   const fassaden=d.fassaden||[{name:"Fassade 1",breite:d.fassadenlaenge||"10",hoehe:d.fassadenhoehe||"6"}];
   const lh=pf(d.LH)||.9,lv=pf(d.LV)||.9;
+  const f0=fassaden[0]||{};
+  const matRaster=f0.seilfuehrung||d.seilfuehrung||"gitter";
+  const matSK=f0.seilkreuztyp||d.seilkreuztyp||"ohne";
+  const matLH=f0.lh||d.LH||"0.9";
+  const matLV=f0.lv||d.LV||"0.9";
+  const matW=f0.breite||d.fassadenlaenge||"10";
+  const matH=f0.hoehe||d.fassadenhoehe||"6";
   let totalAnker=0,totalSK=0,totalArea=0;
   const facadeStats=fassaden.map(f=>{
     const fw=pf(f.breite)||0,fh=pf(f.hoehe)||0;
@@ -460,7 +476,7 @@ function MaterialSection({d,mat}){
     const cols=Math.floor(fw/flh),rows=Math.floor(fh/flv);
     const anker=(cols+1)*(rows+1);
     let sk=0;
-    if(fSK&&fSK!=="ohne"){
+    if(fSK&&fSK!=="ohne"&&(fRaster==="gitter"||fRaster==="diagonal")){
       if(fRaster==="gitter"){
         // Seilkreuze at: cell centers + H-midpoints + V-midpoints
         const cellCenters=cols*rows;
@@ -475,7 +491,7 @@ function MaterialSection({d,mat}){
     return{name:f.name,breite:fw,hoehe:fh,area:fw*fh,anker,sk,cols:cols+1,rows:rows+1};
   });
   const setInfo=SETS.find(s=>s.id===d.produkt);
-  const skInfo=SEILKREUZE.find(s=>s.id===d.seilkreuztyp);
+  const skInfo=SEILKREUZE.find(s=>s.id===matSK);
   return(<div style={{background:WH}}>
     <div style={{borderTop:`3px solid ${R}`,padding:"16px 24px"}}>
       <PageHead title="Materialbedarfsermittlung" subtitle="Überschlägige Mengenermittlung auf Basis der Vorbemessung"/>
@@ -485,12 +501,12 @@ function MaterialSection({d,mat}){
           <div style={{fontWeight:700,fontSize:10.5,textTransform:"uppercase",letterSpacing:.5,marginBottom:8,color:BK}}>Eingangswerte</div>
           <KV l="Gesamtfläche" v={`${totalArea.toFixed(1)} m²`} b/>
           <KV l="Fassaden" v={`${fassaden.length} Stk.`}/>
-          <KV l="LH / LV" v={`${d.LH||"–"} / ${d.LV||"–"} m`}/>
-          <KV l="Seilführung" v={RASTER.find(r=>r.id===d.seilfuehrung)?.l}/>
-          <KV l="Seilkreuztyp" v={skInfo?.l||"–"}/>
+          <KV l="LH / LV" v={`${matLH} / ${matLV} m`}/>
+          <KV l="Seilführung" v={RASTER.find(r=>r.id===matRaster)?.l}/>
+          <KV l="Seilkreuztyp" v={(SEILKREUZE.find(s=>s.id===matSK)||{}).l||"–"}/>
           {setInfo&&<KV l="SET Produkt" v={setInfo.l} b/>}</div>
         <div style={{flex:1}}>
-          <RasterSVG LH={d.LH} LV={d.LV} fW={d.fassadenlaenge} fH={d.fassadenhoehe} rasterType={d.seilfuehrung} seilkreuztyp={d.seilkreuztyp} size={240}/></div></div>
+          <RasterSVG LH={matLH} LV={matLV} fW={matW} fH={matH} rasterType={matRaster} seilkreuztyp={matSK} size={240}/></div></div>
 
       {/* Per-facade breakdown */}
       {fassaden.length>1&&<div style={{border:`1px solid ${BD}`,borderRadius:4,padding:12,marginBottom:14}}>
@@ -552,7 +568,7 @@ export default function App(){
   const fRef=useRef(null);
   const setter=k=>v=>setD(x=>({...x,[k]:v}));
   const usable=useMemo(()=>FLL_PLANTS.filter(p=>p.lk!==null),[]);
-  const mat=useMemo(()=>calcMaterial(d),[d.LH,d.LV,d.fassadenlaenge,d.fassadenhoehe,d.seilfuehrung]);
+  const mat=useMemo(()=>calcMaterial(d),[d.LH,d.LV,d.fassadenlaenge,d.fassadenhoehe,d.seilfuehrung,d.fassaden]);
   const maxNw=Math.max(...[d.nw_zug,d.nw_druck,d.nw_quer,d.nw_kombi].map(v=>pf(v)||0),0);
 
   const selectPlant=bot=>{const p=FLL_PLANTS.find(x=>x.bot===bot);
