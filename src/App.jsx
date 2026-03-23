@@ -457,9 +457,9 @@ function AnlagenSection({d,usable}){
 }
 
 function MaterialSection({d,mat}){
-  // Calculate per-facade totals
+  // Calculate per-facade totals with correct seil logic
   const fassaden=d.fassaden||[{name:"Fassade 1",breite:d.fassadenlaenge||"10",hoehe:d.fassadenhoehe||"6"}];
-  const lh=pf(d.LH)||.9,lv=pf(d.LV)||.9;
+  const glh=pf(d.LH)||.9,glv=pf(d.LV)||.9;
   const f0=fassaden[0]||{};
   const matRaster=f0.seilfuehrung||d.seilfuehrung||"gitter";
   const matSK=f0.seilkreuztyp||d.seilkreuztyp||"ohne";
@@ -467,31 +467,51 @@ function MaterialSection({d,mat}){
   const matLV=f0.lv||d.LV||"0.9";
   const matW=f0.breite||d.fassadenlaenge||"10";
   const matH=f0.hoehe||d.fassadenhoehe||"6";
-  let totalAnker=0,totalSK=0,totalArea=0;
+  let totalAnker=0,totalSK=0,totalArea=0,totalSeilV=0,totalSeilH=0,totalSeilD=0,totalKreuze90=0;
+  let anyV=false,anyH=false,anyD=false;
   const facadeStats=fassaden.map(f=>{
     const fw=pf(f.breite)||0,fh=pf(f.hoehe)||0;
-    const flh=pf(f.lh)||lh, flv=pf(f.lv)||lv;
+    const flh=pf(f.lh)||glh, flv=pf(f.lv)||glv;
     const fRaster=f.seilfuehrung||d.seilfuehrung||"gitter";
     const fSK=f.seilkreuztyp||d.seilkreuztyp||"ohne";
     const cols=Math.floor(fw/flh),rows=Math.floor(fh/flv);
     const anker=(cols+1)*(rows+1);
+    // Seil per facade based on its own seilfuehrung
+    const fHasV=fRaster==="gitter"||fRaster==="vertikal";
+    const fHasH=fRaster==="gitter"||fRaster==="horizontal";
+    const fHasD=fRaster==="diagonal";
+    const sV=fHasV?(cols+1)*fh:0;
+    const sH=fHasH?(rows+1)*fw:0;
+    const sD=fHasD?cols*rows*Math.sqrt(flh*flh+flv*flv)*2:0;
+    if(fHasV)anyV=true; if(fHasH)anyH=true; if(fHasD)anyD=true;
+    totalSeilV+=sV; totalSeilH+=sH; totalSeilD+=sD;
+    // Seilkreuze only for gitter/diagonal AND only if seilkreuztyp != ohne
     let sk=0;
     if(fSK&&fSK!=="ohne"&&(fRaster==="gitter"||fRaster==="diagonal")){
       if(fRaster==="gitter"){
-        // Seilkreuze at: cell centers + H-midpoints + V-midpoints
-        const cellCenters=cols*rows;
-        const hMids=cols*(rows+1);
-        const vMids=(cols+1)*rows;
-        sk=cellCenters+hMids+vMids;
+        sk=cols*rows+cols*(rows+1)+(cols+1)*rows;
       } else if(fRaster==="diagonal"){
-        sk=cols*rows; // cell centers only
+        sk=cols*rows;
       }
     }
+    // Kreuze90 only for gitter (without explicit seilkreuztyp)
+    if(fRaster==="gitter") totalKreuze90+=(cols-1)*(rows-1);
     totalAnker+=anker;totalSK+=sk;totalArea+=fw*fh;
-    return{name:f.name,breite:fw,hoehe:fh,area:fw*fh,anker,sk,cols:cols+1,rows:rows+1};
+    return{name:f.name,breite:fw,hoehe:fh,area:fw*fh,anker,sk,cols:cols+1,rows:rows+1,sV,sH,sD};
   });
+  const totalSeilGes=(totalSeilV+totalSeilH+totalSeilD)*1.1;
   const setInfo=SETS.find(s=>s.id===d.produkt);
   const skInfo=SEILKREUZE.find(s=>s.id===matSK);
+  // Build stückliste items dynamically
+  const items=[];
+  items.push([setInfo?setInfo.l:"EJOT Iso-Bar ECO (Ankerpunkt)",String(totalAnker),"Stk",setInfo?`Art. ${setInfo.art}`:""]);
+  if(anyV) items.push([`Seil Edelstahl V4A ø4mm – vertikal`,totalSeilV.toFixed(1),"m",`${fassaden.length>1?"alle Fassaden kumuliert":"vertikal"}`]);
+  if(anyH) items.push([`Seil Edelstahl V4A ø4mm – horizontal`,totalSeilH.toFixed(1),"m",`${fassaden.length>1?"alle Fassaden kumuliert":"horizontal"}`]);
+  if(anyD) items.push(["Seil Edelstahl V4A ø4mm – diagonal",totalSeilD.toFixed(1),"m","2× pro Feld"]);
+  items.push(["Seil gesamt (alle Richtungen)",totalSeilGes.toFixed(1),"m","inkl. Verschnitt ca. +10 %"]);
+  if(totalSK>0&&skInfo) items.push([`${skInfo.l}`,String(totalSK),"Stk",skInfo.art?`Art. ${skInfo.art}`:"alle Fassaden"]);
+  items.push(["Endkappen / Seilhülsen",String(totalAnker*2),"Stk","2 pro Ankerpunkt"]);
+
   return(<div style={{background:WH}}>
     <div style={{borderTop:`3px solid ${R}`,padding:"16px 24px"}}>
       <PageHead title="Materialbedarfsermittlung" subtitle="Überschlägige Mengenermittlung auf Basis der Vorbemessung"/>
@@ -536,16 +556,7 @@ function MaterialSection({d,mat}){
           <thead><tr>{["Pos.","Bezeichnung","Menge","Einheit","Hinweis"].map(h=>
             <th key={h} style={{background:BG,fontWeight:700,padding:"5px 8px",textAlign:"left",borderBottom:`1px solid ${BD}`,fontSize:10.5}}>{h}</th>)}</tr></thead>
           <tbody>
-            {[
-              ["1",setInfo?setInfo.l:"EJOT Iso-Bar ECO (Ankerpunkt)",String(totalAnker||mat.pts),"Stk",setInfo?`Art. ${setInfo.art}`:""],
-              ...(mat.hasV?[[null,`Seil Edelstahl V4A ø4mm – vertikal`,mat.seilV,"m",`${mat.cols} Stränge × ${d.fassadenhoehe||"–"} m`]]:[]),
-              ...(mat.hasH?[[null,`Seil Edelstahl V4A ø4mm – horizontal`,mat.seilH,"m",`${mat.rows} Stränge × ${d.fassadenlaenge||"–"} m`]]:[]),
-              ...(mat.hasD?[[null,"Seil Edelstahl V4A ø4mm – diagonal",mat.seilD,"m","2× pro Feld"]]:[]),
-              [null,"Seil gesamt (alle Richtungen)",mat.seilGes,"m","inkl. Verschnitt ca. +10 %"],
-              ...(totalSK>0&&skInfo?[[null,`${skInfo.l}`,String(totalSK),"Stk",skInfo.art?`Art. ${skInfo.art}`:"alle Fassaden"]]:[]),
-              ...(totalSK===0&&mat.kreuze90>0?[[null,"Seilkreuz 90° (Kreuzungspunkte)",String(mat.kreuze90),"Stk","nur bei Gitter"]]:[]),
-              [null,"Endkappen / Seilhülsen",String(mat.endkappen),"Stk","2 pro Ankerpunkt"],
-            ].map(([p,b,m,e,h],idx)=><tr key={idx}>
+            {items.map(([b,m,e,h],idx)=><tr key={idx}>
               <td style={{padding:"4px 8px",borderBottom:`1px solid ${BD}`,fontWeight:700,color:R,width:30}}>{idx+1}</td>
               <td style={{padding:"4px 8px",borderBottom:`1px solid ${BD}`}}>{b}</td>
               <td style={{padding:"4px 8px",borderBottom:`1px solid ${BD}`,fontWeight:700,textAlign:"right"}}>{m}</td>
