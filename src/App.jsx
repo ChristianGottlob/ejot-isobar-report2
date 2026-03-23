@@ -601,10 +601,17 @@ export default function App(){
     setExporting(sectionId);
     try{
       const el=ref.current;
-      // Temporarily move element on-screen for html2canvas to capture properly
-      const origStyle=el.parentElement.style.cssText;
-      el.parentElement.style.cssText="position:absolute;left:0;top:0;width:880px;z-index:9999;background:#FFF;font-family:'Segoe UI',system-ui,sans-serif;";
-      await new Promise(r=>setTimeout(r,400));
+      // Move the outer off-screen wrapper AND the section itself on-screen
+      const outerWrapper=el.closest('[data-pdf-offscreen]');
+      const origOuterStyle=outerWrapper?outerWrapper.style.cssText:"";
+      const origParentStyle=el.parentElement.style.cssText;
+      
+      if(outerWrapper) outerWrapper.style.cssText="position:absolute;left:0;top:0;width:880px;z-index:9999;overflow:visible;pointer-events:none;";
+      el.parentElement.style.cssText="width:880px;background:#FFF;font-family:'Segoe UI',system-ui,sans-serif;";
+      el.style.width="880px";
+      el.style.background="#FFF";
+      
+      await new Promise(r=>setTimeout(r,500));
       
       const canvas=await html2canvas(el,{
         scale:4,
@@ -614,10 +621,13 @@ export default function App(){
         windowWidth:920,
         imageTimeout:0,
         removeContainer:false,
+        scrollX:0,
+        scrollY:0,
       });
       
       // Restore off-screen position
-      el.parentElement.style.cssText=origStyle;
+      if(outerWrapper) outerWrapper.style.cssText=origOuterStyle;
+      el.parentElement.style.cssText=origParentStyle;
       
       const imgData=canvas.toDataURL("image/png",1.0);
       const imgW=canvas.width;
@@ -915,7 +925,7 @@ export default function App(){
       </div>
 
 {/* ═══ OFF-SCREEN PDF RENDER CONTAINERS ═══ */}
-<div style={{position:"absolute",left:"-9999px",top:0,overflow:"hidden",pointerEvents:"none"}}>
+<div data-pdf-offscreen="true" style={{position:"absolute",left:"-9999px",top:0,overflow:"visible",pointerEvents:"none"}}>
   <div style={{width:880,background:WH,fontFamily:"'Segoe UI',system-ui,sans-serif"}}>
     <div ref={previewRef} style={{background:WH,width:880,padding:0}}><PreviewSection d={d} maxNw={maxNw} mat={mat}/></div>
   </div>
