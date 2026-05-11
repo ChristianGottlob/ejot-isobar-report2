@@ -362,9 +362,9 @@ function PreviewSection({d,maxNw,mat}){
           <NwBar label="Zug, N_Ed,z / N_Rd" value={d.nw_zug}/><NwBar label="Druck, N_Ed,d / N_Rd,d" value={d.nw_druck}/>
           <NwBar label="Quer, V_Ed / V_Rd" value={d.nw_quer}/><NwBar label="Kombination (max)" value={d.nw_kombi}/>
           <div style={{fontSize:8.5,color:GL,marginTop:8}}>Zulassungsbezug: Z-21.8-2083</div></div>
-        <div style={{flex:1,border:`1px solid ${BD}`,borderRadius:4,padding:12}}>
+        <div style={{flex:1.4,border:`1px solid ${BD}`,borderRadius:4,padding:12}}>
           <div style={{fontWeight:700,fontSize:10.5,textTransform:"uppercase",letterSpacing:.5,marginBottom:6,color:BK}}>Raster ({RASTER.find(r=>r.id===prvRaster)?.l})</div>
-          <RasterSVG LH={prvLH} LV={prvLV} fW={prvW} fH={prvH} rasterType={prvRaster} seilkreuztyp={prvSK} size={240}/>
+          <RasterSVG LH={prvLH} LV={prvLV} fW={prvW} fH={prvH} rasterType={prvRaster} seilkreuztyp={prvSK} size={400}/>
           <div style={{fontSize:8.5,color:GL,marginTop:4}}>Schematisch – ersetzt keine Ausführungsplanung.</div></div></div>
       <div style={{border:`1px solid ${BD}`,borderRadius:4,padding:12}}>
         <div style={{fontWeight:700,fontSize:10.5,textTransform:"uppercase",letterSpacing:.5,marginBottom:6,color:BK}}>Lasten &amp; Widerstände</div>
@@ -525,8 +525,8 @@ function MaterialSection({d,mat}){
           <KV l="Seilführung" v={RASTER.find(r=>r.id===matRaster)?.l}/>
           <KV l="Seilkreuztyp" v={(SEILKREUZE.find(s=>s.id===matSK)||{}).l||"–"}/>
           {setInfo&&<KV l="SET Produkt" v={setInfo.l} b/>}</div>
-        <div style={{flex:1}}>
-          <RasterSVG LH={matLH} LV={matLV} fW={matW} fH={matH} rasterType={matRaster} seilkreuztyp={matSK} size={240}/></div></div>
+        <div style={{flex:1.5}}>
+          <RasterSVG LH={matLH} LV={matLV} fW={matW} fH={matH} rasterType={matRaster} seilkreuztyp={matSK} size={420}/></div></div>
 
       {/* Per-facade breakdown */}
       {fassaden.length>1&&<div style={{border:`1px solid ${BD}`,borderRadius:4,padding:12,marginBottom:14}}>
