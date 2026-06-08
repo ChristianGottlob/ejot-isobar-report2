@@ -1,0 +1,119 @@
+// Shared geometry / annotation helpers for plan-based rendering.
+
+export function nid() { return Math.random().toString(36).slice(2, 9); }
+
+// Normalize an annotations payload into the canonical form
+//   { facades: [...], windows: [...], doors: [...], scale: {p1,p2,m}|null }
+// Accepts the legacy single-facade form  { facade: {x,y,w,h}, ... }  and
+// migrates it transparently.  `scale` is an optional user-defined ruler:
+// the line from p1 to p2 (in plan-pixel coords) corresponds to `m` meters,
+// giving us pxPerM = hypot(p2-p1) / m.  When absent we fall back to the
+// bbox-vs-typed-breite assumption.
+export function normalizeAnnotations(a) {
+  if (!a) return { facades: [], windows: [], doors: [], scale: null };
+  const wins = Array.isArray(a.windows) ? a.windows : [];
+  const drs  = Array.isArray(a.doors)   ? a.doors   : [];
+  const scale = (a.scale && a.scale.p1 && a.scale.p2 && Number(a.scale.m) > 0) ? a.scale : null;
+  if (Array.isArray(a.facades)) {
+    return {
+      facades: a.facades.map(f => f.id ? f : { ...f, id: nid() }),
+      windows: wins,
+      doors:   drs,
+      scale,
+    };
+  }
+  if (a.facade) {
+    return {
+      facades: [{ ...a.facade, id: a.facade.id || nid() }],
+      windows: wins,
+      doors:   drs,
+      scale,
+    };
+  }
+  return { facades: [], windows: wins, doors: drs, scale };
+}
+
+// Compute pxPerM (uniform — single value for X and Y).  Prefers explicit
+// scale; falls back to bbox-vs-typed-dimensions; returns null if neither
+// is determinable.
+export function pxPerMeter(ann, bbox, fwM, fhM) {
+  if (ann?.scale?.p1 && ann?.scale?.p2 && ann.scale.m > 0) {
+    const dx = ann.scale.p2.x - ann.scale.p1.x;
+    const dy = ann.scale.p2.y - ann.scale.p1.y;
+    const px = Math.hypot(dx, dy);
+    return px > 0 ? px / ann.scale.m : null;
+  }
+  if (!bbox || bbox.w <= 0 || bbox.h <= 0) return null;
+  const sx = fwM > 0 ? bbox.w / fwM : null;
+  const sy = fhM > 0 ? bbox.h / fhM : null;
+  // Average if both available, else pick whichever exists
+  if (sx && sy) return (sx + sy) / 2;
+  return sx || sy;
+}
+
+export function pointInRect(p, r, slack = 0) {
+  return !!r && p.x >= r.x - slack && p.x <= r.x + r.w + slack &&
+                p.y >= r.y - slack && p.y <= r.y + r.h + slack;
+}
+export function pointInAny(p, rects, slack = 0) {
+  for (const r of rects) if (pointInRect(p, r, slack)) return true;
+  return false;
+}
+
+// Smallest axis-aligned bbox enclosing all rects.  Returns null for empty.
+export function unionBBox(rects) {
+  if (!rects || rects.length === 0) return null;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const r of rects) {
+    if (r.x < minX) minX = r.x;
+    if (r.y < minY) minY = r.y;
+    if (r.x + r.w > maxX) maxX = r.x + r.w;
+    if (r.y + r.h > maxY) maxY = r.y + r.h;
+  }
+  return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+}
+
+// Selection key helpers (stable string ids for items)
+export function selKey(item) {
+  return item.kind === "facade" ? `facade:${item.id || "0"}` : `${item.kind}:${item.id}`;
+}
+
+// Axis-aligned intersection area between two rectangles (0 if disjoint).
+export function rectIntersectionArea(a, b) {
+  if (!a || !b) return 0;
+  const x1 = Math.max(a.x, b.x);
+  const y1 = Math.max(a.y, b.y);
+  const x2 = Math.min(a.x + a.w, b.x + b.w);
+  const y2 = Math.min(a.y + a.h, b.y + b.h);
+  if (x2 <= x1 || y2 <= y1) return 0;
+  return (x2 - x1) * (y2 - y1);
+}
+
+// Sample a line segment and report the pixel-length whose midpoint lies
+// inside any greening rect AND outside every exclusion rect.  Used by the
+// plan-aware material calc to estimate how much of each cable runs over
+// actual greening (not over windows or beyond the wall).
+export function lineInsideLengthPx(x1, y1, x2, y2, greenings, exclusions, samples = 100) {
+  const dx = x2 - x1, dy = y2 - y1;
+  const len = Math.hypot(dx, dy);
+  if (len < 1) return 0;
+  let insideCount = 0;
+  for (let i = 0; i <= samples; i++) {
+    const t = i / samples;
+    const p = { x: x1 + dx * t, y: y1 + dy * t };
+    if (pointInAny(p, greenings) && !pointInAny(p, exclusions)) insideCount++;
+  }
+  return (insideCount / (samples + 1)) * len;
+}
+
+// Net greening area in pixel² = Σ greening − Σ (greening ∩ exclusion).
+// Does NOT account for overlap between greening rects (assumes user marks
+// non-overlapping wall areas, which is the natural workflow).
+export function greeningAreaPx(greenings, exclusions) {
+  let total = 0;
+  for (const g of greenings) {
+    total += g.w * g.h;
+    for (const e of exclusions) total -= rectIntersectionArea(g, e);
+  }
+  return Math.max(0, total);
+}

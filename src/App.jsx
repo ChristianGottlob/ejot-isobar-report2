@@ -1,6 +1,11 @@
 import { useState, useRef, useCallback, useMemo, useEffect } from "react";
 import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
+import { extractPdfText, buildDocument, loadPlanImage } from "./pdfExtract";
+import RealisticFacade from "./RealisticFacade";
+import RasterOverlay from "./RasterOverlay";
+import PlanAnnotator from "./PlanAnnotator";
+import { normalizeAnnotations, unionBBox, pointInAny, greeningAreaPx, lineInsideLengthPx, pxPerMeter } from "./planUtils";
 
 // ─── Colors ─────────────────────────────────────────────
 const R="#C8102E",RL="#C8102E10",RM="#C8102E28",BK="#1A1A1A",DK="#333",GY="#666",GL="#999",BG="#F7F6F4",BD="#D8D6D4",WH="#FFF",GN="#2E7D32",AM="#E68A00";
@@ -98,44 +103,55 @@ const UNTERGRUENDE=[
   {id:"custom",l:"– Manuell –",typ:"custom",druckf:"",rohd:"",nrk:"",vrk:"",gamma:""},
 ];
 
-// ─── PDF Parser ─────────────────────────────────────────
-function parsePdf(t){
-  const d={bauvorhaben:"",ort_plz:"",datum:new Date().toLocaleDateString("de-DE"),dokNr:`VB-ISO-${new Date().toISOString().slice(0,10).replace(/-/g,"")}-001`,version:"V1.0",bearbeiter:"",
-    produkt:"eco260",verankerungsgrund:"ks_vollstein",wdvs_dicke:"",gebaeudehoehe:"",gelaendekategorie:"",druckfestigkeit:"12",rohdichte:"1.8",verankerungstiefe:"",dicke_klebschicht:"10",
-    pflanze_botanisch:"",pflanze_deutsch:"",lastklasse:"3",seilfuehrung:"gitter",seilkreuztyp:"ohne",psi:"0.60",
-    ws:"",nek:"",ned_z:"",ned_d:"",ved:"",vrd:"",LH:"0.9",LV:"0.9",stk_m2:"",
-    nw_zug:"",nw_druck:"",nw_quer:"",nw_kombi:"",
-    fassadenlaenge:"10",fassadenhoehe:"",windlastzone:"",geometrie_art:"",
-    fassaden:[{name:"Fassade 1",breite:"10",hoehe:"6"}]};
-  const f=(p)=>{const m=t.match(new RegExp(p,"im"));return m?m[1].trim():""};
-  d.bauvorhaben=f("Bauvorhaben\\s+(.+?)(?:\\s{2,}|$)");
-  d.ort_plz=f("Ort\\s*/\\s*PLZ\\s+(.+?)(?:\\s{2,}|$)");
-  d.datum=f("Datum\\s+(\\d+\\.\\d+\\.\\d+)")||d.datum;
-  d.verankerungsgrund=f("Verankerungsgrund\\s+(.+?)(?:\\s{2,}|$)");
-  d.wdvs_dicke=f("WDVS-?Dicke\\s+([\\d.]+)");
-  d.gebaeudehoehe=f("Geb[aä]udeh[oö]he\\s+([\\d.]+)");
-  d.produkt=f("Produkt\\s+(.+?)(?:\\s{2,}|$)")||d.produkt;
-  d.LH=f("horizontaler?\\s+Abstand\\s*\\(LH\\)\\s+([\\d.]+)");
-  d.LV=f("vertikaler?\\s+Abstand\\s*\\(LV\\)\\s+([\\d.]+)");
-  d.stk_m2=f("ISO-Bar\\s+ECO\\s+pro\\s+m.\\s+([\\d.]+)");
-  d.nw_zug=f("Zug,\\s*N[^\\n]*(\\d+\\.?\\d*)\\s*$");
-  d.nw_druck=f("Druck,\\s*N[^\\n]*(\\d+\\.?\\d*)\\s*$");
-  d.nw_quer=f("Quer,\\s*V[^\\n]*(\\d+\\.?\\d*)\\s*$");
-  d.nw_kombi=f("Kombination[^\\n]*(\\d+\\.?\\d*)\\s*$");
-  d.lastklasse=f("Lastklasse\\s+(\\d)")||"3";
-  d.psi=f("[ψΨ][^\\n]*(\\d+\\.\\d+)")||"0.60";
-  d.ws=f("ws\\s*\\(Windsog\\)[^\\n]*(\\d+\\.?\\d*)");
-  d.nek=f("Nek\\s*\\(Winddruck\\)[^\\n]*(\\d+\\.?\\d*)");
-  d.ned_z=f("Ned,z\\s*\\(Zug\\)[^\\n]*(\\d+\\.?\\d*)");
-  d.ned_d=f("Ned,d\\s*\\(Druck\\)[^\\n]*(\\d+\\.?\\d*)");
-  d.ved=f("VEd\\s*\\(Quer\\)[^\\n]*(\\d+\\.?\\d*)");
-  d.vrd=f("VRd\\s*\\(Quertrag\\.?\\)[^\\n]*(\\d+\\.?\\d*)");
-  d.windlastzone=f("Windlastzone\\s+(.+?)\\s*$");
-  d.gelaendekategorie=f("Gel[aä]ndekategorie\\s+(.+?)\\s*$");
-  d.geometrie_art=f("Geometrie\\s*/\\s*Begr[uü]nungsart\\s+(.+?)\\s*$");
-  d.fassadenhoehe=d.gebaeudehoehe||"3";
-  return d;
-}
+// ─── New enumerated option catalogs (more dropdowns) ────
+const WINDLASTZONEN=[
+  {v:"1",l:"WZ 1 – Binnenland (v_b,0 = 22,5 m/s)"},
+  {v:"2",l:"WZ 2 – Binnenland-Küste (v_b,0 = 25,0 m/s)"},
+  {v:"3",l:"WZ 3 – Küstennah (v_b,0 = 27,5 m/s)"},
+  {v:"4",l:"WZ 4 – Küste / Inseln (v_b,0 = 30,0 m/s)"},
+];
+const GELAENDEKATEGORIEN=[
+  {v:"I",  l:"GK I – Offene See, Seen"},
+  {v:"II", l:"GK II – Offenes Gelände, vereinzelte Hindernisse"},
+  {v:"III",l:"GK III – Vorstadt, Wald, dichte Bebauung"},
+  {v:"IV", l:"GK IV – Stadtgebiete mit ≥15 % bebauter Fläche"},
+  {v:"BV", l:"Bin/Vorland-Mischprofil (BVII)"},
+];
+const VERSIONEN=[
+  {v:"V1.0",l:"V1.0 – Erstausgabe"},
+  {v:"V1.1",l:"V1.1 – kleine Korrektur"},
+  {v:"V2.0",l:"V2.0 – nach Statik"},
+  {v:"V2.1",l:"V2.1 – Revision Material"},
+  {v:"V3.0",l:"V3.0 – Ausführungsfreigabe"},
+];
+const LASTKLASSEN=[
+  {v:"1",l:"LK 1 – sehr leicht"},
+  {v:"2",l:"LK 2 – leicht"},
+  {v:"3",l:"LK 3 – mittel (Standard)"},
+  {v:"4",l:"LK 4 – schwer"},
+  {v:"5",l:"LK 5 – sehr schwer"},
+];
+const WDVS_DICKEN=[
+  {v:"",l:"– keine WDVS-Anwendung –"},
+  {v:"60",l:"60 mm"},{v:"80",l:"80 mm"},{v:"100",l:"100 mm"},
+  {v:"120",l:"120 mm"},{v:"140",l:"140 mm"},{v:"160",l:"160 mm"},
+  {v:"180",l:"180 mm"},{v:"200",l:"200 mm"},{v:"220",l:"220 mm"},
+  {v:"240",l:"240 mm"},{v:"260",l:"260 mm"},{v:"280",l:"280 mm"},{v:"300",l:"300 mm"},
+];
+const KLEBSCHICHT_DICKEN=[
+  {v:"5",l:"5 mm"},{v:"8",l:"8 mm"},{v:"10",l:"10 mm (Standard)"},
+  {v:"15",l:"15 mm"},{v:"20",l:"20 mm"},{v:"25",l:"25 mm"},
+];
+const GEOMETRIE_ARTEN=[
+  {v:"flaechig",l:"Flächige Begrünung (≤ 2 m breit)"},
+  {v:"schmal",  l:"Schmal flächig (≤ 1 m)"},
+  {v:"linear",  l:"Linear (≤ 0,7 m)"},
+];
+const FOLIAGE_MATURITY=[
+  {v:"young",l:"Jung (1–3 Jahre)"},
+  {v:"mature",l:"Etabliert (4–7 Jahre)"},
+  {v:"dense",l:"Dicht ausgewachsen (8+ Jahre)"},
+];
 
 // ─── Material calculator ────────────────────────────────
 function calcMaterial(d){
@@ -163,6 +179,156 @@ function calcMaterial(d){
 function pf(v){return parseFloat(String(v).replace(",","."));}
 function fm(v,d=2){return v?Number(v).toFixed(d).replace(".",","):"–";}
 
+// ── German number formatting via Intl (handles thousands separator + decimal comma)
+const _NF0 = new Intl.NumberFormat("de-DE", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+const _NF1 = new Intl.NumberFormat("de-DE", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const _NF2 = new Intl.NumberFormat("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+function fmtInt(n)   { return Number.isFinite(n) ? _NF0.format(Math.round(n)) : "–"; }
+function fmtArea(n)  { return Number.isFinite(n) ? _NF1.format(n) + " m²" : "–"; }
+function fmtLen(n)   { return Number.isFinite(n) ? _NF1.format(n) + " m"  : "–"; }
+function fmtDec(n, d = 2) { return Number.isFinite(n) ? (d === 1 ? _NF1 : d === 0 ? _NF0 : _NF2).format(n) : "–"; }
+
+// ── Per-facade material stats ─────────────────────────────
+// Returns:  {name, breite, hoehe, area_brutto, area_excl, area,
+//            anker, sk, cols, rows, sV, sH, sD, fromPlan}
+// If the facade has a plan + at least one annotated greening rect, the
+// numbers are derived from the plan (scaled by the user's typed breite/höhe).
+// Windows/doors marked on the plan are deducted from anchors, cables, area.
+// Otherwise: simple rectangular calc with typed breite × höhe.
+function calcFacadeStats(f, d) {
+  const lh_m = pf(f.lh) || pf(d.LH) || 0.9;
+  const lv_m = pf(f.lv) || pf(d.LV) || 0.9;
+  const raster = f.seilfuehrung || d.seilfuehrung || "gitter";
+  const sk = f.seilkreuztyp || d.seilkreuztyp || "ohne";
+  const fw_m = pf(f.breite) || 0;
+  const fh_m = pf(f.hoehe) || 0;
+
+  const ann = normalizeAnnotations(f.annotations);
+  const havePlan = !!(f.plan && ann.facades.length > 0);
+
+  const hasV = raster === "gitter" || raster === "vertikal";
+  const hasH = raster === "gitter" || raster === "horizontal";
+  const hasD = raster === "diagonal";
+
+  if (!havePlan) {
+    const cols = Math.max(0, Math.floor(fw_m / lh_m));
+    const rows = Math.max(0, Math.floor(fh_m / lv_m));
+    const anker = (cols + 1) * (rows + 1);
+    const sV = hasV ? (cols + 1) * fh_m : 0;
+    const sH = hasH ? (rows + 1) * fw_m : 0;
+    const sD = hasD ? cols * rows * Math.sqrt(lh_m * lh_m + lv_m * lv_m) * 2 : 0;
+    let skCount = 0;
+    if (sk !== "ohne") {
+      if (raster === "gitter") skCount = cols * rows + cols * (rows + 1) + (cols + 1) * rows;
+      else if (raster === "diagonal") skCount = cols * rows;
+    }
+    return {
+      name: f.name, breite: fw_m, hoehe: fh_m,
+      area_brutto: fw_m * fh_m,
+      area_excl: 0,
+      area: fw_m * fh_m,
+      anker, sk: skCount,
+      cols: cols + 1, rows: rows + 1,
+      sV, sH, sD,
+      fromPlan: false,
+    };
+  }
+
+  // Plan-aware.  Prefer explicit scale (calibrated by user) over the
+  // bbox-vs-typed-breite assumption — that's the only way the resulting
+  // anchor count and cable lengths are trustworthy when the user marks
+  // only part of the facade.
+  const bbox = unionBBox(ann.facades);
+  const pxPerMUniform = pxPerMeter(ann, bbox, fw_m, fh_m);  // single value
+  const haveCalibratedScale = !!ann.scale;
+  // When calibrated, both axes use the same pxPerM (uniform).  When falling
+  // back to bbox, use per-axis ratios so the grid fits the marked region.
+  const pxPerMx = haveCalibratedScale ? pxPerMUniform : (fw_m > 0 ? bbox.w / fw_m : 1);
+  const pxPerMy = haveCalibratedScale ? pxPerMUniform : (fh_m > 0 ? bbox.h / fh_m : 1);
+  if (!pxPerMx || !pxPerMy) {
+    // No usable scale — return zeros so the user sees "calibration missing"
+    return {
+      name: f.name, breite: fw_m, hoehe: fh_m,
+      area_brutto: 0, area_excl: 0, area: 0,
+      anker: 0, sk: 0, cols: 0, rows: 0,
+      sV: 0, sH: 0, sD: 0,
+      fromPlan: true,
+    };
+  }
+  const cellWpx = lh_m * pxPerMx;
+  const cellHpx = lv_m * pxPerMy;
+  const cols = Math.max(0, Math.floor(fw_m / lh_m));
+  const rows = Math.max(0, Math.floor(fh_m / lv_m));
+  const totalGridW = cols * cellWpx;
+  const totalGridH = rows * cellHpx;
+  const ax0 = bbox.x + (bbox.w - totalGridW) / 2;
+  const ay0 = bbox.y + (bbox.h - totalGridH) / 2;
+  const exclusions = [...ann.windows, ...ann.doors];
+
+  // Anchor count: include if inside any greening AND outside every exclusion.
+  // Same slack policy as the renderer.
+  let anker = 0;
+  for (let c = 0; c <= cols; c++) for (let r = 0; r <= rows; r++) {
+    const p = { x: ax0 + c * cellWpx, y: ay0 + r * cellHpx };
+    if (!pointInAny(p, ann.facades, 1)) continue;
+    if (pointInAny(p, exclusions, -2)) continue;
+    anker++;
+  }
+
+  // Cable lengths in meters (sampled, then divided by px/m)
+  let sV = 0, sH = 0, sD = 0;
+  if (hasV) for (let c = 0; c <= cols; c++) {
+    sV += lineInsideLengthPx(ax0 + c * cellWpx, ay0, ax0 + c * cellWpx, ay0 + totalGridH,
+                             ann.facades, exclusions) / pxPerMy;
+  }
+  if (hasH) for (let r = 0; r <= rows; r++) {
+    sH += lineInsideLengthPx(ax0, ay0 + r * cellHpx, ax0 + totalGridW, ay0 + r * cellHpx,
+                             ann.facades, exclusions) / pxPerMx;
+  }
+  if (hasD) {
+    const diagPx = Math.sqrt(cellWpx * cellWpx + cellHpx * cellHpx);
+    const diagM  = Math.sqrt(lh_m * lh_m + lv_m * lv_m);
+    for (let c = 0; c < cols; c++) for (let r = 0; r < rows; r++) {
+      const len1 = lineInsideLengthPx(ax0 + c * cellWpx, ay0 + r * cellHpx,
+                                       ax0 + (c + 1) * cellWpx, ay0 + (r + 1) * cellHpx,
+                                       ann.facades, exclusions);
+      const len2 = lineInsideLengthPx(ax0 + (c + 1) * cellWpx, ay0 + r * cellHpx,
+                                       ax0 + c * cellWpx, ay0 + (r + 1) * cellHpx,
+                                       ann.facades, exclusions);
+      sD += ((len1 + len2) / diagPx) * diagM;
+    }
+  }
+
+  // Seilkreuze: filter their positions through greening minus exclusions
+  let skCount = 0;
+  if (sk !== "ohne") {
+    const skPts = [];
+    if (raster === "gitter") {
+      for (let c = 0; c < cols; c++) for (let r = 0; r < rows; r++) skPts.push({ x: ax0 + (c + 0.5) * cellWpx, y: ay0 + (r + 0.5) * cellHpx });
+      for (let c = 0; c < cols; c++) for (let r = 0; r <= rows; r++) skPts.push({ x: ax0 + (c + 0.5) * cellWpx, y: ay0 + r * cellHpx });
+      for (let c = 0; c <= cols; c++) for (let r = 0; r < rows; r++) skPts.push({ x: ax0 + c * cellWpx, y: ay0 + (r + 0.5) * cellHpx });
+    } else if (raster === "diagonal") {
+      for (let c = 0; c < cols; c++) for (let r = 0; r < rows; r++) skPts.push({ x: ax0 + (c + 0.5) * cellWpx, y: ay0 + (r + 0.5) * cellHpx });
+    }
+    skCount = skPts.filter(p => pointInAny(p, ann.facades, 1) && !pointInAny(p, exclusions, -2)).length;
+  }
+
+  const area_brutto_px = ann.facades.reduce((s, g) => s + g.w * g.h, 0);
+  const greening_px = greeningAreaPx(ann.facades, exclusions);
+  const denom = pxPerMx * pxPerMy;
+  const area_brutto = denom > 0 ? area_brutto_px / denom : 0;
+  const area_netto  = denom > 0 ? greening_px / denom : 0;
+
+  return {
+    name: f.name, breite: fw_m, hoehe: fh_m,
+    area_brutto, area_excl: Math.max(0, area_brutto - area_netto), area: area_netto,
+    anker, sk: skCount,
+    cols: cols + 1, rows: rows + 1,
+    sV, sH, sD,
+    fromPlan: true,
+  };
+}
+
 // ─── Components ─────────────────────────────────────────
 function Sub({children:s}){
   if(typeof s!=="string")return s;
@@ -174,140 +340,70 @@ function Sub({children:s}){
   return <>{p}</>;
 }
 
-function RasterSVG({LH,LV,fW,fH,rasterType,seilkreuztyp="ohne",skInterval=1,size=300}){
-  const lh=pf(LH)||.9,lv=pf(LV)||.9,fw=pf(fW)||3,fh=pf(fH)||3;
-  const cols=Math.min(Math.max(1,Math.floor(fw/lh)),12),rows=Math.min(Math.max(1,Math.floor(fh/lv)),12);
-  const pad=42,inner=size-2*pad,cell=Math.min(inner/cols,inner/rows);
-  const gw=cell*cols,gh=cell*rows,ox=pad+(inner-gw)/2,oy=pad+(inner-gh)/2;
-  const BL="#1565C0";
-  const hasSK=seilkreuztyp&&seilkreuztyp!=="ohne";
-  const halfCell=cell/2;
-  
-  // In the real system, seils run between anchors. Seilkreuze sit on the seil
-  // at every crossing point. For a gitter, each cell of the main raster gets
-  // one additional seil between each pair of anchors, creating sub-crossings.
-  // The Seilkreuze are at those sub-crossings (center of each cell).
-  
-  // For gitter with Seilkreuze: we draw a finer sub-grid.
-  // Each main cell gets subdivided: seils run from anchor to anchor,
-  // and the Seilkreuz sits where H and V seils cross between anchors.
-  const lines=[];
-  const addLine=(x1,y1,x2,y2,c="#AAA",w=.7)=>lines.push({x1,y1,x2,y2,c,w});
-
-  if(rasterType==="gitter"||rasterType==="vertikal"){
-    for(let c=0;c<=cols;c++) addLine(ox+c*cell,oy,ox+c*cell,oy+gh,"#BBB",.8);
-    // If Seilkreuze: add intermediate vertical seils through cell centers
-    if(hasSK&&(rasterType==="gitter"))
-      for(let c=0;c<cols;c++) addLine(ox+(c+0.5)*cell,oy,ox+(c+0.5)*cell,oy+gh,"#D0D0D0",.5);
-  }
-  if(rasterType==="gitter"||rasterType==="horizontal"){
-    for(let r=0;r<=rows;r++) addLine(ox,oy+r*cell,ox+gw,oy+r*cell,"#BBB",.8);
-    // If Seilkreuze: add intermediate horizontal seils through cell centers
-    if(hasSK&&(rasterType==="gitter"))
-      for(let r=0;r<rows;r++) addLine(ox,oy+(r+0.5)*cell,ox+gw,oy+(r+0.5)*cell,"#D0D0D0",.5);
-  }
-  // Diagonal lines (only diagonal mode)
-  if(rasterType==="diagonal"){
-    for(let c=0;c<cols;c++)for(let r=0;r<rows;r++){
-      addLine(ox+c*cell,oy+r*cell,ox+(c+1)*cell,oy+(r+1)*cell,"#C0C0C0",.5);
-      addLine(ox+(c+1)*cell,oy+r*cell,ox+c*cell,oy+(r+1)*cell,"#C0C0C0",.5);
-    }
-  }
-  
-  // Anchor points (Iso-Bar ECO) at main grid nodes
-  const anchors=[];
-  for(let c=0;c<=cols;c++)for(let r=0;r<=rows;r++)
-    anchors.push({x:ox+c*cell,y:oy+r*cell});
-  
-  // Seilkreuz positions
-  const skPts=[];
-  if(hasSK){
-    if(rasterType==="gitter"){
-      // Seilkreuze at ALL sub-grid crossings that are NOT anchor points:
-      // 1. Center of each cell (where intermediate H and V seils cross)
-      for(let c=0;c<cols;c++)for(let r=0;r<rows;r++)
-        skPts.push({x:ox+(c+0.5)*cell,y:oy+(r+0.5)*cell});
-      // 2. Mid-points on horizontal seils (between two horizontal anchors)
-      for(let c=0;c<cols;c++)for(let r=0;r<=rows;r++)
-        skPts.push({x:ox+(c+0.5)*cell,y:oy+r*cell});
-      // 3. Mid-points on vertical seils (between two vertical anchors)
-      for(let c=0;c<=cols;c++)for(let r=0;r<rows;r++)
-        skPts.push({x:ox+c*cell,y:oy+(r+0.5)*cell});
-    } else if(rasterType==="diagonal"){
-      // Diagonal: Seilkreuze at cell centers where diagonals cross
-      for(let c=0;c<cols;c++)for(let r=0;r<rows;r++)
-        skPts.push({x:ox+(c+0.5)*cell,y:oy+(r+0.5)*cell});
-    }
-  }
-
-  const numAnker=anchors.length;
-  const numSK=skPts.length;
-  const aR=Math.max(3,Math.min(5.5,cell*0.13));
-  const sqS=Math.max(2.5,Math.min(4.5,cell*0.10));
-
-  const DH=(x1,x2,y,l)=><g key={`h${l}`}><line x1={x1} y1={y} x2={x2} y2={y} stroke={BK} strokeWidth=".5"/><line x1={x1} y1={y-3} x2={x1} y2={y+3} stroke={BK} strokeWidth=".5"/><line x1={x2} y1={y-3} x2={x2} y2={y+3} stroke={BK} strokeWidth=".5"/><text x={(x1+x2)/2} y={y+10} textAnchor="middle" fontSize="8" fill={BK} fontFamily="sans-serif">{l}</text></g>;
-  const DV=(x,y1,y2,l)=><g key={`v${l}`}><line x1={x} y1={y1} x2={x} y2={y2} stroke={BK} strokeWidth=".5"/><line x1={x-3} y1={y1} x2={x+3} y2={y1} stroke={BK} strokeWidth=".5"/><line x1={x-3} y1={y2} x2={x+3} y2={y2} stroke={BK} strokeWidth=".5"/><text x={x-4} y={(y1+y2)/2} textAnchor="end" fontSize="8" fill={BK} fontFamily="sans-serif" transform={`rotate(-90,${x-4},${(y1+y2)/2})`}>{l}</text></g>;
-
-  return(<svg viewBox={`0 0 ${size} ${size}`} width="100%" style={{maxWidth:size}}>
-    {/* Seil lines */}
-    {lines.map((l,i)=><line key={i} x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2} stroke={l.c} strokeWidth={l.w}/>)}
-    {/* Seilkreuze (blue squares) — drawn UNDER anchors */}
-    {skPts.map((p,i)=><rect key={`sk${i}`} x={p.x-sqS} y={p.y-sqS} width={sqS*2} height={sqS*2} fill={BL} rx={.5} opacity={.85}/>)}
-    {/* Anker / Iso-Bar ECO (red circles) — drawn ON TOP */}
-    {anchors.map((p,i)=><g key={`a${i}`}>
-      <circle cx={p.x} cy={p.y} r={aR} fill={R}/>
-      <circle cx={p.x} cy={p.y} r={aR*.45} fill={WH} opacity={.6}/>
-    </g>)}
-    {/* Dimension lines - bottom */}
-    {DH(ox,ox+cell,oy+gh+10,`LH=${lh.toFixed(1).replace(".",",")}m`)}
-    {hasSK&&rasterType==="gitter"&&DH(ox,ox+halfCell,oy+gh+22,`${(lh/2).toFixed(2).replace(".",",")}m`)}
-    {gw>cell*1.2&&DH(ox,ox+gw,oy+gh+(hasSK?34:24),`${Math.min(fw,cols*lh).toFixed(1).replace(".",",")} m`)}
-    {/* Dimension lines - left */}
-    {DV(ox-10,oy,oy+cell,`LV=${lv.toFixed(1).replace(".",",")}m`)}
-    {hasSK&&rasterType==="gitter"&&DV(ox-22,oy,oy+halfCell,`${(lv/2).toFixed(2).replace(".",",")}m`)}
-    {gh>cell*1.2&&DV(ox-(hasSK?34:24),oy,oy+gh,`${Math.min(fh,rows*lv).toFixed(1).replace(".",",")} m`)}
-    {/* Legend */}
-    <text x={ox+gw/2} y={size-2} textAnchor="middle" fontSize="7" fill={GL} fontFamily="sans-serif">
-      <tspan fill={R}>●</tspan> {numAnker} Anker{numSK>0&&<>{" "}<tspan fill={BL}>■</tspan> {numSK} Seilkreuze</>} = {numAnker+numSK} Punkte
-    </text>
-  </svg>);
-}
-
 function NwBar({label,value}){
   const v=pf(value)||0;const pct=Math.min(v,1.1)*100;
   const col=v<.5?GN:v<.8?AM:R;
-  return(<div style={{display:"flex",alignItems:"center",gap:8,marginBottom:5}}>
-    <div style={{width:140,fontSize:12,color:DK}}><Sub>{label}</Sub></div>
-    <div style={{flex:1,height:18,background:"#ECECEC",borderRadius:3,position:"relative",border:`1px solid ${BD}`}}>
-      <div style={{width:`${Math.min(pct,100)}%`,height:"100%",background:col,borderRadius:3,transition:"width .3s"}}/>
-      <span style={{position:"absolute",right:pct>55?5:"auto",left:pct<=55?`${Math.min(pct,100)}%`:"auto",marginLeft:pct<=55?5:0,top:"50%",transform:"translateY(-50%)",fontSize:11,fontWeight:700,color:pct>55?WH:BK}}>{v?v.toFixed(2):"–"}</span>
+  return(<div style={{display:"flex",alignItems:"center",gap:10,marginBottom:6}}>
+    <div style={{width:160,fontSize:12,color:DK}}><Sub>{label}</Sub></div>
+    <div style={{flex:1,height:18,background:"#ECECEC",borderRadius:9,position:"relative",overflow:"hidden",border:`1px solid ${BD}`}}>
+      <div style={{width:`${Math.min(pct,100)}%`,height:"100%",background:`linear-gradient(90deg, ${col}, ${col}dd)`,borderRadius:9,transition:"width .3s"}}/>
+      <span style={{position:"absolute",right:pct>55?8:"auto",left:pct<=55?`${Math.min(pct,100)}%`:"auto",marginLeft:pct<=55?8:0,top:"50%",transform:"translateY(-50%)",fontSize:11,fontWeight:700,color:pct>55?WH:BK}}>{v?v.toFixed(2):"–"}</span>
     </div>
-    <span style={{fontSize:13,fontWeight:700,color:v&&v<=1?GN:v>1?R:GL,width:16}}>{v?(v<=1?"✓":"✗"):"–"}</span>
+    <span style={{fontSize:14,fontWeight:700,color:v&&v<=1?GN:v>1?R:GL,width:18,textAlign:"center"}}>{v?(v<=1?"✓":"✗"):"–"}</span>
   </div>);
 }
 
-function Field({label,value,onChange,unit,half,ro,sel,opts}){
-  return(<div style={{flex:half?"0 0 48%":"1 1 48%",minWidth:120,marginBottom:7}}>
-    <label style={{fontSize:10,color:GY,display:"block",marginBottom:1}}><Sub>{label}</Sub></label>
-    <div style={{display:"flex",border:`1px solid ${BD}`,borderRadius:4,background:ro?BG:WH}}>
-      {sel?<select value={value} onChange={e=>onChange?.(e.target.value)} style={{flex:1,border:"none",padding:"6px 7px",fontSize:12,fontWeight:600,background:"transparent",outline:"none",fontFamily:"inherit",color:BK}}>
-        {opts.map(o=><option key={o.v??o} value={o.v??o}>{o.l??o}</option>)}</select>
-      :<input value={value} onChange={e=>onChange?.(e.target.value)} readOnly={ro} style={{flex:1,border:"none",padding:"6px 7px",fontSize:12,fontWeight:600,background:"transparent",outline:"none",fontFamily:"inherit",color:BK,minWidth:0}}/>}
-      {unit&&<span style={{padding:"0 7px",fontSize:9.5,color:GL,whiteSpace:"nowrap",alignSelf:"center"}}>{unit}</span>}
-    </div></div>);
+// Field: text / number / select / dropdown.  `sel` triggers <select>, `opts` is the option list.
+function Field({label,value,onChange,unit,half,ro,sel,opts,hint,full}){
+  const flex=full?"1 1 100%":half?"0 0 48%":"1 1 48%";
+  return(<div style={{flex,minWidth:120,marginBottom:9}}>
+    <label style={{fontSize:10.5,color:GY,display:"block",marginBottom:3,fontWeight:600,letterSpacing:.1}}><Sub>{label}</Sub></label>
+    <div style={{display:"flex",border:`1px solid ${BD}`,borderRadius:5,background:ro?BG:WH,transition:"border-color .15s",position:"relative"}}
+      onFocus={e=>e.currentTarget.style.borderColor=R}
+      onBlur={e=>e.currentTarget.style.borderColor=BD}>
+      {sel
+        ? <select value={value??""} onChange={e=>onChange?.(e.target.value)} style={{flex:1,border:"none",padding:"7px 8px",fontSize:12,fontWeight:600,background:"transparent",outline:"none",fontFamily:"inherit",color:BK,cursor:"pointer",appearance:"none"}}>
+            {opts.map(o=><option key={o.v??o} value={o.v??o}>{o.l??o}</option>)}
+          </select>
+        : <input value={value??""} onChange={e=>onChange?.(e.target.value)} readOnly={ro} style={{flex:1,border:"none",padding:"7px 8px",fontSize:12,fontWeight:600,background:"transparent",outline:"none",fontFamily:"inherit",color:BK,minWidth:0}}/>
+      }
+      {unit&&<span style={{padding:"0 8px",fontSize:10,color:GL,whiteSpace:"nowrap",alignSelf:"center"}}>{unit}</span>}
+      {sel&&<span style={{padding:"0 8px",alignSelf:"center",color:GL,fontSize:10,pointerEvents:"none"}}>▾</span>}
+    </div>
+    {hint&&<div style={{fontSize:9.5,color:GL,marginTop:2}}>{hint}</div>}
+  </div>);
 }
 
-function Sec({title,children,accent,open:defOpen=true}){
+function Sec({title,children,accent,icon,open:defOpen=true,subtitle}){
   const[o,setO]=useState(defOpen);
-  return(<div style={{border:`1px solid ${accent?RM:BD}`,borderRadius:5,marginBottom:10,background:WH}}>
-    <div onClick={()=>setO(!o)} style={{padding:"7px 12px",borderBottom:o?`1px solid ${accent?RM:BD}`:"none",background:accent?RL:BG,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-      <span style={{fontWeight:700,fontSize:11,letterSpacing:.5,textTransform:"uppercase",color:accent?R:BK}}>{title}</span>
-      <span style={{fontSize:9,color:GL}}>{o?"▼":"▶"}</span></div>
-    {o&&<div style={{padding:"10px 12px"}}>{children}</div>}</div>);
+  return(<div style={{border:`1px solid ${accent?RM:BD}`,borderRadius:8,marginBottom:12,background:WH,boxShadow:"0 1px 3px rgba(0,0,0,.04)",overflow:"hidden"}}>
+    <div onClick={()=>setO(!o)} style={{padding:"10px 14px",borderBottom:o?`1px solid ${accent?RM:BD}`:"none",background:accent?`linear-gradient(90deg, ${RL}, ${WH})`:`linear-gradient(90deg, ${BG}, ${WH})`,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+      <div style={{display:"flex",alignItems:"center",gap:8}}>
+        {icon&&<span style={{fontSize:13,color:accent?R:GY}}>{icon}</span>}
+        <div>
+          <div style={{fontWeight:700,fontSize:11.5,letterSpacing:.4,textTransform:"uppercase",color:accent?R:BK}}>{title}</div>
+          {subtitle&&<div style={{fontSize:10,color:GL,fontWeight:500,marginTop:1}}>{subtitle}</div>}
+        </div>
+      </div>
+      <span style={{fontSize:10,color:GL,transition:"transform .2s",transform:o?"rotate(0deg)":"rotate(-90deg)"}}>▼</span></div>
+    {o&&<div style={{padding:"14px 16px"}}>{children}</div>}</div>);
 }
 
 function KV({l,v,b}){return(<div style={{display:"flex",justifyContent:"space-between",marginBottom:4,fontSize:12}}>
   <span style={{color:GY}}><Sub>{l}</Sub></span><span style={{fontWeight:b?700:600,color:BK,textAlign:"right"}}>{v||"–"}</span></div>);}
+
+// Big-number stat tile for the headline summary card in MaterialSection
+function Stat({label,value,unit,hint,accent,color,valueSize=22}){
+  const c=color||(accent?R:BK);
+  return(<div style={{padding:"2px 4px"}}>
+    <div style={{fontSize:9.5,fontWeight:700,color:GY,textTransform:"uppercase",letterSpacing:.4,marginBottom:3}}>{label}</div>
+    <div style={{display:"flex",alignItems:"baseline",gap:4,lineHeight:1}}>
+      <span style={{fontSize:valueSize,fontWeight:800,color:c}}>{value}</span>
+      {unit&&<span style={{fontSize:11,fontWeight:600,color:GY}}>{unit}</span>}
+    </div>
+    {hint&&<div style={{fontSize:9,color:GL,marginTop:3}}>{hint}</div>}
+  </div>);
+}
 
 function PageHead({title,subtitle}){
   return(<div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14}}>
@@ -316,8 +412,74 @@ function PageHead({title,subtitle}){
       {subtitle&&<div style={{fontSize:10,color:GY}}>{subtitle}</div>}</div></div>);
 }
 
+// ─── Per-facade plan upload + annotator ─────────────────
+function FacadePlanPanel({facade,onUpdate}){
+  const[loading,setLoading]=useState(false);
+  const[err,setErr]=useState("");
+  const inRef=useRef(null);
+
+  const handle=useCallback(async e=>{
+    const file=e.target.files?.[0];
+    if(!file)return;
+    setLoading(true);setErr("");
+    try{
+      const plan=await loadPlanImage(file);
+      onUpdate({plan,annotations:{facades:[],windows:[],doors:[]}});
+    }catch(er){console.error(er);setErr(er.message||String(er));}
+    finally{setLoading(false);if(inRef.current)inRef.current.value="";}
+  },[onUpdate]);
+
+  if(!facade.plan){
+    return(<div style={{border:`1.5px dashed ${BD}`,borderRadius:8,padding:14,background:WH,textAlign:"center"}}>
+      <div style={{fontSize:11.5,color:DK,fontWeight:600,marginBottom:6}}>
+        Fassadenplan hochladen (optional)
+      </div>
+      <div style={{fontSize:10,color:GL,marginBottom:10}}>
+        PDF (1 Seite) oder Bild · wird als Hintergrund für Vorschau & Rasterdarstellung verwendet
+      </div>
+      <input ref={inRef} type="file" accept="image/*,application/pdf" onChange={handle} style={{display:"none"}}/>
+      <button onClick={()=>inRef.current?.click()} disabled={loading}
+        style={{padding:"7px 16px",fontSize:11,fontWeight:700,border:`1px solid ${R}`,borderRadius:6,
+          background:loading?BG:`linear-gradient(135deg, ${R}, #A40C24)`,color:loading?GY:WH,cursor:loading?"wait":"pointer",
+          display:"inline-flex",alignItems:"center",gap:6}}>
+        {loading
+          ?<><span style={{display:"inline-block",width:10,height:10,border:`2px solid ${BD}`,borderTopColor:R,borderRadius:"50%",animation:"spin 1s linear infinite"}}/>Plan wird geladen …</>
+          :<>📐 Plan auswählen</>}
+      </button>
+      {err&&<div style={{marginTop:10,fontSize:11,color:R,background:"#FFEBEE",padding:"6px 10px",borderRadius:5,border:`1px solid ${R}40`}}>
+        Fehler: {err}
+      </div>}
+    </div>);
+  }
+  return(<div style={{border:`1px solid ${BD}`,borderRadius:8,padding:12,background:WH}}>
+    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+      <div style={{fontSize:11.5,fontWeight:700,color:DK,display:"flex",alignItems:"center",gap:8}}>
+        <span style={{padding:"2px 8px",background:RL,color:R,borderRadius:10,fontSize:10}}>{facade.plan.kind==="pdf"?"PDF":"BILD"}</span>
+        Plan annotieren
+        {(facade.annotations?.facades?.length>0||facade.annotations?.facade)
+          ?<span style={{color:GN,fontSize:10,fontWeight:600}}>✓ {facade.annotations?.facades?.length||1} Begrünungsfläche{(facade.annotations?.facades?.length||1)===1?"":"n"}</span>
+          :<span style={{color:AM,fontSize:10,fontWeight:600}}>⚠ Begrünungsfläche fehlt noch</span>}
+      </div>
+      <div style={{display:"flex",gap:6}}>
+        <input ref={inRef} type="file" accept="image/*,application/pdf" onChange={handle} style={{display:"none"}}/>
+        <button onClick={()=>inRef.current?.click()} disabled={loading}
+          style={{padding:"5px 10px",fontSize:10,fontWeight:600,border:`1px solid ${BD}`,borderRadius:5,background:WH,color:DK,cursor:"pointer"}}>
+          ↺ Plan ersetzen
+        </button>
+        <button onClick={()=>onUpdate({plan:null,annotations:null})}
+          style={{padding:"5px 10px",fontSize:10,fontWeight:600,border:`1px solid ${BD}`,borderRadius:5,background:WH,color:R,cursor:"pointer"}}>
+          ✕ Plan entfernen
+        </button>
+      </div>
+    </div>
+    <PlanAnnotator plan={facade.plan} annotations={facade.annotations}
+      onChange={a=>onUpdate({annotations:a})} height={460}
+      facadeWidthM={pf(facade.breite)||0} facadeHeightM={pf(facade.hoehe)||0}/>
+  </div>);
+}
+
 // ─── PDF Section Components (reusable for on-screen + off-screen) ───
-function PreviewSection({d,maxNw,mat}){
+function PreviewSection({d,maxNw,mat,withRealistic=true}){
   const f0=(d.fassaden||[])[0]||{};
   const prvRaster=f0.seilfuehrung||d.seilfuehrung||"gitter";
   const prvSK=f0.seilkreuztyp||d.seilkreuztyp||"ohne";
@@ -325,11 +487,52 @@ function PreviewSection({d,maxNw,mat}){
   const prvLV=f0.lv||d.LV||"0.9";
   const prvW=f0.breite||d.fassadenlaenge||"3";
   const prvH=f0.hoehe||d.fassadenhoehe||"3";
+  const prvPlan=f0.plan||null;
+  const prvAnn=f0.annotations||null;
+  const selectedPlant=FLL_PLANTS.find(p=>p.bot===d.pflanze_botanisch);
+  const formCode=selectedPlant?selectedPlant.form:"S";
   return(<div style={{background:WH}}>
     <div style={{borderTop:`3px solid ${R}`,padding:"16px 24px"}}>
       <PageHead title="Vorbemessung Fassadenbegrünung" subtitle="ISO-Bar ECO, Vorab-Auslegung (ohne Ausführungsplanung)"/>
       <div style={{borderTop:`1px solid ${R}`,paddingTop:3,fontSize:9.5,color:GY,marginBottom:14}}>
         Dokument: {d.dokNr||"–"} · Version: {d.version||"–"} · Datum: {d.datum}</div>
+
+      {withRealistic&&(()=>{
+        const facadesArr=(prvAnn?.facades?.length>0?prvAnn.facades:(prvAnn?.facade?[prvAnn.facade]:[]));
+        const havePlanWithFacades=!!(prvPlan&&facadesArr.length>0);
+        return(<>
+          <div style={{border:`1px solid ${BD}`,borderRadius:6,padding:8,marginBottom:14,background:"#FAFAF8"}}>
+            <div style={{fontWeight:700,fontSize:10.5,textTransform:"uppercase",letterSpacing:.5,marginBottom:6,color:BK,paddingLeft:6,display:"flex",justifyContent:"space-between",alignItems:"baseline"}}>
+              <span>Fassadenbegrünung – {havePlanWithFacades?"Vorschau im Plan":"Realistische Vorschau"}
+                {selectedPlant&&<span style={{fontWeight:400,color:GY,marginLeft:8,textTransform:"none",letterSpacing:0}}>· {selectedPlant.de} ({selectedPlant.bot})</span>}
+              </span>
+              {havePlanWithFacades&&facadesArr.length>1&&<span style={{fontSize:9.5,fontWeight:600,color:GY,textTransform:"none",letterSpacing:0}}>{facadesArr.length} Begrünungsflächen</span>}
+            </div>
+            <RealisticFacade fW={prvW} fH={prvH} LH={prvLH} LV={prvLV} rasterType={prvRaster}
+              seilkreuztyp={prvSK} coverage={pf(d.coverage)||65} maturity={d.maturity||"mature"}
+              formCode={formCode} size={760}
+              plan={prvPlan} annotations={prvAnn}/>
+            {prvPlan&&facadesArr.length===0&&<div style={{padding:"6px 10px",background:"#FFF8E1",border:`1px solid ${AM}40`,borderRadius:5,fontSize:10.5,color:DK,marginTop:6}}>
+              ⓘ Plan hochgeladen aber noch keine Begrünungsfläche markiert – im Edit-Tab unter "Fassadenflächen" mindestens ein Rechteck ziehen.
+            </div>}
+          </div>
+
+          {/* Schematische Übersicht — zusätzlich zur Plan-Vorschau, immer im Procedural-Modus */}
+          {havePlanWithFacades&&<div style={{border:`1px solid ${BD}`,borderRadius:6,padding:8,marginBottom:14,background:"#FAFAF8"}}>
+            <div style={{fontWeight:700,fontSize:10.5,textTransform:"uppercase",letterSpacing:.5,marginBottom:6,color:BK,paddingLeft:6}}>
+              Schematische Begrünungs-Übersicht
+              <span style={{fontWeight:400,color:GY,marginLeft:8,textTransform:"none",letterSpacing:0}}>· wie sich die Fassade entwickeln kann</span>
+            </div>
+            <div style={{display:"flex",justifyContent:"center"}}>
+              <RealisticFacade fW={prvW} fH={prvH} LH={prvLH} LV={prvLV} rasterType={prvRaster}
+                seilkreuztyp={prvSK} coverage={pf(d.coverage)||65} maturity={d.maturity||"mature"}
+                formCode={formCode} size={560}
+                forceProcedural/>
+            </div>
+          </div>}
+        </>);
+      })()}
+
       <div style={{display:"flex",gap:12,marginBottom:14}}>
         <div style={{flex:1,border:`1px solid ${BD}`,borderRadius:4,padding:12}}>
           <div style={{fontWeight:700,fontSize:10.5,textTransform:"uppercase",letterSpacing:.5,marginBottom:6,color:BK}}>Projekt</div>
@@ -364,7 +567,8 @@ function PreviewSection({d,maxNw,mat}){
           <div style={{fontSize:8.5,color:GL,marginTop:8}}>Zulassungsbezug: Z-21.8-2083</div></div>
         <div style={{flex:1.4,border:`1px solid ${BD}`,borderRadius:4,padding:12}}>
           <div style={{fontWeight:700,fontSize:10.5,textTransform:"uppercase",letterSpacing:.5,marginBottom:6,color:BK}}>Raster ({RASTER.find(r=>r.id===prvRaster)?.l})</div>
-          <RasterSVG LH={prvLH} LV={prvLV} fW={prvW} fH={prvH} rasterType={prvRaster} seilkreuztyp={prvSK} size={400}/>
+          <RasterOverlay LH={prvLH} LV={prvLV} fW={prvW} fH={prvH} rasterType={prvRaster}
+            seilkreuztyp={prvSK} size={420} plan={prvPlan} annotations={prvAnn}/>
           <div style={{fontSize:8.5,color:GL,marginTop:4}}>Schematisch – ersetzt keine Ausführungsplanung.</div></div></div>
       <div style={{border:`1px solid ${BD}`,borderRadius:4,padding:12}}>
         <div style={{fontWeight:700,fontSize:10.5,textTransform:"uppercase",letterSpacing:.5,marginBottom:6,color:BK}}>Lasten &amp; Widerstände</div>
@@ -457,7 +661,6 @@ function AnlagenSection({d,usable}){
 }
 
 function MaterialSection({d,mat}){
-  // Calculate per-facade totals with correct seil logic
   const fassaden=d.fassaden||[{name:"Fassade 1",breite:d.fassadenlaenge||"10",hoehe:d.fassadenhoehe||"6"}];
   const glh=pf(d.LH)||.9,glv=pf(d.LV)||.9;
   const f0=fassaden[0]||{};
@@ -467,88 +670,110 @@ function MaterialSection({d,mat}){
   const matLV=f0.lv||d.LV||"0.9";
   const matW=f0.breite||d.fassadenlaenge||"10";
   const matH=f0.hoehe||d.fassadenhoehe||"6";
-  let totalAnker=0,totalSK=0,totalArea=0,totalSeilV=0,totalSeilH=0,totalSeilD=0,totalKreuze90=0;
-  let anyV=false,anyH=false,anyD=false;
-  const facadeStats=fassaden.map(f=>{
-    const fw=pf(f.breite)||0,fh=pf(f.hoehe)||0;
-    const flh=pf(f.lh)||glh, flv=pf(f.lv)||glv;
-    const fRaster=f.seilfuehrung||d.seilfuehrung||"gitter";
-    const fSK=f.seilkreuztyp||d.seilkreuztyp||"ohne";
-    const cols=Math.floor(fw/flh),rows=Math.floor(fh/flv);
-    const anker=(cols+1)*(rows+1);
-    // Seil per facade based on its own seilfuehrung
-    const fHasV=fRaster==="gitter"||fRaster==="vertikal";
-    const fHasH=fRaster==="gitter"||fRaster==="horizontal";
-    const fHasD=fRaster==="diagonal";
-    const sV=fHasV?(cols+1)*fh:0;
-    const sH=fHasH?(rows+1)*fw:0;
-    const sD=fHasD?cols*rows*Math.sqrt(flh*flh+flv*flv)*2:0;
-    if(fHasV)anyV=true; if(fHasH)anyH=true; if(fHasD)anyD=true;
-    totalSeilV+=sV; totalSeilH+=sH; totalSeilD+=sD;
-    // Seilkreuze only for gitter/diagonal AND only if seilkreuztyp != ohne
-    let sk=0;
-    if(fSK&&fSK!=="ohne"&&(fRaster==="gitter"||fRaster==="diagonal")){
-      if(fRaster==="gitter"){
-        sk=cols*rows+cols*(rows+1)+(cols+1)*rows;
-      } else if(fRaster==="diagonal"){
-        sk=cols*rows;
-      }
-    }
-    // Kreuze90 only for gitter (without explicit seilkreuztyp)
-    if(fRaster==="gitter") totalKreuze90+=(cols-1)*(rows-1);
-    totalAnker+=anker;totalSK+=sk;totalArea+=fw*fh;
-    return{name:f.name,breite:fw,hoehe:fh,area:fw*fh,anker,sk,cols:cols+1,rows:rows+1,sV,sH,sD};
-  });
-  const totalSeilGes=(totalSeilV+totalSeilH+totalSeilD)*1.1;
+  const matPlan=f0.plan||null;
+  const matAnn=f0.annotations||null;
+  // Per-facade stats — plan-aware where annotations exist, simple formula otherwise.
+  const facadeStats = fassaden.map(f => calcFacadeStats(f, d));
+  const anyV = facadeStats.some(s => s.sV > 0);
+  const anyH = facadeStats.some(s => s.sH > 0);
+  const anyD = facadeStats.some(s => s.sD > 0);
+  const anyFromPlan = facadeStats.some(s => s.fromPlan);
+  const totalAnker = facadeStats.reduce((s, x) => s + x.anker, 0);
+  const totalSK    = facadeStats.reduce((s, x) => s + x.sk, 0);
+  const totalArea  = facadeStats.reduce((s, x) => s + x.area, 0);          // netto
+  const totalAreaBrutto = facadeStats.reduce((s, x) => s + x.area_brutto, 0);
+  const totalAreaExcl   = facadeStats.reduce((s, x) => s + x.area_excl, 0);
+  const totalSeilV = facadeStats.reduce((s, x) => s + x.sV, 0);
+  const totalSeilH = facadeStats.reduce((s, x) => s + x.sH, 0);
+  const totalSeilD = facadeStats.reduce((s, x) => s + x.sD, 0);
+  const totalSeilGes = (totalSeilV + totalSeilH + totalSeilD) * 1.1;
   const setInfo=SETS.find(s=>s.id===d.produkt);
   const skInfo=SEILKREUZE.find(s=>s.id===matSK);
-  // Build stückliste items dynamically
   const items=[];
-  items.push([setInfo?setInfo.l:"EJOT Iso-Bar ECO (Ankerpunkt)",String(totalAnker),"Stk",setInfo?`Art. ${setInfo.art}`:""]);
-  if(anyV) items.push([`Seil Edelstahl V4A ø4mm – vertikal`,totalSeilV.toFixed(1),"m",`${fassaden.length>1?"alle Fassaden kumuliert":"vertikal"}`]);
-  if(anyH) items.push([`Seil Edelstahl V4A ø4mm – horizontal`,totalSeilH.toFixed(1),"m",`${fassaden.length>1?"alle Fassaden kumuliert":"horizontal"}`]);
-  if(anyD) items.push(["Seil Edelstahl V4A ø4mm – diagonal",totalSeilD.toFixed(1),"m","2× pro Feld"]);
-  items.push(["Seil gesamt (alle Richtungen)",totalSeilGes.toFixed(1),"m","inkl. Verschnitt ca. +10 %"]);
-  if(totalSK>0&&skInfo) items.push([`${skInfo.l}`,String(totalSK),"Stk",skInfo.art?`Art. ${skInfo.art}`:"alle Fassaden"]);
-  items.push(["Endkappen / Seilhülsen",String(totalAnker*2),"Stk","2 pro Ankerpunkt"]);
+  items.push([setInfo?setInfo.l:"EJOT Iso-Bar ECO (Ankerpunkt)",fmtInt(totalAnker),"Stk",setInfo?`Art. ${setInfo.art}`:""]);
+  if(anyV) items.push([`Seil Edelstahl V4A ø4mm – vertikal`,fmtDec(totalSeilV,1),"m",`${fassaden.length>1?"alle Fassaden kumuliert":"vertikal"}`]);
+  if(anyH) items.push([`Seil Edelstahl V4A ø4mm – horizontal`,fmtDec(totalSeilH,1),"m",`${fassaden.length>1?"alle Fassaden kumuliert":"horizontal"}`]);
+  if(anyD) items.push(["Seil Edelstahl V4A ø4mm – diagonal",fmtDec(totalSeilD,1),"m","2× pro Feld"]);
+  items.push(["Seil gesamt (alle Richtungen)",fmtDec(totalSeilGes,1),"m","inkl. Verschnitt ca. +10 %"]);
+  if(totalSK>0&&skInfo) items.push([`${skInfo.l}`,fmtInt(totalSK),"Stk",skInfo.art?`Art. ${skInfo.art}`:"alle Fassaden"]);
+  items.push(["Endkappen / Seilhülsen",fmtInt(totalAnker*2),"Stk","2 pro Ankerpunkt"]);
 
   return(<div style={{background:WH}}>
     <div style={{borderTop:`3px solid ${R}`,padding:"16px 24px"}}>
       <PageHead title="Materialbedarfsermittlung" subtitle="Überschlägige Mengenermittlung auf Basis der Vorbemessung"/>
-      <div style={{borderTop:`1px solid ${R}`,marginBottom:12}}/>
+      <div style={{borderTop:`1px solid ${R}`,marginBottom:14}}/>
+
+      {/* Headline-Summary: prominente Karte mit den Kernzahlen */}
+      <div style={{
+        display:"grid",
+        gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",
+        gap:8,marginBottom:14,
+        border:`1px solid ${RM}`,borderRadius:8,padding:"12px 14px",
+        background:`linear-gradient(135deg, ${RL}, #FFFFFF)`,
+      }}>
+        <Stat label="Netto-Begrünung" value={fmtArea(totalArea)} accent/>
+        <Stat label="Iso-Bar ECO" value={fmtInt(totalAnker)} unit="Stk" accent/>
+        <Stat label="Seilkreuze" value={fmtInt(totalSK)} unit="Stk" color="#1565C0"/>
+        <Stat label="Seil gesamt" value={fmtLen(totalSeilGes)} hint="inkl. +10 % Verschnitt"/>
+        <Stat label="Endkappen" value={fmtInt(totalAnker*2)} unit="Stk"/>
+        {anyFromPlan&&<Stat label="Quelle" value="aus Plan" valueSize={14} color={R}/>}
+      </div>
+
       <div style={{display:"flex",gap:12,marginBottom:14}}>
         <div style={{flex:1,border:`1px solid ${BD}`,borderRadius:4,padding:12}}>
-          <div style={{fontWeight:700,fontSize:10.5,textTransform:"uppercase",letterSpacing:.5,marginBottom:8,color:BK}}>Eingangswerte</div>
-          <KV l="Gesamtfläche" v={`${totalArea.toFixed(1)} m²`} b/>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:8}}>
+            <div style={{fontWeight:700,fontSize:10.5,textTransform:"uppercase",letterSpacing:.5,color:BK}}>Eingangswerte</div>
+            {anyFromPlan&&<span style={{fontSize:9,fontWeight:700,color:R,background:RL,padding:"1px 6px",borderRadius:3}}>📐 aus Plan ermittelt</span>}
+          </div>
+          {anyFromPlan&&totalAreaBrutto>0
+            ? <>
+                <KV l="Brutto-Fläche" v={fmtArea(totalAreaBrutto)}/>
+                <KV l="Aussparungen (Fenster+Türen)" v={`− ${fmtArea(totalAreaExcl)}`}/>
+                <KV l="Netto-Begrünungsfläche" v={fmtArea(totalArea)} b/>
+              </>
+            : <KV l="Gesamtfläche" v={fmtArea(totalArea)} b/>}
           <KV l="Fassaden" v={`${fassaden.length} Stk.`}/>
           <KV l="LH / LV" v={`${matLH} / ${matLV} m`}/>
           <KV l="Seilführung" v={RASTER.find(r=>r.id===matRaster)?.l}/>
           <KV l="Seilkreuztyp" v={(SEILKREUZE.find(s=>s.id===matSK)||{}).l||"–"}/>
           {setInfo&&<KV l="SET Produkt" v={setInfo.l} b/>}</div>
         <div style={{flex:1.5}}>
-          <RasterSVG LH={matLH} LV={matLV} fW={matW} fH={matH} rasterType={matRaster} seilkreuztyp={matSK} size={420}/></div></div>
+          <RasterOverlay LH={matLH} LV={matLV} fW={matW} fH={matH} rasterType={matRaster}
+            seilkreuztyp={matSK} size={460} plan={matPlan} annotations={matAnn}/></div></div>
 
-      {/* Per-facade breakdown */}
-      {fassaden.length>1&&<div style={{border:`1px solid ${BD}`,borderRadius:4,padding:12,marginBottom:14}}>
-        <div style={{fontWeight:700,fontSize:10.5,textTransform:"uppercase",letterSpacing:.5,marginBottom:8,color:BK}}>Aufschlüsselung je Fassade</div>
+      {(fassaden.length>1||anyFromPlan)&&<div style={{border:`1px solid ${BD}`,borderRadius:4,padding:12,marginBottom:14}}>
+        <div style={{fontWeight:700,fontSize:10.5,textTransform:"uppercase",letterSpacing:.5,marginBottom:8,color:BK,display:"flex",justifyContent:"space-between"}}>
+          <span>Aufschlüsselung je Fassade</span>
+          {anyFromPlan&&<span style={{fontWeight:600,fontSize:9,color:GY,textTransform:"none",letterSpacing:0}}>📐 = aus Plan ermittelt</span>}
+        </div>
         <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
-          <thead><tr>{["Fassade","B × H","Fläche","Anker","Seilkreuze","Gesamt"].map(h=>
-            <th key={h} style={{background:BG,fontWeight:700,padding:"4px 8px",textAlign:"left",borderBottom:`1px solid ${BD}`,fontSize:10}}>{h}</th>)}</tr></thead>
+          <thead><tr>{["Fassade","B × H [m]","Brutto","Aussp.","Netto","Anker","Seilkreuze","Gesamt"].map(h=>
+            <th key={h} style={{background:BG,fontWeight:700,padding:"4px 6px",textAlign:"left",borderBottom:`1px solid ${BD}`,fontSize:10}}>{h}</th>)}</tr></thead>
           <tbody>
             {facadeStats.map((f,i)=><tr key={i}>
-              <td style={{padding:"3px 8px",borderBottom:`1px solid ${BD}`,fontWeight:600}}>{f.name}</td>
-              <td style={{padding:"3px 8px",borderBottom:`1px solid ${BD}`}}>{f.breite} × {f.hoehe} m</td>
-              <td style={{padding:"3px 8px",borderBottom:`1px solid ${BD}`}}>{f.area.toFixed(1)} m²</td>
-              <td style={{padding:"3px 8px",borderBottom:`1px solid ${BD}`,fontWeight:700,color:R}}>{f.anker}</td>
-              <td style={{padding:"3px 8px",borderBottom:`1px solid ${BD}`,fontWeight:700,color:"#1565C0"}}>{f.sk}</td>
-              <td style={{padding:"3px 8px",borderBottom:`1px solid ${BD}`,fontWeight:700}}>{f.anker+f.sk}</td></tr>)}
+              <td style={{padding:"3px 6px",borderBottom:`1px solid ${BD}`,fontWeight:600}}>
+                {f.fromPlan&&<span title="aus Plan" style={{marginRight:4}}>📐</span>}{f.name}
+              </td>
+              <td style={{padding:"3px 6px",borderBottom:`1px solid ${BD}`}}>{fmtDec(f.breite,1)} × {fmtDec(f.hoehe,1)}</td>
+              <td style={{padding:"3px 6px",borderBottom:`1px solid ${BD}`}}>{fmtArea(f.area_brutto)}</td>
+              <td style={{padding:"3px 6px",borderBottom:`1px solid ${BD}`,color:f.area_excl>0?AM:GL}}>{f.area_excl>0?`− ${fmtArea(f.area_excl)}`:"–"}</td>
+              <td style={{padding:"3px 6px",borderBottom:`1px solid ${BD}`,fontWeight:600}}>{fmtArea(f.area)}</td>
+              <td style={{padding:"3px 6px",borderBottom:`1px solid ${BD}`,fontWeight:700,color:R}}>{fmtInt(f.anker)}</td>
+              <td style={{padding:"3px 6px",borderBottom:`1px solid ${BD}`,fontWeight:700,color:"#1565C0"}}>{fmtInt(f.sk)}</td>
+              <td style={{padding:"3px 6px",borderBottom:`1px solid ${BD}`,fontWeight:700}}>{fmtInt(f.anker+f.sk)}</td></tr>)}
             <tr style={{background:BG}}>
-              <td style={{padding:"4px 8px",fontWeight:700}} colSpan={2}>Gesamt</td>
-              <td style={{padding:"4px 8px",fontWeight:700}}>{totalArea.toFixed(1)} m²</td>
-              <td style={{padding:"4px 8px",fontWeight:700,color:R}}>{totalAnker}</td>
-              <td style={{padding:"4px 8px",fontWeight:700,color:"#1565C0"}}>{totalSK}</td>
-              <td style={{padding:"4px 8px",fontWeight:700}}>{totalAnker+totalSK}</td></tr>
-          </tbody></table></div>}
+              <td style={{padding:"4px 6px",fontWeight:700}} colSpan={2}>Gesamt</td>
+              <td style={{padding:"4px 6px",fontWeight:700}}>{fmtArea(totalAreaBrutto)}</td>
+              <td style={{padding:"4px 6px",fontWeight:700,color:AM}}>{totalAreaExcl>0?`− ${fmtArea(totalAreaExcl)}`:"–"}</td>
+              <td style={{padding:"4px 6px",fontWeight:700}}>{fmtArea(totalArea)}</td>
+              <td style={{padding:"4px 6px",fontWeight:700,color:R}}>{fmtInt(totalAnker)}</td>
+              <td style={{padding:"4px 6px",fontWeight:700,color:"#1565C0"}}>{fmtInt(totalSK)}</td>
+              <td style={{padding:"4px 6px",fontWeight:700}}>{fmtInt(totalAnker+totalSK)}</td></tr>
+          </tbody></table>
+        {anyFromPlan&&<div style={{fontSize:9.5,color:GL,marginTop:6}}>
+          Werte mit 📐 wurden aus den Plan-Annotationen ermittelt: Anker und Kabel berücksichtigen alle markierten Begrünungsflächen abzüglich Fenster/Türen.
+        </div>}
+      </div>}
 
       <div style={{border:`1px solid ${RM}`,borderRadius:4,padding:12,marginBottom:14}}>
         <div style={{fontWeight:700,fontSize:10.5,textTransform:"uppercase",letterSpacing:.5,marginBottom:8,color:R}}>Stückliste (überschlägig)</div>
@@ -576,6 +801,10 @@ export default function App(){
   const[step,setStep]=useState("upload");
   const[d,setD]=useState({});
   const[pdfN,setPdfN]=useState("");
+  const[parseInfo,setParseInfo]=useState(null);   // {hits, misses, rawLen}
+  const[parsing,setParsing]=useState(false);
+  const[parseErr,setParseErr]=useState("");
+  const[dragOver,setDragOver]=useState(false);
   const fRef=useRef(null);
   const setter=k=>v=>setD(x=>({...x,[k]:v}));
   const usable=useMemo(()=>FLL_PLANTS.filter(p=>p.lk!==null),[]);
@@ -586,8 +815,24 @@ export default function App(){
     if(p)setD(x=>({...x,pflanze_botanisch:p.bot,pflanze_deutsch:p.de,lastklasse:p.lk?String(p.lk):x.lastklasse,
       psi:p.lk?FLL_LK[p.lk].psi.toFixed(2):x.psi}));else setter("pflanze_botanisch")(bot);};
 
-  const handleFile=useCallback(async e=>{const f=e.target.files?.[0];if(!f)return;
-    setPdfN(f.name);setD(parsePdf(await f.text()));setStep("edit");},[]);
+  const ingestFile=useCallback(async(file)=>{
+    if(!file)return;
+    setParsing(true); setParseErr(""); setParseInfo(null);
+    try{
+      setPdfN(file.name);
+      const raw=await extractPdfText(file);
+      const {document:doc,hits,misses}=buildDocument(raw);
+      setD(doc);
+      setParseInfo({hits,misses,rawLen:raw.length});
+      setStep("edit");
+    }catch(err){
+      console.error("PDF parse error:",err);
+      setParseErr(err.message||String(err));
+    }finally{setParsing(false);}
+  },[]);
+
+  const handleFile=useCallback(e=>{const f=e.target.files?.[0];if(f)ingestFile(f);},[ingestFile]);
+  const handleDrop=useCallback(e=>{e.preventDefault();setDragOver(false);const f=e.dataTransfer?.files?.[0];if(f)ingestFile(f);},[ingestFile]);
 
   // ─── PDF EXPORT ───────────────────────────────────────
   const previewRef=useRef(null);
@@ -601,73 +846,43 @@ export default function App(){
     setExporting(sectionId);
     try{
       const el=ref.current;
-      // Move the outer off-screen wrapper AND the section itself on-screen
       const outerWrapper=el.closest('[data-pdf-offscreen]');
       const origOuterStyle=outerWrapper?outerWrapper.style.cssText:"";
       const origParentStyle=el.parentElement.style.cssText;
-      
       if(outerWrapper) outerWrapper.style.cssText="position:absolute;left:0;top:0;width:880px;z-index:9999;overflow:visible;pointer-events:none;";
       el.parentElement.style.cssText="width:880px;background:#FFF;font-family:'Segoe UI',system-ui,sans-serif;";
       el.style.width="880px";
       el.style.background="#FFF";
-      
       await new Promise(r=>setTimeout(r,500));
-      
-      const canvas=await html2canvas(el,{
-        scale:4,
-        useCORS:true,
-        backgroundColor:"#FFFFFF",
-        logging:false,
-        windowWidth:920,
-        imageTimeout:0,
-        removeContainer:false,
-        scrollX:0,
-        scrollY:0,
-      });
-      
-      // Restore off-screen position
+      const canvas=await html2canvas(el,{scale:4,useCORS:true,backgroundColor:"#FFFFFF",logging:false,windowWidth:920,imageTimeout:0,removeContainer:false,scrollX:0,scrollY:0});
       if(outerWrapper) outerWrapper.style.cssText=origOuterStyle;
       el.parentElement.style.cssText=origParentStyle;
-      
-      const imgData=canvas.toDataURL("image/png",1.0);
-      const imgW=canvas.width;
-      const imgH=canvas.height;
-      const pdfW=210;const margin=6;const contentW=pdfW-2*margin;
-      const ratio=contentW/imgW;
-      const contentH=imgH*ratio;
-      const pdfH=297;
+      const imgW=canvas.width,imgH=canvas.height,pdfW=210,margin=6,contentW=pdfW-2*margin;
+      const ratio=contentW/imgW,contentH=imgH*ratio,pdfH=297;
       const pdf=new jsPDF({orientation:"portrait",unit:"mm",format:"a4",compress:true});
       const pageContentH=pdfH-2*margin;
       const totalPages=Math.ceil(contentH/pageContentH);
-      
       for(let page=0;page<totalPages;page++){
         if(page>0)pdf.addPage();
         const srcY=page*pageContentH/ratio;
         const srcH=Math.min(pageContentH/ratio,imgH-srcY);
         const destH=srcH*ratio;
         const tmpCanvas=document.createElement("canvas");
-        tmpCanvas.width=imgW;
-        tmpCanvas.height=Math.round(srcH);
+        tmpCanvas.width=imgW;tmpCanvas.height=Math.round(srcH);
         const ctx=tmpCanvas.getContext("2d");
         ctx.drawImage(canvas,0,Math.round(srcY),imgW,Math.round(srcH),0,0,imgW,Math.round(srcH));
         const sliceData=tmpCanvas.toDataURL("image/png",1.0);
         pdf.addImage(sliceData,"PNG",margin,margin,contentW,destH,"","FAST");
       }
       pdf.save(filename);
-    }catch(err){
-      console.error("PDF export error:",err);
-      alert("PDF-Export fehlgeschlagen: "+err.message);
-    }finally{setExporting(null);}
+    }catch(err){console.error("PDF export error:",err);alert("PDF-Export fehlgeschlagen: "+err.message);}
+    finally{setExporting(null);}
   },[]);
 
   const exportAll=useCallback(async()=>{
     setExporting("all");setShowExportMenu(false);
     try{
-      const sections=[
-        {ref:previewRef,name:"Vorbemessung"},
-        {ref:anlagenRef,name:"Anlagen"},
-        {ref:materialRef,name:"Material"},
-      ];
+      const sections=[{ref:previewRef,name:"Vorbemessung"},{ref:anlagenRef,name:"Anlagen"},{ref:materialRef,name:"Material"}];
       for(const sec of sections){
         if(!sec.ref.current)continue;
         await exportPdf(sec.name,sec.ref,`EJOT_IsoBar_${sec.name}_${d.dokNr||"Report"}.pdf`);
@@ -678,11 +893,7 @@ export default function App(){
 
   const handleExport=(which)=>{
     setShowExportMenu(false);
-    const map={
-      preview:{ref:previewRef,name:"Vorbemessung"},
-      anlagen:{ref:anlagenRef,name:"Anlagen"},
-      material:{ref:materialRef,name:"Material"},
-    };
+    const map={preview:{ref:previewRef,name:"Vorbemessung"},anlagen:{ref:anlagenRef,name:"Anlagen"},material:{ref:materialRef,name:"Material"}};
     const sec=map[which];
     if(sec)exportPdf(which,sec.ref,`EJOT_IsoBar_${sec.name}_${d.dokNr||"Report"}.pdf`);
   };
@@ -696,113 +907,204 @@ export default function App(){
 
   // ─── UPLOAD ─────────────────────────────────────────────
   if(step==="upload")return(
-    <div style={{fontFamily:"'Segoe UI',system-ui,sans-serif",background:BG,minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center"}}>
-      <div style={{textAlign:"center",maxWidth:480,padding:32}}>
-        <div style={{marginBottom:16}}><span style={{fontWeight:900,fontSize:30,color:R}}>EJOT</span><sup style={{fontSize:9,color:BK}}>®</sup></div>
-        <h1 style={{fontSize:18,fontWeight:700,color:BK,margin:"0 0 4px"}}>Iso-Bar ECO Report Generator</h1>
-        <p style={{fontSize:12,color:GY,margin:"0 0 24px"}}>Statik-PDF hochladen → Werte prüfen → Report exportieren</p>
-        <div onClick={()=>fRef.current?.click()} style={{border:`2px dashed ${BD}`,borderRadius:8,padding:"36px 20px",cursor:"pointer",background:WH,transition:"all .2s"}}
-          onMouseEnter={e=>{e.currentTarget.style.borderColor=R;e.currentTarget.style.background=RL;}}
-          onMouseLeave={e=>{e.currentTarget.style.borderColor=BD;e.currentTarget.style.background=WH;}}>
-          <div style={{fontSize:28,marginBottom:6}}>📄</div>
-          <div style={{fontSize:12,fontWeight:600,color:BK}}>PDF-Datei auswählen</div>
-          <div style={{fontSize:10,color:GL,marginTop:3}}>Vorbemessungs-PDF oder Statik-Ausgabe</div>
-          <input ref={fRef} type="file" accept=".pdf,.txt" onChange={handleFile} style={{display:"none"}}/></div>
-        <button onClick={()=>{setD(parsePdf(""));setStep("edit");}} style={{marginTop:10,padding:"5px 14px",fontSize:10,color:GY,background:"none",border:`1px solid ${BD}`,borderRadius:4,cursor:"pointer"}}>Ohne Datei starten</button>
+    <div style={{fontFamily:"'Segoe UI',system-ui,sans-serif",background:`linear-gradient(135deg, ${BG} 0%, #EDE9DD 100%)`,minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+      <div style={{textAlign:"center",maxWidth:560,width:"100%"}}>
+        <div style={{marginBottom:20,display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+          <div style={{width:48,height:48,borderRadius:10,background:`linear-gradient(135deg, ${R}, #8E0B22)`,display:"flex",alignItems:"center",justifyContent:"center",color:WH,fontWeight:900,fontSize:18,boxShadow:"0 4px 12px rgba(200,16,46,.25)"}}>E</div>
+          <div style={{textAlign:"left"}}>
+            <div style={{fontWeight:900,fontSize:22,color:R,lineHeight:1}}>EJOT<sup style={{fontSize:9,color:BK}}>®</sup></div>
+            <div style={{fontSize:11,color:GY,fontWeight:600,marginTop:2}}>Iso-Bar ECO · Report Generator</div>
+          </div>
+        </div>
+        <h1 style={{fontSize:22,fontWeight:700,color:BK,margin:"0 0 6px"}}>Statik-PDF hochladen</h1>
+        <p style={{fontSize:13,color:GY,margin:"0 0 28px",lineHeight:1.5}}>
+          PDF einlesen → Werte automatisch extrahieren → Report exportieren.<br/>
+          <span style={{fontSize:11,color:GL}}>Unterstützt Vorbemessungs-PDFs und Statik-Ausgaben.</span>
+        </p>
+        <div
+          onClick={()=>fRef.current?.click()}
+          onDragOver={e=>{e.preventDefault();setDragOver(true);}}
+          onDragLeave={()=>setDragOver(false)}
+          onDrop={handleDrop}
+          style={{border:`2px dashed ${dragOver?R:BD}`,borderRadius:14,padding:"44px 24px",cursor:"pointer",background:dragOver?RL:WH,transition:"all .2s",boxShadow:dragOver?"0 8px 24px rgba(200,16,46,.12)":"0 2px 8px rgba(0,0,0,.04)"}}>
+          {parsing?(<>
+            <div style={{display:"inline-block",width:36,height:36,border:`3px solid ${BD}`,borderTopColor:R,borderRadius:"50%",animation:"spin 1s linear infinite",marginBottom:10}}/>
+            <div style={{fontSize:14,fontWeight:600,color:BK}}>PDF wird analysiert …</div>
+            <div style={{fontSize:11,color:GL,marginTop:4}}>{pdfN}</div>
+          </>):(<>
+            <div style={{fontSize:42,marginBottom:8}}>📄</div>
+            <div style={{fontSize:14,fontWeight:600,color:BK}}>PDF hier ablegen oder klicken</div>
+            <div style={{fontSize:11,color:GL,marginTop:4}}>Vorbemessungs-PDF, Statik-Ausgabe oder .txt</div>
+          </>)}
+          <input ref={fRef} type="file" accept=".pdf,.txt,application/pdf,text/plain" onChange={handleFile} style={{display:"none"}}/>
+        </div>
+        {parseErr&&<div style={{marginTop:12,padding:"10px 14px",background:"#FFEBEE",border:`1px solid ${R}40`,borderRadius:8,fontSize:12,color:R}}>
+          <strong>Fehler beim Lesen:</strong> {parseErr}
+        </div>}
+        <button onClick={()=>{const{document:doc}=buildDocument("");setD(doc);setStep("edit");}}
+          style={{marginTop:18,padding:"8px 18px",fontSize:11,color:GY,background:WH,border:`1px solid ${BD}`,borderRadius:6,cursor:"pointer",fontWeight:600}}>
+          Ohne Datei starten →
+        </button>
+        <div style={{marginTop:24,display:"flex",justifyContent:"center",gap:18,fontSize:10,color:GL}}>
+          <span>● Z-21.8-2083</span><span>● FLL Tab. 15</span><span>● DIN 1991-1-4</span>
+        </div>
       </div></div>);
 
-  const tabs=[{id:"edit",l:"Bearbeiten"},{id:"preview",l:"Vorschau"},{id:"anlagen",l:"Anlagen"},{id:"material",l:"Material"}];
+  const tabs=[
+    {id:"edit",l:"Bearbeiten",icon:"✎"},
+    {id:"preview",l:"Vorschau",icon:"◐"},
+    {id:"anlagen",l:"Anlagen",icon:"☰"},
+    {id:"material",l:"Material",icon:"⚙"},
+  ];
 
   // ─── MAIN ─────────────────────────────────────────────
   return(
     <div style={{fontFamily:"'Segoe UI',system-ui,sans-serif",background:BG,minHeight:"100vh"}}>
-      <div style={{background:WH,borderBottom:`2px solid ${R}`,padding:"8px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:100}}>
-        <div style={{display:"flex",alignItems:"baseline",gap:8}}>
-          <span style={{fontWeight:900,fontSize:16,color:R}}>EJOT<sup style={{fontSize:6}}>®</sup></span>
-          <span style={{fontSize:12,fontWeight:600,color:BK}}>Iso-Bar ECO</span>
-          {pdfN&&<span style={{fontSize:9,color:GL}}>← {pdfN}</span>}</div>
-        <div style={{display:"flex",gap:4}}>
-          <button onClick={()=>setStep("upload")} style={{padding:"4px 10px",fontSize:10,border:`1px solid ${BD}`,borderRadius:4,background:WH,cursor:"pointer",color:DK}}>↩ Neu</button>
-          {tabs.map(t=><button key={t.id} onClick={()=>setStep(t.id)} style={{padding:"4px 10px",fontSize:10,borderRadius:4,cursor:"pointer",fontWeight:step===t.id?700:400,
-            border:step===t.id?`1px solid ${R}`:`1px solid ${BD}`,background:step===t.id?R:WH,color:step===t.id?WH:DK}}>{t.l}</button>)}
+      {/* Top bar */}
+      <div style={{background:WH,borderBottom:`1px solid ${BD}`,boxShadow:"0 2px 8px rgba(0,0,0,.05)",padding:"10px 18px 0",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:100}}>
+        {/* tiny brand accent line at the very top of the page */}
+        <div style={{position:"absolute",top:0,left:0,right:0,height:3,background:`linear-gradient(90deg, ${R}, #8E0B22 60%, ${R})`}}/>
+        <div style={{display:"flex",alignItems:"center",gap:12,paddingBottom:10}}>
+          <div style={{width:34,height:34,borderRadius:8,background:`linear-gradient(135deg, ${R}, #8E0B22)`,display:"flex",alignItems:"center",justifyContent:"center",color:WH,fontWeight:900,fontSize:15,boxShadow:"0 2px 6px rgba(200,16,46,.30)"}}>E</div>
+          <div>
+            <div style={{fontWeight:900,fontSize:14,color:R,lineHeight:1}}>EJOT<sup style={{fontSize:6,color:BK}}>®</sup> Iso-Bar ECO</div>
+            <div style={{fontSize:10,color:GY,marginTop:2}}>
+              {d.bauvorhaben||"Neues Projekt"} {d.ort_plz&&<>· {d.ort_plz}</>}
+              {pdfN&&<span style={{color:GL,marginLeft:6}}>← {pdfN}</span>}
+            </div>
+          </div>
+        </div>
+        {/* Tab strip + actions */}
+        <div style={{display:"flex",gap:6,alignItems:"center",paddingBottom:10}}>
+          <button onClick={()=>setStep("upload")} title="Neue Datei laden"
+            onMouseEnter={e=>{e.currentTarget.style.background=BG;e.currentTarget.style.borderColor=GL;}}
+            onMouseLeave={e=>{e.currentTarget.style.background=WH;e.currentTarget.style.borderColor=BD;}}
+            style={{padding:"6px 10px",fontSize:11,border:`1px solid ${BD}`,borderRadius:6,background:WH,cursor:"pointer",color:DK,fontWeight:600,display:"flex",alignItems:"center",gap:4,transition:"all .15s"}}>
+            ↩ Neu
+          </button>
+          <div style={{display:"flex",gap:2,background:BG,padding:3,borderRadius:8,border:`1px solid ${BD}`}}>
+            {tabs.map(t=>{const active=step===t.id;return(<button key={t.id} onClick={()=>setStep(t.id)}
+              onMouseEnter={e=>{if(!active)e.currentTarget.style.background=`${R}08`;}}
+              onMouseLeave={e=>{if(!active)e.currentTarget.style.background="transparent";}}
+              style={{padding:"6px 12px",fontSize:11,borderRadius:6,cursor:"pointer",fontWeight:active?700:600,
+                border:"none",background:active?WH:"transparent",color:active?R:DK,boxShadow:active?"0 1px 3px rgba(0,0,0,.08)":"none",display:"flex",alignItems:"center",gap:5,transition:"all .15s",position:"relative"}}>
+              <span style={{fontSize:11,opacity:.7}}>{t.icon}</span>{t.l}
+              {active&&<span style={{position:"absolute",bottom:-2,left:"50%",transform:"translateX(-50%)",width:14,height:2,background:R,borderRadius:1}}/>}
+            </button>);})}
+          </div>
           <div style={{position:"relative",marginLeft:6}}>
             <button onClick={(e)=>{e.stopPropagation();setShowExportMenu(!showExportMenu);}} disabled={!!exporting}
-              style={{padding:"4px 12px",fontSize:10,borderRadius:4,cursor:exporting?"wait":"pointer",fontWeight:700,
-                border:`1px solid ${R}`,background:exporting?"#EEE":R,color:exporting?GY:WH,display:"flex",alignItems:"center",gap:4}}>
-              {exporting?<><span style={{display:"inline-block",width:10,height:10,border:"2px solid #CCC",borderTopColor:R,borderRadius:"50%",animation:"spin 1s linear infinite"}}/>Exportiert...</>:<>⬇ PDF Export</>}
+              style={{padding:"7px 14px",fontSize:11,borderRadius:6,cursor:exporting?"wait":"pointer",fontWeight:700,
+                border:`1px solid ${R}`,background:exporting?"#EEE":`linear-gradient(135deg, ${R}, #A40C24)`,color:exporting?GY:WH,display:"flex",alignItems:"center",gap:6,boxShadow:exporting?"none":"0 1px 3px rgba(200,16,46,.25)"}}>
+              {exporting?<><span style={{display:"inline-block",width:10,height:10,border:"2px solid #CCC",borderTopColor:R,borderRadius:"50%",animation:"spin 1s linear infinite"}}/>Exportiert …</>:<>⬇ PDF Export</>}
             </button>
-            {showExportMenu&&!exporting&&<div style={{position:"absolute",right:0,top:"100%",marginTop:4,background:WH,border:`1px solid ${BD}`,borderRadius:6,
-              boxShadow:"0 4px 16px rgba(0,0,0,.12)",zIndex:200,minWidth:220,padding:4,fontSize:11}} onClick={e=>e.stopPropagation()}>
-              <div style={{padding:"6px 10px",fontWeight:700,fontSize:9.5,color:GL,textTransform:"uppercase",letterSpacing:.5}}>Einzeln exportieren</div>
+            {showExportMenu&&!exporting&&<div style={{position:"absolute",right:0,top:"100%",marginTop:6,background:WH,border:`1px solid ${BD}`,borderRadius:8,
+              boxShadow:"0 8px 24px rgba(0,0,0,.14)",zIndex:200,minWidth:240,padding:5,fontSize:11}} onClick={e=>e.stopPropagation()}>
+              <div style={{padding:"7px 11px",fontWeight:700,fontSize:9.5,color:GL,textTransform:"uppercase",letterSpacing:.5}}>Einzeln exportieren</div>
               {[["preview","Vorbemessung (Seite 1+2)"],["anlagen","Anlagen (FLL, Pflanzen, System)"],["material","Materialbedarfsermittlung"]].map(([id,label])=>
-                <button key={id} onClick={()=>handleExport(id)} style={{display:"block",width:"100%",padding:"7px 10px",background:"none",border:"none",
-                  textAlign:"left",cursor:"pointer",borderRadius:4,fontSize:11,color:DK}}
-                  onMouseEnter={e=>e.currentTarget.style.background=RL}
+                <button key={id} onClick={()=>handleExport(id)} style={{display:"block",width:"100%",padding:"8px 11px",background:"none",border:"none",
+                  textAlign:"left",cursor:"pointer",borderRadius:5,fontSize:11.5,color:DK}}
+                  onMouseEnter={e=>e.currentTarget.style.background=BG}
                   onMouseLeave={e=>e.currentTarget.style.background="none"}>{label}</button>)}
               <div style={{borderTop:`1px solid ${BD}`,margin:"4px 0"}}/>
-              <button onClick={exportAll} style={{display:"block",width:"100%",padding:"7px 10px",background:"none",border:"none",
-                textAlign:"left",cursor:"pointer",borderRadius:4,fontSize:11,fontWeight:700,color:R}}
+              <button onClick={exportAll} style={{display:"block",width:"100%",padding:"8px 11px",background:"none",border:"none",
+                textAlign:"left",cursor:"pointer",borderRadius:5,fontSize:11.5,fontWeight:700,color:R}}
                 onMouseEnter={e=>e.currentTarget.style.background=RL}
                 onMouseLeave={e=>e.currentTarget.style.background="none"}>⬇ Alle 3 PDFs exportieren</button>
             </div>}
           </div>
-        </div></div>
+        </div>
+      </div>
 
-      <div style={{maxWidth:920,margin:"0 auto",padding:"14px 10px"}}>
+      {/* Parse-feedback banner (after upload) */}
+      {parseInfo&&step==="edit"&&<div style={{maxWidth:980,margin:"12px auto 0",padding:"0 14px"}}>
+        <div style={{display:"flex",gap:10,alignItems:"center",padding:"10px 14px",background:parseInfo.hits.length>0?"#E8F5E9":"#FFF8E1",border:`1px solid ${parseInfo.hits.length>0?GN+"40":AM+"40"}`,borderRadius:8,fontSize:12}}>
+          <span style={{fontSize:16}}>{parseInfo.hits.length>0?"✓":"⚠"}</span>
+          <div style={{flex:1}}>
+            <div style={{fontWeight:700,color:parseInfo.hits.length>0?GN:AM}}>
+              {parseInfo.hits.length>0
+                ? `${parseInfo.hits.length} Felder erkannt aus PDF (${parseInfo.rawLen.toLocaleString()} Zeichen)`
+                : "Keine Felder im PDF erkannt – bitte manuell eingeben."}
+            </div>
+            {parseInfo.misses.length>0&&parseInfo.hits.length>0&&<div style={{color:GY,fontSize:10.5,marginTop:2}}>
+              Fehlend: {parseInfo.misses.slice(0,10).join(", ")}{parseInfo.misses.length>10?` … +${parseInfo.misses.length-10}`:""}
+            </div>}
+          </div>
+          <button onClick={()=>setParseInfo(null)} style={{padding:"2px 8px",fontSize:11,border:`1px solid ${BD}`,borderRadius:4,background:WH,cursor:"pointer",color:GY}}>×</button>
+        </div>
+      </div>}
+
+      <div style={{maxWidth:980,margin:"0 auto",padding:"14px"}}>
 
 {/* ═══ EDIT ═══ */}
 {step==="edit"&&<>
-  <Sec title="Dokument"><div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-    <Field label="Dokument Nr." value={d.dokNr} onChange={setter("dokNr")}/>
-    <Field label="Version" value={d.version} onChange={setter("version")} half/>
-    <Field label="Bearbeiter" value={d.bearbeiter} onChange={setter("bearbeiter")}/>
+  <Sec title="Dokument" icon="📋"><div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+    <Field label="Dokument Nr." value={d.dokNr} onChange={setter("dokNr")} half/>
+    <Field label="Version" value={d.version} onChange={setter("version")} sel opts={VERSIONEN} half/>
+    <Field label="Bearbeiter" value={d.bearbeiter} onChange={setter("bearbeiter")} half/>
     <Field label="Datum" value={d.datum} onChange={setter("datum")} half/></div></Sec>
 
-  <Sec title="Projekt"><div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-    <Field label="Bauvorhaben" value={d.bauvorhaben} onChange={setter("bauvorhaben")}/>
-    <Field label="Ort / PLZ" value={d.ort_plz} onChange={setter("ort_plz")}/></div></Sec>
+  <Sec title="Projekt" icon="🏢"><div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+    <Field label="Bauvorhaben" value={d.bauvorhaben} onChange={setter("bauvorhaben")} half/>
+    <Field label="Ort / PLZ" value={d.ort_plz} onChange={setter("ort_plz")} half/></div></Sec>
 
-  <Sec title="System"><div>
-    <label style={{fontSize:10,color:GY,display:"block",marginBottom:2}}>SET Produkt</label>
-    <select value={d.produkt} onChange={e=>{
-      const s=SETS.find(x=>x.id===e.target.value);
-      setD(x=>({...x,produkt:e.target.value}));
-    }} style={{width:"100%",padding:"6px 7px",fontSize:12,fontWeight:600,border:`1px solid ${BD}`,borderRadius:4,background:WH,fontFamily:"inherit",marginBottom:8}}>
-      {SETS.map(s=><option key={s.id} value={s.id}>{s.l} ({s.art})</option>)}</select>
-    {(()=>{const s=SETS.find(x=>x.id===d.produkt);return s?<div style={{padding:"6px 10px",background:RL,borderRadius:4,border:`1px solid ${RM}`,marginBottom:10,fontSize:11,fontWeight:600,color:R}}>
-      → {s.l} ({s.art}) {d.verankerungsgrund&&UNTERGRUENDE.find(u=>u.id===d.verankerungsgrund)?.typ==="beton"?`${s.nutzBeton}mm Nutzlänge`:`${s.nutzMW}mm MW`}
+  <Sec title="System & Untergrund" icon="⚙">
+    <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+      <Field label="SET Produkt" value={d.produkt} onChange={setter("produkt")} sel
+        opts={SETS.map(s=>({v:s.id,l:`${s.l} (${s.art})`}))} full/>
+    </div>
+    {(()=>{const s=SETS.find(x=>x.id===d.produkt);return s?<div style={{padding:"7px 12px",background:RL,borderRadius:5,border:`1px solid ${RM}`,marginBottom:10,fontSize:11.5,fontWeight:600,color:R}}>
+      → {s.l} ({s.art}) {d.verankerungsgrund&&UNTERGRUENDE.find(u=>u.id===d.verankerungsgrund)?.typ==="beton"?`· ${s.nutzBeton} mm Nutzlänge Beton`:`· ${s.nutzMW} mm Nutzlänge MW`}
     </div>:null})()}
-    <label style={{fontSize:10,color:GY,display:"block",marginBottom:2}}>Verankerungsgrund (gem. Z-21.8-2083)</label>
-    <select value={d.verankerungsgrund} onChange={e=>{
-      const u=UNTERGRUENDE.find(x=>x.id===e.target.value);
-      if(u&&u.typ!=="custom")setD(x=>({...x,verankerungsgrund:e.target.value,druckfestigkeit:u.druckf,rohdichte:u.rohd}));
-      else setter("verankerungsgrund")(e.target.value);
-    }} style={{width:"100%",padding:"6px 7px",fontSize:12,fontWeight:600,border:`1px solid ${BD}`,borderRadius:4,background:WH,fontFamily:"inherit",marginBottom:8}}>
-      {UNTERGRUENDE.map(u=><option key={u.id} value={u.id}>{u.l}</option>)}</select>
-    <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-      <Field label="WDVS-Dicke t_WDVS" value={d.wdvs_dicke} onChange={setter("wdvs_dicke")} unit="mm" half/>
-      <Field label="Dicke Klebschicht t_tol" value={d.dicke_klebschicht} onChange={setter("dicke_klebschicht")} unit="mm" half/>
+    <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+      <Field label="Verankerungsgrund (gem. Z-21.8-2083)" value={d.verankerungsgrund} sel
+        opts={UNTERGRUENDE.map(u=>({v:u.id,l:u.l}))}
+        onChange={v=>{const u=UNTERGRUENDE.find(x=>x.id===v);
+          if(u&&u.typ!=="custom")setD(x=>({...x,verankerungsgrund:v,druckfestigkeit:u.druckf,rohdichte:u.rohd}));
+          else setter("verankerungsgrund")(v);}} full/>
+      <Field label="WDVS-Dicke t_WDVS" value={d.wdvs_dicke} onChange={setter("wdvs_dicke")} sel opts={WDVS_DICKEN} half/>
+      <Field label="Dicke Klebschicht t_tol" value={d.dicke_klebschicht} onChange={setter("dicke_klebschicht")} sel opts={KLEBSCHICHT_DICKEN} half/>
       <Field label="Verankerungstiefe h_ef,min" value={d.verankerungstiefe} onChange={setter("verankerungstiefe")} unit="mm" half/>
       <Field label="Gebäudehöhe h" value={d.gebaeudehoehe} onChange={setter("gebaeudehoehe")} unit="m" half/>
       <Field label="Druckfestigkeit σ" value={d.druckfestigkeit} onChange={setter("druckfestigkeit")} unit="N/mm²" half/>
       <Field label="Rohdichte ρ" value={d.rohdichte} onChange={setter("rohdichte")} unit="kg/dm³" half/>
-      <Field label="Geländekategorie" value={d.gelaendekategorie} onChange={setter("gelaendekategorie")} half/>
-      <Field label="Windlastzone" value={d.windlastzone} onChange={setter("windlastzone")} half/></div></div></Sec>
+      <Field label="Geländekategorie" value={d.gelaendekategorie} onChange={setter("gelaendekategorie")} sel opts={GELAENDEKATEGORIEN} half/>
+      <Field label="Windlastzone" value={d.windlastzone} onChange={setter("windlastzone")} sel opts={WINDLASTZONEN} half/>
+    </div>
+  </Sec>
 
-  <Sec title="Pflanze (FLL Tab. 15)">
-    <div style={{marginBottom:8}}>
-      <label style={{fontSize:10,color:GY}}>Pflanzenart auswählen (41 Arten mit Lastklasse)</label>
-      <select value={d.pflanze_botanisch} onChange={e=>selectPlant(e.target.value)}
-        style={{width:"100%",padding:"6px 7px",fontSize:12,fontWeight:600,border:`1px solid ${BD}`,borderRadius:4,background:WH,fontFamily:"inherit",marginTop:2}}>
+  <Sec title="Pflanze (FLL Tab. 15)" icon="🌿">
+    <div style={{marginBottom:10}}>
+      <label style={{fontSize:10.5,color:GY,fontWeight:600}}>Pflanzenart auswählen ({usable.length} Arten mit Lastklasse)</label>
+      <select value={d.pflanze_botanisch||""} onChange={e=>selectPlant(e.target.value)}
+        style={{width:"100%",padding:"7px 8px",fontSize:12,fontWeight:600,border:`1px solid ${BD}`,borderRadius:5,background:WH,fontFamily:"inherit",marginTop:3}}>
         <option value="">– Manuell eingeben –</option>
-        {usable.map(p=><option key={p.bot} value={p.bot}>{p.bot} ({p.de}) – LK {p.lk}</option>)}</select></div>
-    <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-      <Field label="Pflanze (botanisch)" value={d.pflanze_botanisch} onChange={setter("pflanze_botanisch")}/>
-      <Field label="Pflanze (deutsch)" value={d.pflanze_deutsch} onChange={setter("pflanze_deutsch")}/>
-      <Field label="Lastklasse" value={d.lastklasse} onChange={setter("lastklasse")} half/>
-      <Field label="ψ (Durchströmung)" value={d.psi} onChange={setter("psi")} half/></div></Sec>
+        {Object.entries(usable.reduce((acc,p)=>{const k=FORMS[p.form]||p.form;(acc[k]=acc[k]||[]).push(p);return acc;},{})).map(([k,arr])=>
+          <optgroup key={k} label={k}>
+            {arr.map(p=><option key={p.bot} value={p.bot}>{p.bot} · {p.de} – LK {p.lk}</option>)}
+          </optgroup>)}
+      </select>
+    </div>
+    <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+      <Field label="Pflanze (botanisch)" value={d.pflanze_botanisch} onChange={setter("pflanze_botanisch")} half/>
+      <Field label="Pflanze (deutsch)" value={d.pflanze_deutsch} onChange={setter("pflanze_deutsch")} half/>
+      <Field label="Lastklasse" value={String(d.lastklasse||"3")} onChange={setter("lastklasse")} sel opts={LASTKLASSEN} half/>
+      <Field label="ψ (Durchströmung)" value={d.psi} onChange={setter("psi")} half hint="Standard nach FLL Tab. 15"/>
+      <Field label="Geometrie/Begrünungsart" value={d.geometrie_art} onChange={setter("geometrie_art")} sel opts={[{v:"",l:"– bitte wählen –"},...GEOMETRIE_ARTEN]} full/>
+    </div>
+  </Sec>
 
-  <Sec title="Windlasten & Schnittgrößen"><div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+  <Sec title="Vorschau-Darstellung" icon="🎨" subtitle="Beeinflusst die realistische Fassadenvorschau">
+    <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+      <Field label="Bewuchsdichte (%)" value={d.coverage||"65"} onChange={setter("coverage")} unit="%" half/>
+      <Field label="Bewuchsstadium" value={d.maturity||"mature"} onChange={setter("maturity")} sel opts={FOLIAGE_MATURITY} half/>
+    </div>
+    <div style={{fontSize:10.5,color:GL,marginTop:4}}>
+      Fenster/Türen werden aus den Plan-Annotationen je Fassade übernommen (siehe "Fassadenflächen").
+    </div>
+  </Sec>
+
+  <Sec title="Windlasten & Schnittgrößen" icon="🌬"><div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
     <Field label="w_s (Windsog)" value={d.ws} onChange={setter("ws")} unit="kN/m²" half/>
     <Field label="N_Ek (Winddruck)" value={d.nek} onChange={setter("nek")} unit="kN/m²" half/>
     <Field label="N_Ed,z (Zug)" value={d.ned_z} onChange={setter("ned_z")} unit="kN" half/>
@@ -810,34 +1112,28 @@ export default function App(){
     <Field label="V_Ed (Querkraft)" value={d.ved} onChange={setter("ved")} unit="kN" half/>
     <Field label="V_Rd (Quertragfähigkeit)" value={d.vrd} onChange={setter("vrd")} unit="kN" half/></div></Sec>
 
-  <Sec title="Kernergebnisse" accent><div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+  <Sec title="Kernergebnisse" icon="◎" accent><div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
     <Field label="Max. Abstand LH" value={d.LH} onChange={setter("LH")} unit="m" half/>
     <Field label="Max. Abstand LV" value={d.LV} onChange={setter("LV")} unit="m" half/>
     <Field label="ISO-Bar ECO pro m²" value={d.stk_m2} onChange={setter("stk_m2")} unit="Stk" half/></div></Sec>
 
-  <Sec title="Nachweise (≤ 1,0)" accent>
-    <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10}}>
+  <Sec title="Nachweise (≤ 1,0)" icon="✓" accent>
+    <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:12}}>
       <Field label="N_Ed,z / N_Rd (Zug)" value={d.nw_zug} onChange={setter("nw_zug")} half/>
       <Field label="N_Ed,d / N_Rd,d (Druck)" value={d.nw_druck} onChange={setter("nw_druck")} half/>
       <Field label="V_Ed / V_Rd (Querkraft)" value={d.nw_quer} onChange={setter("nw_quer")} half/>
       <Field label="Kombination (max)" value={d.nw_kombi} onChange={setter("nw_kombi")} half/></div>
-    {(pf(d.nw_zug)||pf(d.nw_druck)||pf(d.nw_quer)||pf(d.nw_kombi))>0&&<div style={{border:`1px solid ${BD}`,borderRadius:4,padding:12,background:BG}}>
-      <div style={{fontWeight:700,fontSize:10,textTransform:"uppercase",letterSpacing:.5,marginBottom:8,color:BK}}>Ausnutzungsgrad</div>
+    {(pf(d.nw_zug)||pf(d.nw_druck)||pf(d.nw_quer)||pf(d.nw_kombi))>0&&<div style={{border:`1px solid ${BD}`,borderRadius:6,padding:14,background:BG}}>
+      <div style={{fontWeight:700,fontSize:10.5,textTransform:"uppercase",letterSpacing:.5,marginBottom:10,color:BK}}>Ausnutzungsgrad</div>
       <NwBar label="Zug, N_Ed,z / N_Rd" value={d.nw_zug}/>
       <NwBar label="Druck, N_Ed,d / N_Rd,d" value={d.nw_druck}/>
       <NwBar label="Quer, V_Ed / V_Rd" value={d.nw_quer}/>
       <NwBar label="Kombination (max)" value={d.nw_kombi}/>
-      {maxNw>0&&<div style={{marginTop:6,fontSize:10,fontWeight:700,color:maxNw<=1?GN:R}}>
+      {maxNw>0&&<div style={{marginTop:8,fontSize:11,fontWeight:700,color:maxNw<=1?GN:R}}>
         {maxNw<=1?"✓ Alle Nachweise erfüllt":`✗ Überschreitung! max: ${maxNw.toFixed(2)}`}</div>}
     </div>}</Sec>
 
-  <Sec title="Raster-Vorgaben">
-    <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-      <Field label="Max. Abstand LH (Standard)" value={d.LH} onChange={setter("LH")} unit="m" half/>
-      <Field label="Max. Abstand LV (Standard)" value={d.LV} onChange={setter("LV")} unit="m" half/>
-      <Field label="ISO-Bar ECO pro m²" value={d.stk_m2} onChange={setter("stk_m2")} unit="Stk" half/></div></Sec>
-
-  <Sec title="Fassadenflächen">
+  <Sec title="Fassadenflächen" icon="🏠" subtitle="Pro Fassade Raster, Maße und Seilkreuze festlegen">
     {(d.fassaden||[]).map((f,i)=>{
       const fRaster=f.seilfuehrung||d.seilfuehrung||"gitter";
       const fSK=f.seilkreuztyp||d.seilkreuztyp||"ohne";
@@ -845,81 +1141,72 @@ export default function App(){
       const fLV=f.lv||d.LV||"0.9";
       const updateF=(key,val)=>{const fa=[...(d.fassaden||[])];fa[i]={...fa[i],[key]:val};setD(x=>({...x,fassaden:fa,
         ...(i===0?{fassadenlaenge:fa[0].breite,fassadenhoehe:fa[0].hoehe}:{})}));};
-      return(<div key={i} style={{border:`1px solid ${BD}`,borderRadius:6,padding:12,marginBottom:12,background:i%2===0?WH:"#FAFAF8"}}>
-        <div style={{display:"flex",gap:8,alignItems:"end",marginBottom:8}}>
+      return(<div key={i} style={{border:`1px solid ${BD}`,borderRadius:8,padding:14,marginBottom:12,background:i%2===0?WH:"#FAFAF8"}}>
+        <div style={{display:"flex",gap:10,alignItems:"end",marginBottom:10}}>
           <div style={{flex:2,minWidth:140}}>
-            <label style={{fontSize:10,color:GY,display:"block",marginBottom:1}}>Name</label>
+            <label style={{fontSize:10.5,color:GY,display:"block",marginBottom:2,fontWeight:600}}>Name</label>
             <input value={f.name} onChange={e=>updateF("name",e.target.value)}
-              style={{width:"100%",padding:"6px 7px",fontSize:12,fontWeight:700,border:`1px solid ${BD}`,borderRadius:4,background:WH,fontFamily:"inherit"}}/></div>
+              style={{width:"100%",padding:"7px 8px",fontSize:12,fontWeight:700,border:`1px solid ${BD}`,borderRadius:5,background:WH,fontFamily:"inherit"}}/></div>
           <div style={{flex:1}}>
-            <label style={{fontSize:10,color:GY,display:"block",marginBottom:1}}>Breite</label>
-            <div style={{display:"flex",border:`1px solid ${BD}`,borderRadius:4,background:WH}}>
+            <label style={{fontSize:10.5,color:GY,display:"block",marginBottom:2,fontWeight:600}}>Breite</label>
+            <div style={{display:"flex",border:`1px solid ${BD}`,borderRadius:5,background:WH}}>
               <input value={f.breite} onChange={e=>updateF("breite",e.target.value)}
-                style={{flex:1,border:"none",padding:"6px 7px",fontSize:12,fontWeight:600,background:"transparent",outline:"none",fontFamily:"inherit",minWidth:0}}/>
-              <span style={{padding:"0 7px",fontSize:9.5,color:GL,alignSelf:"center"}}>m</span></div></div>
+                style={{flex:1,border:"none",padding:"7px 8px",fontSize:12,fontWeight:600,background:"transparent",outline:"none",fontFamily:"inherit",minWidth:0}}/>
+              <span style={{padding:"0 8px",fontSize:10,color:GL,alignSelf:"center"}}>m</span></div></div>
           <div style={{flex:1}}>
-            <label style={{fontSize:10,color:GY,display:"block",marginBottom:1}}>Höhe</label>
-            <div style={{display:"flex",border:`1px solid ${BD}`,borderRadius:4,background:WH}}>
+            <label style={{fontSize:10.5,color:GY,display:"block",marginBottom:2,fontWeight:600}}>Höhe</label>
+            <div style={{display:"flex",border:`1px solid ${BD}`,borderRadius:5,background:WH}}>
               <input value={f.hoehe} onChange={e=>updateF("hoehe",e.target.value)}
-                style={{flex:1,border:"none",padding:"6px 7px",fontSize:12,fontWeight:600,background:"transparent",outline:"none",fontFamily:"inherit",minWidth:0}}/>
-              <span style={{padding:"0 7px",fontSize:9.5,color:GL,alignSelf:"center"}}>m</span></div></div>
+                style={{flex:1,border:"none",padding:"7px 8px",fontSize:12,fontWeight:600,background:"transparent",outline:"none",fontFamily:"inherit",minWidth:0}}/>
+              <span style={{padding:"0 8px",fontSize:10,color:GL,alignSelf:"center"}}>m</span></div></div>
           {(d.fassaden||[]).length>1&&<button onClick={()=>{const fa=[...(d.fassaden||[])];fa.splice(i,1);setD(x=>({...x,fassaden:fa}));}}
-            style={{padding:"6px 8px",fontSize:11,border:`1px solid ${BD}`,borderRadius:4,background:WH,cursor:"pointer",color:R,fontWeight:700}}>✕</button>}
+            style={{padding:"7px 10px",fontSize:12,border:`1px solid ${BD}`,borderRadius:5,background:WH,cursor:"pointer",color:R,fontWeight:700}}>✕</button>}
         </div>
 
-        {/* Per-facade raster config */}
-        <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:6}}>
-          <div style={{flex:1,minWidth:200}}>
-            <label style={{fontSize:10,color:GY,marginBottom:2,display:"block"}}>Seilführung</label>
-            <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:6}}>
-              {RASTER.map(r=><button key={r.id} onClick={()=>updateF("seilfuehrung",r.id)}
-                style={{padding:"4px 10px",fontSize:9,borderRadius:4,cursor:"pointer",border:fRaster===r.id?`2px solid ${R}`:`1px solid ${BD}`,
-                  background:fRaster===r.id?RL:WH,color:fRaster===r.id?R:DK,fontWeight:fRaster===r.id?700:400}}>{r.l}</button>)}</div>
-            <label style={{fontSize:10,color:GY,marginBottom:2,display:"block"}}>Seilkreuztyp</label>
-            <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:6}}>
-              {SEILKREUZE.filter(sk=>sk.id==="ohne"||sk.id==="sk90a4"||sk.id==="skverst").map(sk=><button key={sk.id} onClick={()=>updateF("seilkreuztyp",sk.id)}
-                style={{padding:"4px 10px",fontSize:9,borderRadius:4,cursor:"pointer",border:fSK===sk.id?`2px solid ${R}`:`1px solid ${BD}`,
-                  background:fSK===sk.id?RL:WH,color:fSK===sk.id?R:DK,fontWeight:fSK===sk.id?700:400}}>
-                {sk.l}{sk.art?<span style={{fontSize:7,color:GL,marginLeft:3}}>({sk.art})</span>:null}</button>)}</div>
-            {fSK!=="ohne"&&<div style={{padding:"4px 8px",background:"#E3F2FD",borderRadius:3,border:"1px solid #90CAF940",fontSize:9,color:"#1565C0",marginBottom:6}}>
-              Seilkreuz in Zellmitte (zwischen 4 Ankern)</div>}
-            <div style={{display:"flex",gap:8}}>
-              <div style={{flex:1}}>
-                <label style={{fontSize:9,color:GY}}>LH</label>
-                <div style={{display:"flex",border:`1px solid ${BD}`,borderRadius:4,background:WH}}>
-                  <input value={f.lh||d.LH||"0.9"} onChange={e=>updateF("lh",e.target.value)}
-                    style={{flex:1,border:"none",padding:"4px 6px",fontSize:11,fontWeight:600,background:"transparent",outline:"none",fontFamily:"inherit",minWidth:0}}/>
-                  <span style={{padding:"0 5px",fontSize:8,color:GL,alignSelf:"center"}}>m</span></div></div>
-              <div style={{flex:1}}>
-                <label style={{fontSize:9,color:GY}}>LV</label>
-                <div style={{display:"flex",border:`1px solid ${BD}`,borderRadius:4,background:WH}}>
-                  <input value={f.lv||d.LV||"0.9"} onChange={e=>updateF("lv",e.target.value)}
-                    style={{flex:1,border:"none",padding:"4px 6px",fontSize:11,fontWeight:600,background:"transparent",outline:"none",fontFamily:"inherit",minWidth:0}}/>
-                  <span style={{padding:"0 5px",fontSize:8,color:GL,alignSelf:"center"}}>m</span></div></div></div>
+        <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:6}}>
+          <div style={{flex:1,minWidth:240,display:"flex",flexDirection:"column",gap:8}}>
+            <Field label="Seilführung" value={fRaster} onChange={v=>updateF("seilfuehrung",v)} sel
+              opts={RASTER.map(r=>({v:r.id,l:`${r.l} – ${r.d}`}))}/>
+            <Field label="Seilkreuztyp" value={fSK} onChange={v=>updateF("seilkreuztyp",v)} sel
+              opts={SEILKREUZE.map(sk=>({v:sk.id,l:sk.art?`${sk.l} (${sk.art})`:sk.l}))}/>
+            {fSK!=="ohne"&&<div style={{padding:"6px 10px",background:"#E3F2FD",borderRadius:5,border:"1px solid #90CAF940",fontSize:10.5,color:"#1565C0"}}>
+              ⓘ Seilkreuze sitzen in der Zellmitte zwischen vier Ankern.</div>}
+            <div style={{display:"flex",gap:10}}>
+              <Field label="LH" value={f.lh||d.LH||"0.9"} onChange={v=>updateF("lh",v)} unit="m" half/>
+              <Field label="LV" value={f.lv||d.LV||"0.9"} onChange={v=>updateF("lv",v)} unit="m" half/>
+            </div>
           </div>
-          <div style={{flex:1,minWidth:280,background:BG,borderRadius:5,padding:8,textAlign:"center"}}>
-            <RasterSVG LH={fLH} LV={fLV} fW={f.breite||"3"} fH={f.hoehe||"3"} rasterType={fRaster} seilkreuztyp={fSK} size={320}/>
-            <div style={{fontSize:9.5,color:DK,fontWeight:600,marginTop:2}}>{f.name}: {f.breite||"–"} × {f.hoehe||"–"} m = {((pf(f.breite)||0)*(pf(f.hoehe)||0)).toFixed(1)} m²</div>
+          <div style={{flex:1,minWidth:300,background:BG,borderRadius:8,padding:10,textAlign:"center"}}>
+            <RasterOverlay LH={fLH} LV={fLV} fW={f.breite||"3"} fH={f.hoehe||"3"} rasterType={fRaster}
+              seilkreuztyp={fSK} size={340} plan={f.plan} annotations={f.annotations}/>
+            <div style={{fontSize:10,color:DK,fontWeight:600,marginTop:4}}>{f.name}: {f.breite||"–"} × {f.hoehe||"–"} m = {((pf(f.breite)||0)*(pf(f.hoehe)||0)).toFixed(1)} m²</div>
           </div>
+        </div>
+
+        {/* Plan upload + annotator */}
+        <div style={{marginTop:12}}>
+          <FacadePlanPanel facade={f} onUpdate={patch=>{
+            const fa=[...(d.fassaden||[])];fa[i]={...fa[i],...patch};setD(x=>({...x,fassaden:fa}));
+          }}/>
         </div>
       </div>);
     })}
     <button onClick={()=>setD(x=>({...x,fassaden:[...(x.fassaden||[]),{name:`Fassade ${(x.fassaden||[]).length+1}`,breite:"10",hoehe:"6",seilfuehrung:x.seilfuehrung||"gitter",seilkreuztyp:x.seilkreuztyp||"ohne"}]}))}
-      style={{padding:"5px 14px",fontSize:10,border:`1px dashed ${BD}`,borderRadius:4,background:WH,cursor:"pointer",color:GY,marginTop:4}}>+ Fläche</button></Sec>
+      style={{padding:"8px 16px",fontSize:11,border:`1px dashed ${BD}`,borderRadius:6,background:WH,cursor:"pointer",color:GY,marginTop:6,fontWeight:600}}>+ weitere Fassade</button></Sec>
 </>}
 
 {/* ═══ PREVIEW ═══ */}
-{step==="preview"&&<div style={{borderRadius:6,boxShadow:"0 1px 6px rgba(0,0,0,.06)",overflow:"hidden"}}>
+{step==="preview"&&<div style={{borderRadius:8,boxShadow:"0 2px 12px rgba(0,0,0,.08)",overflow:"hidden"}}>
   <PreviewSection d={d} maxNw={maxNw} mat={mat}/>
 </div>}
 
 {/* ═══ ANLAGEN ═══ */}
-{step==="anlagen"&&<div style={{borderRadius:6,boxShadow:"0 1px 6px rgba(0,0,0,.06)",overflow:"hidden"}}>
+{step==="anlagen"&&<div style={{borderRadius:8,boxShadow:"0 2px 12px rgba(0,0,0,.08)",overflow:"hidden"}}>
   <AnlagenSection d={d} usable={usable}/>
 </div>}
 
 {/* ═══ MATERIAL ═══ */}
-{step==="material"&&<div style={{borderRadius:6,boxShadow:"0 1px 6px rgba(0,0,0,.06)",overflow:"hidden"}}>
+{step==="material"&&<div style={{borderRadius:8,boxShadow:"0 2px 12px rgba(0,0,0,.08)",overflow:"hidden"}}>
   <MaterialSection d={d} mat={mat}/>
 </div>}
       </div>
