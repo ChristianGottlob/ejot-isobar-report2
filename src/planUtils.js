@@ -117,3 +117,95 @@ export function greeningAreaPx(greenings, exclusions) {
   }
   return Math.max(0, total);
 }
+
+// Build anchor/cable/Seilkreuz geometry per greening rectangle.  Returns
+// concatenated lists ready for direct rendering.  This is the ONE source
+// of truth used by both the renderers (RealisticFacade, RasterOverlay)
+// and — semantically equivalent — by calcFacadeStats in App.jsx, so the
+// preview always matches the material calculation.
+//
+// `cellW` / `cellH` are in plan-pixel space.  When the caller has a real
+// scale (m → px), pass cellW = lh * pxM and cellH = lv * pxM and the grid
+// will be uniform across rects.  In procedural mode the renderer can pass
+// rect-relative cell sizes; the function only cares that all rects share
+// the same cellW/cellH.
+export function buildPlanGrid({
+  greeningRects,
+  exclusions = [],
+  cellW, cellH,
+  rasterType = "gitter",
+  hasSeilkreuze = false,
+}) {
+  const anchors = [];
+  const cables = [];      // {x1,y1,x2,y2,dir,rectIndex}
+  const subCables = [];   // only relevant for gitter+Seilkreuze (mid-cell extra cables)
+  const skPts = [];
+
+  const drawV = rasterType === "gitter" || rasterType === "vertikal";
+  const drawH = rasterType === "gitter" || rasterType === "horizontal";
+  const drawD = rasterType === "diagonal";
+
+  greeningRects.forEach((g, rectIndex) => {
+    const colsR = Math.max(0, Math.floor(g.w / cellW));
+    const rowsR = Math.max(0, Math.floor(g.h / cellH));
+    const totalW = colsR * cellW;
+    const totalH = rowsR * cellH;
+    const ax0 = g.x + (g.w - totalW) / 2;
+    const ay0 = g.y + (g.h - totalH) / 2;
+
+    // Anchors — inside THIS rect, outside every exclusion
+    for (let c = 0; c <= colsR; c++) for (let r = 0; r <= rowsR; r++) {
+      const p = { x: ax0 + c * cellW, y: ay0 + r * cellH, rectIndex };
+      if (!pointInRect(p, g, 1)) continue;
+      if (pointInAny(p, exclusions, -2)) continue;
+      anchors.push(p);
+    }
+
+    // Cables
+    if (drawV) {
+      for (let c = 0; c <= colsR; c++) {
+        cables.push({ x1: ax0 + c * cellW, y1: ay0, x2: ax0 + c * cellW, y2: ay0 + totalH, dir: "V", rectIndex });
+      }
+      if (hasSeilkreuze && rasterType === "gitter") {
+        for (let c = 0; c < colsR; c++) {
+          subCables.push({ x1: ax0 + (c + 0.5) * cellW, y1: ay0, x2: ax0 + (c + 0.5) * cellW, y2: ay0 + totalH, dir: "V", rectIndex });
+        }
+      }
+    }
+    if (drawH) {
+      for (let r = 0; r <= rowsR; r++) {
+        cables.push({ x1: ax0, y1: ay0 + r * cellH, x2: ax0 + totalW, y2: ay0 + r * cellH, dir: "H", rectIndex });
+      }
+      if (hasSeilkreuze && rasterType === "gitter") {
+        for (let r = 0; r < rowsR; r++) {
+          subCables.push({ x1: ax0, y1: ay0 + (r + 0.5) * cellH, x2: ax0 + totalW, y2: ay0 + (r + 0.5) * cellH, dir: "H", rectIndex });
+        }
+      }
+    }
+    if (drawD) {
+      for (let c = 0; c < colsR; c++) for (let r = 0; r < rowsR; r++) {
+        cables.push({ x1: ax0 + c * cellW,       y1: ay0 + r * cellH,       x2: ax0 + (c + 1) * cellW, y2: ay0 + (r + 1) * cellH, dir: "D", rectIndex });
+        cables.push({ x1: ax0 + (c + 1) * cellW, y1: ay0 + r * cellH,       x2: ax0 + c * cellW,       y2: ay0 + (r + 1) * cellH, dir: "D", rectIndex });
+      }
+    }
+
+    // Seilkreuze
+    if (hasSeilkreuze) {
+      const candidates = [];
+      if (rasterType === "gitter") {
+        for (let c = 0; c < colsR; c++) for (let r = 0; r < rowsR; r++) candidates.push({ x: ax0 + (c + 0.5) * cellW, y: ay0 + (r + 0.5) * cellH });
+        for (let c = 0; c < colsR; c++) for (let r = 0; r <= rowsR; r++) candidates.push({ x: ax0 + (c + 0.5) * cellW, y: ay0 + r * cellH });
+        for (let c = 0; c <= colsR; c++) for (let r = 0; r < rowsR; r++) candidates.push({ x: ax0 + c * cellW, y: ay0 + (r + 0.5) * cellH });
+      } else if (rasterType === "diagonal") {
+        for (let c = 0; c < colsR; c++) for (let r = 0; r < rowsR; r++) candidates.push({ x: ax0 + (c + 0.5) * cellW, y: ay0 + (r + 0.5) * cellH });
+      }
+      for (const p of candidates) {
+        if (!pointInRect(p, g, 1)) continue;
+        if (pointInAny(p, exclusions, -2)) continue;
+        skPts.push(p);
+      }
+    }
+  });
+
+  return { anchors, cables, subCables, skPts };
+}

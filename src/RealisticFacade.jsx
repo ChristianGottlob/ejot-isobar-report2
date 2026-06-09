@@ -17,7 +17,7 @@
 //   - Raster-type badge inside the picture (icon + label).
 
 import React, { useMemo } from "react";
-import { normalizeAnnotations, pointInAny, unionBBox, pxPerMeter } from "./planUtils";
+import { normalizeAnnotations, pointInAny, unionBBox, pxPerMeter, buildPlanGrid } from "./planUtils";
 
 const R = "#C8102E", BK = "#1A1A1A";
 const COL_FACADE_OUTLINE = "#2E7D32";  // green for greening-area outline (matches PlanAnnotator)
@@ -170,60 +170,27 @@ export default function RealisticFacade({
     backdrop = <ProceduralBackdrop facadeBox={facadeBox} vbW={vbW} vbH={vbH} />;
   }
 
-  // ── Anchor grid sized to facadeBox.  In plan mode, prefer the user's
-  //    calibrated scale (annotations.scale) over the bbox-vs-typed ratio
-  //    — that's the only way the cell spacing reflects real metres when
-  //    the user marked only part of the facade. ──
-  const cols = Math.max(1, Math.min(80, Math.floor(w / lh)));
-  const rows = Math.max(1, Math.min(80, Math.floor(h / lv)));
+  // ── Geometry (anchors + cables) via the shared buildPlanGrid helper so
+  // the picture is geometrically identical to what calcFacadeStats counts.
+  // In plan mode, each greening rectangle gets its own grid; in procedural
+  // mode, the single facadeBox is the only "rectangle". ──
   let cellW, cellH;
   if (havePlan) {
     const pxM = pxPerMeter(ann, facadeBox, w, h);
-    if (pxM && pxM > 0) {
-      cellW = lh * pxM;
-      cellH = lv * pxM;
-    } else {
-      cellW = (lh * facadeBox.w) / w;
-      cellH = (lv * facadeBox.h) / h;
-    }
+    if (pxM && pxM > 0) { cellW = lh * pxM; cellH = lv * pxM; }
+    else                { cellW = (lh * facadeBox.w) / w; cellH = (lv * facadeBox.h) / h; }
   } else {
     cellW = (lh * facadeBox.w) / w;
     cellH = (lv * facadeBox.h) / h;
   }
-  const totalGridW = cols * cellW;
-  const totalGridH = rows * cellH;
-  const ax0 = facadeBox.x + (facadeBox.w - totalGridW) / 2;
-  const ay0 = facadeBox.y + (facadeBox.h - totalGridH) / 2;
 
-  const anchors = useMemo(() => {
-    const out = [];
-    for (let c = 0; c <= cols; c++) for (let r = 0; r <= rows; r++) {
-      const p = { x: ax0 + c * cellW, y: ay0 + r * cellH };
-      // greening: be inclusive at edges so the outer ring of anchors is rendered
-      if (!pointInAny(p, greeningRects, 1)) continue;
-      // exclusions: small negative slack so anchors barely touching a window edge still count
-      if (pointInAny(p, exclusionRects, -2)) continue;
-      out.push(p);
-    }
-    return out;
-  }, [cols, rows, ax0, ay0, cellW, cellH, greeningRects, exclusionRects]);
-
-  // ── Cables ──
-  const cables = useMemo(() => {
-    const out = [];
-    const dV = rasterType === "gitter" || rasterType === "vertikal";
-    const dH = rasterType === "gitter" || rasterType === "horizontal";
-    const dD = rasterType === "diagonal";
-    if (dV) for (let c = 0; c <= cols; c++) out.push({ x1: ax0 + c * cellW, y1: ay0, x2: ax0 + c * cellW, y2: ay0 + totalGridH, dir: "V" });
-    if (dH) for (let r = 0; r <= rows; r++) out.push({ x1: ax0, y1: ay0 + r * cellH, x2: ax0 + totalGridW, y2: ay0 + r * cellH, dir: "H" });
-    if (dD) {
-      for (let c = 0; c < cols; c++) for (let r = 0; r < rows; r++) {
-        out.push({ x1: ax0 + c * cellW, y1: ay0 + r * cellH, x2: ax0 + (c + 1) * cellW, y2: ay0 + (r + 1) * cellH, dir: "D" });
-        out.push({ x1: ax0 + (c + 1) * cellW, y1: ay0 + r * cellH, x2: ax0 + c * cellW, y2: ay0 + (r + 1) * cellH, dir: "D" });
-      }
-    }
-    return out;
-  }, [rasterType, cols, rows, ax0, ay0, cellW, cellH, totalGridW, totalGridH]);
+  const grid = useMemo(() => buildPlanGrid({
+    greeningRects, exclusions: exclusionRects,
+    cellW, cellH, rasterType,
+    hasSeilkreuze: false,   // foliage view ignores Seilkreuze – they're a detail of the technical raster
+  }), [greeningRects, exclusionRects, cellW, cellH, rasterType]);
+  const anchors = grid.anchors;
+  const cables  = grid.cables;
 
   // ── Foliage (real leaf shapes, three-layer cluster, raster-aware density) ──
   const palette = FOLIAGE_PALETTES[formCode] || FOLIAGE_PALETTES.default;
@@ -234,7 +201,7 @@ export default function RealisticFacade({
 
   const leaves = useMemo(() => {
     if (coverage <= 0) return [];
-    const seed = hashStr(`${facadeBox.x}-${facadeBox.y}-${facadeBox.w}-${facadeBox.h}-${cols}-${rows}-${rasterType}-${coverage}-${maturity}-${formCode}-${greeningRects.length}-${exclusionRects.length}`);
+    const seed = hashStr(`${facadeBox.x}-${facadeBox.y}-${facadeBox.w}-${facadeBox.h}-${cables.length}-${anchors.length}-${rasterType}-${coverage}-${maturity}-${formCode}-${greeningRects.length}-${exclusionRects.length}`);
     const rng = mulberry32(seed);
     const out = [];
 
@@ -311,7 +278,7 @@ export default function RealisticFacade({
     }
 
     return out;
-  }, [coverage, maturity, formCode, palette, shapeKeys, leafBase, facadeBox.x, facadeBox.y, facadeBox.w, facadeBox.h, cables, cellW, cellH, cols, rows, greeningRects, exclusionRects, rasterType]);
+  }, [coverage, maturity, formCode, palette, shapeKeys, leafBase, facadeBox.x, facadeBox.y, facadeBox.w, facadeBox.h, cables, anchors, cellW, cellH, greeningRects, exclusionRects, rasterType]);
 
   const maskId = useMemo(() => `fc-mask-${Math.random().toString(36).slice(2, 9)}`, []);
   const shadowFilterId = useMemo(() => `fc-shadow-${Math.random().toString(36).slice(2, 9)}`, []);

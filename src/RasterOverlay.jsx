@@ -8,7 +8,7 @@
 //     axis.
 
 import React, { useMemo } from "react";
-import { normalizeAnnotations, pointInAny, unionBBox, pxPerMeter } from "./planUtils";
+import { normalizeAnnotations, pointInAny, unionBBox, pxPerMeter, buildPlanGrid } from "./planUtils";
 
 const R  = "#C8102E", BK = "#1A1A1A", GY = "#666";
 const BD = "#D8D6D4", WH = "#FFF";
@@ -75,69 +75,31 @@ export default function RasterOverlay({
     cellW = (lh * facadeBox.w) / w;
     cellH = (lv * facadeBox.h) / h;
   }
+  // Procedural dimension overlay uses the (single) facadeBox layout — only
+  // shown when there's effectively one greening area (procedural fallback).
   const totalGridW = cols * cellW;
   const totalGridH = rows * cellH;
   const ox = facadeBox.x + (facadeBox.w - totalGridW) / 2;
   const oy = facadeBox.y + (facadeBox.h - totalGridH) / 2;
 
-  const hasV = rasterType === "gitter" || rasterType === "vertikal";
-  const hasH = rasterType === "gitter" || rasterType === "horizontal";
-  const hasD = rasterType === "diagonal";
   const hasSK = seilkreuztyp && seilkreuztyp !== "ohne";
 
-  // ── Cable lines ──
-  const lines = useMemo(() => {
-    const out = [];
-    const add = (x1, y1, x2, y2, sub = false) => out.push({ x1, y1, x2, y2, sub });
-    if (hasV) {
-      for (let c = 0; c <= cols; c++) add(ox + c * cellW, oy, ox + c * cellW, oy + totalGridH);
-      if (hasSK && rasterType === "gitter")
-        for (let c = 0; c < cols; c++) add(ox + (c + 0.5) * cellW, oy, ox + (c + 0.5) * cellW, oy + totalGridH, true);
-    }
-    if (hasH) {
-      for (let r = 0; r <= rows; r++) add(ox, oy + r * cellH, ox + totalGridW, oy + r * cellH);
-      if (hasSK && rasterType === "gitter")
-        for (let r = 0; r < rows; r++) add(ox, oy + (r + 0.5) * cellH, ox + totalGridW, oy + (r + 0.5) * cellH, true);
-    }
-    if (hasD) {
-      for (let c = 0; c < cols; c++) for (let r = 0; r < rows; r++) {
-        add(ox + c * cellW, oy + r * cellH, ox + (c + 1) * cellW, oy + (r + 1) * cellH);
-        add(ox + (c + 1) * cellW, oy + r * cellH, ox + c * cellW, oy + (r + 1) * cellH);
-      }
-    }
-    return out;
-  }, [hasV, hasH, hasD, hasSK, cols, rows, ox, oy, cellW, cellH, totalGridW, totalGridH, rasterType]);
+  // ── Geometry from the SHARED helper.  In plan mode, one independent grid
+  //     PER greening rectangle (matches calcFacadeStats exactly).  In
+  //     procedural mode, the single facadeBox is the only rectangle, so the
+  //     helper produces the same single grid as before. ──
+  const grid = useMemo(() => buildPlanGrid({
+    greeningRects, exclusions,
+    cellW, cellH, rasterType,
+    hasSeilkreuze: hasSK,
+  }), [greeningRects, exclusions, cellW, cellH, rasterType, hasSK]);
 
-  // ── Anchor points filtered to greening areas minus exclusions ──
-  const anchors = useMemo(() => {
-    const out = [];
-    for (let c = 0; c <= cols; c++) for (let r = 0; r <= rows; r++) {
-      const p = { x: ox + c * cellW, y: oy + r * cellH };
-      if (!pointInAny(p, greeningRects, 1)) continue;
-      if (pointInAny(p, exclusions, -2)) continue;
-      out.push(p);
-    }
-    return out;
-  }, [cols, rows, ox, oy, cellW, cellH, greeningRects, exclusions]);
-
-  const skPts = useMemo(() => {
-    if (!hasSK) return [];
-    const out = [];
-    if (rasterType === "gitter") {
-      for (let c = 0; c < cols; c++) for (let r = 0; r < rows; r++)
-        out.push({ x: ox + (c + 0.5) * cellW, y: oy + (r + 0.5) * cellH });
-      for (let c = 0; c < cols; c++) for (let r = 0; r <= rows; r++)
-        out.push({ x: ox + (c + 0.5) * cellW, y: oy + r * cellH });
-      for (let c = 0; c <= cols; c++) for (let r = 0; r < rows; r++)
-        out.push({ x: ox + c * cellW, y: oy + (r + 0.5) * cellH });
-    } else if (rasterType === "diagonal") {
-      for (let c = 0; c < cols; c++) for (let r = 0; r < rows; r++)
-        out.push({ x: ox + (c + 0.5) * cellW, y: oy + (r + 0.5) * cellH });
-    }
-    return out
-      .filter(p => pointInAny(p, greeningRects, 1))
-      .filter(p => !pointInAny(p, exclusions, -2));
-  }, [hasSK, rasterType, cols, rows, ox, oy, cellW, cellH, greeningRects, exclusions]);
+  const lines = useMemo(() => [
+    ...grid.cables.map(c => ({ ...c, sub: false })),
+    ...grid.subCables.map(c => ({ ...c, sub: true })),
+  ], [grid]);
+  const anchors = grid.anchors;
+  const skPts   = grid.skPts;
 
   const maskId = useMemo(() => `ro-mask-${Math.random().toString(36).slice(2, 9)}`, []);
 
@@ -229,27 +191,33 @@ export default function RasterOverlay({
         </g>
       ))}
 
-      {/* Dimensions */}
-      <g fontFamily="Segoe UI, system-ui, sans-serif" fontSize={dimFs} fill={BK}>
-        <line x1={ox} y1={dimY} x2={ox + cellW} y2={dimY} stroke={BK} strokeWidth="0.6" />
-        <line x1={ox} y1={dimY - 3} x2={ox} y2={dimY + 3} stroke={BK} strokeWidth="0.6" />
-        <line x1={ox + cellW} y1={dimY - 3} x2={ox + cellW} y2={dimY + 3} stroke={BK} strokeWidth="0.6" />
-        <text x={ox + cellW / 2} y={dimY + dimFs} textAnchor="middle">LH = {lh.toFixed(2).replace(".", ",")} m</text>
-        <text x={ox + totalGridW / 2} y={dimY + dimFs * 2 + 2} textAnchor="middle" fontWeight="700">
-          {w.toFixed(1).replace(".", ",")} m
-        </text>
-        <line x1={dimX} y1={oy} x2={dimX} y2={oy + cellH} stroke={BK} strokeWidth="0.6" />
-        <line x1={dimX - 3} y1={oy} x2={dimX + 3} y2={oy} stroke={BK} strokeWidth="0.6" />
-        <line x1={dimX - 3} y1={oy + cellH} x2={dimX + 3} y2={oy + cellH} stroke={BK} strokeWidth="0.6" />
-        <text x={dimX - 4} y={oy + cellH / 2} textAnchor="middle"
-          transform={`rotate(-90 ${dimX - 4} ${oy + cellH / 2})`}>
-          LV = {lv.toFixed(2).replace(".", ",")} m
-        </text>
-        <text x={dimX - dimFs * 1.4} y={oy + totalGridH / 2} textAnchor="middle" fontWeight="700"
-          transform={`rotate(-90 ${dimX - dimFs * 1.4} ${oy + totalGridH / 2})`}>
-          {h.toFixed(1).replace(".", ",")} m
-        </text>
-      </g>
+      {/* Dimensions — only meaningful for a single grid (procedural fallback
+          or plan mode with exactly one greening area).  With multiple
+          rects each grid is centered in its own rectangle, so a single
+          bbox-wide bracket would be misleading; the live per-rect labels
+          in the PlanAnnotator already convey those dimensions. */}
+      {(!havePlan || greeningRects.length === 1) && (
+        <g fontFamily="Segoe UI, system-ui, sans-serif" fontSize={dimFs} fill={BK}>
+          <line x1={ox} y1={dimY} x2={ox + cellW} y2={dimY} stroke={BK} strokeWidth="0.6" />
+          <line x1={ox} y1={dimY - 3} x2={ox} y2={dimY + 3} stroke={BK} strokeWidth="0.6" />
+          <line x1={ox + cellW} y1={dimY - 3} x2={ox + cellW} y2={dimY + 3} stroke={BK} strokeWidth="0.6" />
+          <text x={ox + cellW / 2} y={dimY + dimFs} textAnchor="middle">LH = {lh.toFixed(2).replace(".", ",")} m</text>
+          <text x={ox + totalGridW / 2} y={dimY + dimFs * 2 + 2} textAnchor="middle" fontWeight="700">
+            {w.toFixed(1).replace(".", ",")} m
+          </text>
+          <line x1={dimX} y1={oy} x2={dimX} y2={oy + cellH} stroke={BK} strokeWidth="0.6" />
+          <line x1={dimX - 3} y1={oy} x2={dimX + 3} y2={oy} stroke={BK} strokeWidth="0.6" />
+          <line x1={dimX - 3} y1={oy + cellH} x2={dimX + 3} y2={oy + cellH} stroke={BK} strokeWidth="0.6" />
+          <text x={dimX - 4} y={oy + cellH / 2} textAnchor="middle"
+            transform={`rotate(-90 ${dimX - 4} ${oy + cellH / 2})`}>
+            LV = {lv.toFixed(2).replace(".", ",")} m
+          </text>
+          <text x={dimX - dimFs * 1.4} y={oy + totalGridH / 2} textAnchor="middle" fontWeight="700"
+            transform={`rotate(-90 ${dimX - dimFs * 1.4} ${oy + totalGridH / 2})`}>
+            {h.toFixed(1).replace(".", ",")} m
+          </text>
+        </g>
+      )}
 
       <g fontFamily="Segoe UI, system-ui, sans-serif" fontSize={Math.max(8, dimFs * 0.8)} fill={GY}>
         <text x={vbW - 6} y={vbH - 4} textAnchor="end">
