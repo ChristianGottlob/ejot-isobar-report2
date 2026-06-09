@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useMemo, useEffect } from "react";
 import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
-import { extractPdfText, buildDocument, loadPlanImage } from "./pdfExtract";
+import { extractPdfText, buildDocument, loadPlanImage, FIELD_LABELS } from "./pdfExtract";
 import RealisticFacade from "./RealisticFacade";
 import RasterOverlay from "./RasterOverlay";
 import PlanAnnotator from "./PlanAnnotator";
@@ -420,6 +420,66 @@ function Sec({title,children,accent,icon,open:defOpen=true,subtitle}){
 
 function KV({l,v,b}){return(<div style={{display:"flex",justifyContent:"space-between",marginBottom:4,fontSize:12}}>
   <span style={{color:GY}}><Sub>{l}</Sub></span><span style={{fontWeight:b?700:600,color:BK,textAlign:"right"}}>{v||"–"}</span></div>);}
+
+// Parse-feedback banner shown after a PDF upload.  Lists the missing fields
+// in German and lets the user expand the raw extracted text so they can spot
+// values manually — useful when the PDF's wording doesn't match our regex
+// catalog.
+function ParseFeedbackBanner({info,onClose}){
+  const[showRaw,setShowRaw]=useState(false);
+  const hitsTotal=Object.keys(FIELD_LABELS).length;
+  const hitsCount=info.hits.length;
+  const ok=hitsCount>0;
+  const stripped=(info.rawText||"").trim();
+  const preview=stripped.length>5000?stripped.slice(0,5000)+"\n…":stripped;
+  const missLabels=info.misses.map(k=>FIELD_LABELS[k]||k);
+  return(<div style={{maxWidth:980,margin:"12px auto 0",padding:"0 14px"}}>
+    <div style={{padding:"10px 14px",background:ok?"#E8F5E9":"#FFF8E1",border:`1px solid ${ok?GN+"40":AM+"40"}`,borderRadius:8,fontSize:12}}>
+      <div style={{display:"flex",gap:10,alignItems:"flex-start"}}>
+        <span style={{fontSize:16,marginTop:1}}>{ok?"✓":"⚠"}</span>
+        <div style={{flex:1}}>
+          <div style={{fontWeight:700,color:ok?GN:AM}}>
+            {ok
+              ? `${hitsCount} von ${hitsTotal} Feldern aus PDF erkannt (${info.rawLen.toLocaleString("de-DE")} Zeichen)`
+              : "Keine Felder im PDF erkannt – bitte manuell eingeben."}
+          </div>
+          {missLabels.length>0&&<details style={{marginTop:4}}>
+            <summary style={{cursor:"pointer",color:GY,fontSize:10.5,userSelect:"none"}}>
+              {missLabels.length} fehlende Felder anzeigen
+            </summary>
+            <div style={{display:"flex",flexWrap:"wrap",gap:4,marginTop:6}}>
+              {missLabels.map(l=><span key={l} style={{padding:"2px 7px",background:WH,border:`1px solid ${BD}`,borderRadius:10,fontSize:10,color:DK}}>{l}</span>)}
+            </div>
+            <div style={{fontSize:10,color:GL,marginTop:6}}>
+              Tipp: Wenn diese Werte im PDF stehen aber nicht erkannt wurden, kannst du sie unten manuell ergänzen. Der Rohtext unten zeigt was wir extrahiert haben.
+            </div>
+          </details>}
+        </div>
+        <div style={{display:"flex",gap:4}}>
+          <button onClick={()=>setShowRaw(!showRaw)} title={showRaw?"Rohtext ausblenden":"Roher PDF-Text anzeigen"}
+            style={{padding:"3px 9px",fontSize:11,border:`1px solid ${BD}`,borderRadius:5,background:showRaw?BG:WH,cursor:"pointer",color:DK,fontWeight:600}}>
+            📄 {showRaw?"Rohtext aus":"Rohtext"}
+          </button>
+          <button onClick={onClose} style={{padding:"3px 8px",fontSize:11,border:`1px solid ${BD}`,borderRadius:5,background:WH,cursor:"pointer",color:GY}}>×</button>
+        </div>
+      </div>
+      {showRaw&&<div style={{marginTop:10,borderTop:`1px solid ${BD}`,paddingTop:10}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+          <span style={{fontWeight:700,fontSize:10.5,color:DK,textTransform:"uppercase",letterSpacing:.4}}>Roher PDF-Text</span>
+          <button onClick={()=>{navigator.clipboard&&navigator.clipboard.writeText(stripped);}}
+            style={{padding:"3px 8px",fontSize:10,border:`1px solid ${BD}`,borderRadius:4,background:WH,cursor:"pointer",color:GY,fontWeight:600}}>
+            📋 Kopieren
+          </button>
+        </div>
+        <pre style={{margin:0,padding:"8px 10px",background:"#FAFAF7",border:`1px solid ${BD}`,borderRadius:5,fontSize:10.5,fontFamily:"ui-monospace, Consolas, monospace",color:DK,maxHeight:280,overflow:"auto",whiteSpace:"pre-wrap",wordBreak:"break-word",lineHeight:1.4}}>{preview||"– kein Text extrahiert –"}</pre>
+        <div style={{fontSize:9.5,color:GL,marginTop:4}}>
+          Dies ist der Text, den der PDF-Parser aus deinem Dokument gelesen hat. Tab-Zeichen markieren Spalten.
+          Wenn ein Wert hier steht aber oben nicht erkannt wurde, sag Bescheid welches Format dein PDF benutzt — dann ergänze ich das Pattern.
+        </div>
+      </div>}
+    </div>
+  </div>);
+}
 
 // Big-number stat tile for the headline summary card in MaterialSection
 function Stat({label,value,unit,hint,accent,color,valueSize=22}){
@@ -917,9 +977,9 @@ export default function App(){
     try{
       setPdfN(file.name);
       const raw=await extractPdfText(file);
-      const {document:doc,hits,misses}=buildDocument(raw);
+      const {document:doc,hits,misses,rawText}=buildDocument(raw);
       setD(doc);
-      setParseInfo({hits,misses,rawLen:raw.length});
+      setParseInfo({hits,misses,rawLen:raw.length,rawText});
       setStep("edit");
     }catch(err){
       console.error("PDF parse error:",err);
@@ -1265,22 +1325,7 @@ export default function App(){
       </div>}
 
       {/* Parse-feedback banner (after upload) */}
-      {parseInfo&&step==="edit"&&<div style={{maxWidth:980,margin:"12px auto 0",padding:"0 14px"}}>
-        <div style={{display:"flex",gap:10,alignItems:"center",padding:"10px 14px",background:parseInfo.hits.length>0?"#E8F5E9":"#FFF8E1",border:`1px solid ${parseInfo.hits.length>0?GN+"40":AM+"40"}`,borderRadius:8,fontSize:12}}>
-          <span style={{fontSize:16}}>{parseInfo.hits.length>0?"✓":"⚠"}</span>
-          <div style={{flex:1}}>
-            <div style={{fontWeight:700,color:parseInfo.hits.length>0?GN:AM}}>
-              {parseInfo.hits.length>0
-                ? `${parseInfo.hits.length} Felder erkannt aus PDF (${parseInfo.rawLen.toLocaleString()} Zeichen)`
-                : "Keine Felder im PDF erkannt – bitte manuell eingeben."}
-            </div>
-            {parseInfo.misses.length>0&&parseInfo.hits.length>0&&<div style={{color:GY,fontSize:10.5,marginTop:2}}>
-              Fehlend: {parseInfo.misses.slice(0,10).join(", ")}{parseInfo.misses.length>10?` … +${parseInfo.misses.length-10}`:""}
-            </div>}
-          </div>
-          <button onClick={()=>setParseInfo(null)} style={{padding:"2px 8px",fontSize:11,border:`1px solid ${BD}`,borderRadius:4,background:WH,cursor:"pointer",color:GY}}>×</button>
-        </div>
-      </div>}
+      {parseInfo&&step==="edit"&&<ParseFeedbackBanner info={parseInfo} onClose={()=>setParseInfo(null)}/>}
 
       <div style={{maxWidth:980,margin:"0 auto",padding:"14px"}}>
 

@@ -1,6 +1,16 @@
 // PDF text extraction + field parsing for EJOT Iso-Bar ECO vorbemessung PDFs.
-// Uses pdfjs-dist to get real text from binary PDFs (the previous
-// implementation called .text() on the binary blob and never matched anything).
+// Uses pdfjs-dist to get real text from binary PDFs.
+//
+// The extraction step is structure-aware: items are grouped into LINES based
+// on their Y-coordinate with a small tolerance, then sorted left→right inside
+// each line.  This survives PDFs whose tabular layout puts label and value
+// on the same baseline but in different columns.
+//
+// The parser tries multiple alternative regex patterns per field — labels in
+// German engineering reports vary wildly (Bauvorhaben / Projekt / Objekt /
+// Bauwerk / Vorhaben / BV …).  First match wins; missing fields are reported
+// back to the UI as a German-labeled list so the user knows what's left to
+// fill in by hand.
 
 import * as pdfjsLib from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
@@ -8,13 +18,11 @@ import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
 // ── Public: render the first page of a PDF (or pass through an image
-// file) to a data URL.  Used by the plan annotator so the architectural
-// drawing can be used as a backdrop. ────────────────────────────────
+// file) to a data URL.  Used by the plan annotator. ──────────────────
 export async function loadPlanImage(file, { scale = 2, pageNum = 1 } = {}) {
   if (!file) throw new Error("no file");
   const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
   if (!isPdf) {
-    // Image: read directly, then probe natural size by loading it
     const dataUrl = await new Promise((res, rej) => {
       const r = new FileReader();
       r.onload = () => res(r.result);
@@ -29,7 +37,6 @@ export async function loadPlanImage(file, { scale = 2, pageNum = 1 } = {}) {
     });
     return { dataUrl, w: dim.w, h: dim.h, kind: "image" };
   }
-  // PDF: render page to canvas
   const buf = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: buf, useSystemFonts: true }).promise;
   const page = await pdf.getPage(Math.min(pageNum, pdf.numPages));
@@ -38,201 +45,277 @@ export async function loadPlanImage(file, { scale = 2, pageNum = 1 } = {}) {
   canvas.width = Math.floor(viewport.width);
   canvas.height = Math.floor(viewport.height);
   const ctx = canvas.getContext("2d");
-  // Plain white background so transparent areas don't break our overlays
   ctx.fillStyle = "#FFF";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   await page.render({ canvasContext: ctx, viewport }).promise;
   return { dataUrl: canvas.toDataURL("image/png"), w: canvas.width, h: canvas.height, kind: "pdf" };
 }
 
-// ── Public: read a File object and return raw text ──────────────────
+// ── Public: extract text from a PDF, preserving line structure. ─────
+//
+// pdfjs returns text items as a flat stream of {str, transform: [a,b,c,d,e,f]}
+// where (e,f) is the position.  We group items whose Y values are within
+// ~3 px into a single visual line — this stitches subscripts back together
+// and prevents column-aligned data from being split into too many lines.
 export async function extractPdfText(file) {
   if (!file) return "";
-  // Plain-text upload is still supported (useful for paste/debug).
   if (file.type === "text/plain" || /\.txt$/i.test(file.name)) {
     return await file.text();
   }
   const buf = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: buf, useSystemFonts: true }).promise;
+  const TOL_Y = 3;          // px tolerance for "same line"
+  const COL_GAP = 24;       // px gap that we treat as a column boundary
   let out = "";
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i);
     const content = await page.getTextContent();
-    // Group by Y so we keep line structure even though pdfjs returns items as a flat stream.
-    const lines = new Map();
-    for (const it of content.items) {
-      if (!("str" in it)) continue;
-      const y = Math.round(it.transform[5]);
-      const x = it.transform[4];
-      const arr = lines.get(y) || [];
-      arr.push({ x, s: it.str });
-      lines.set(y, arr);
+    const items = content.items
+      .filter(it => "str" in it && it.str)
+      .map(it => ({ x: it.transform[4], y: it.transform[5], s: it.str.trim() }))
+      .filter(it => it.s.length > 0);
+    items.sort((a, b) => (b.y - a.y) || (a.x - b.x));    // top → bottom, left → right
+    // Group into lines using a Y tolerance
+    const lines = [];
+    for (const it of items) {
+      const last = lines[lines.length - 1];
+      if (last && Math.abs(last.y - it.y) <= TOL_Y) last.parts.push(it);
+      else lines.push({ y: it.y, parts: [it] });
     }
-    const ys = [...lines.keys()].sort((a, b) => b - a);
-    for (const y of ys) {
-      const parts = lines.get(y).sort((a, b) => a.x - b.x).map(p => p.s);
-      out += parts.join(" ") + "\n";
+    for (const ln of lines) {
+      ln.parts.sort((a, b) => a.x - b.x);
+      // Insert a tab where the gap between two items is larger than COL_GAP
+      // — preserves the column structure of tables in the raw text.
+      let text = "";
+      let prevX = null;
+      for (const p of ln.parts) {
+        if (prevX !== null && p.x - prevX > COL_GAP) text += "\t";
+        else if (text) text += " ";
+        text += p.s;
+        prevX = p.x + p.s.length * 5;   // very rough end-x
+      }
+      out += text + "\n";
     }
     out += "\n";
   }
   return out;
 }
 
-// ── Field catalog: each field has multiple alternative regexes ──────
-// Patterns are matched against the cleaned text (multiline, case-insensitive).
-// First match wins; whitespace is collapsed so we can use flexible patterns.
+// ── German labels for every parsed field (used by the UI) ──────────
+export const FIELD_LABELS = {
+  bauvorhaben:        "Bauvorhaben",
+  ort_plz:            "Ort / PLZ",
+  datum:              "Datum",
+  bearbeiter:         "Bearbeiter",
+  dokNr:              "Dokument-Nr.",
+  version:            "Version",
+  produkt:            "Produkt (EJOT Iso-Bar ECO)",
+  verankerungsgrund:  "Verankerungsgrund",
+  wdvs_dicke:         "WDVS-Dicke",
+  dicke_klebschicht:  "Klebschicht-Dicke",
+  verankerungstiefe:  "Verankerungstiefe",
+  gebaeudehoehe:      "Gebäudehöhe",
+  druckfestigkeit:    "Druckfestigkeit",
+  rohdichte:          "Rohdichte",
+  windlastzone:       "Windlastzone",
+  gelaendekategorie:  "Geländekategorie",
+  LH:                 "Horizontaler Abstand LH",
+  LV:                 "Vertikaler Abstand LV",
+  stk_m2:             "ISO-Bar ECO pro m²",
+  pflanze_botanisch:  "Pflanze (botanisch)",
+  pflanze_deutsch:    "Pflanze (deutsch)",
+  lastklasse:         "Lastklasse",
+  psi:                "ψ (Durchströmung)",
+  ws:                 "Windsog ws",
+  nek:                "Winddruck N_Ek",
+  ned_z:              "Zug N_Ed,z",
+  ned_d:              "Druck N_Ed,d",
+  ved:                "Querkraft V_Ed",
+  vrd:                "Quertragfähigkeit V_Rd",
+  nw_zug:             "Nachweis Zug",
+  nw_druck:           "Nachweis Druck",
+  nw_quer:            "Nachweis Quer",
+  nw_kombi:           "Nachweis Kombination",
+  fassadenlaenge:     "Fassadenlänge",
+  fassadenhoehe:      "Fassadenhöhe",
+  geometrie_art:      "Geometrie / Begrünungsart",
+};
+
+// ── Pattern building blocks ─────────────────────────────────────────
+// Flexible label-separator: any combo of ':', '=', '-', tabs, spaces.
+const SEP = String.raw`[\s\t]*[:\-=]?[\s\t]*`;
+// Optional surrounding parens or brackets around the value
+// Decimal number: 12 / 12,5 / 12.5 / 0.12 / 1.234,56 (we keep as-is, pf() normalises)
+const NUM = String.raw`(\d+(?:[.,]\d+)?(?:[.,]\d+)?)`;
+// Up to N non-digit characters until the captured number (the label-to-number gap)
+const GAP = (n) => `[^\\d\\n]{0,${n}}`;
+
+// ── Field catalog — alternatives are tried in order ────────────────
 const PATTERNS = {
   bauvorhaben: [
-    /Bauvorhaben[:\s]+([^\n]{2,80}?)(?:\s{2,}|$)/im,
-    /Projekt[:\s]+([^\n]{2,80}?)(?:\s{2,}|$)/im,
-    /Objekt[:\s]+([^\n]{2,80}?)(?:\s{2,}|$)/im,
+    /(?:Bauvorhaben|Projekt|Objekt|Vorhaben|Bauwerk|BV|Bauwerksbezeichnung)[\s\t]*[:\-=][\s\t]*([^\n\t]{2,100}?)(?:\t|\s{3,}|$)/im,
+    /(?:Bauvorhaben|Projekt|Objekt|Bauwerk)[\s\t]+([A-ZÄÖÜ][^\n\t]{2,100}?)(?:\t|\s{3,}|$)/m,
   ],
   ort_plz: [
-    /Ort\s*\/\s*PLZ[:\s]+([^\n]{2,80}?)(?:\s{2,}|$)/im,
-    /(?:Ort|Standort)[:\s]+([^\n]{2,80}?)(?:\s{2,}|$)/im,
-    /(\d{5}\s+[A-Za-zÄÖÜäöüß\-\s]{2,40})/m,
+    /(?:Ort\s*\/\s*PLZ|PLZ\s*\/\s*Ort|Ort|Standort|Adresse|Anschrift)[\s\t]*[:\-=][\s\t]*([^\n\t]{2,100}?)(?:\t|\s{3,}|$)/im,
+    /\b(\d{5}\s+[A-ZÄÖÜ][A-Za-zÄÖÜäöüß\-\s/]{2,60})/m,             // any "12345 Stadtname"
   ],
   datum: [
-    /Datum[:\s]+(\d{1,2}\.\d{1,2}\.\d{2,4})/im,
-    /(?:vom|am)\s+(\d{1,2}\.\d{1,2}\.\d{2,4})/im,
+    /(?:Datum|Stand|Bearbeitungsdatum)[\s\t]*[:\-=][\s\t]*(\d{1,2}\.\d{1,2}\.\d{2,4})/im,
+    /(?:vom|am)[\s\t]+(\d{1,2}\.\d{1,2}\.\d{2,4})/im,
     /\b(\d{1,2}\.\d{1,2}\.20\d{2})\b/m,
   ],
   bearbeiter: [
-    /Bearbeiter[:\s]+([A-Za-zÄÖÜäöüß][^\n]{1,50}?)(?:\s{2,}|$)/im,
-    /(?:erstellt von|Sachbearbeiter)[:\s]+([^\n]{2,50}?)(?:\s{2,}|$)/im,
+    /(?:Bearbeiter|Sachbearbeiter|erstellt von|Verfasser|Geprüft von|Aufgestellt von|Ersteller)[\s\t]*[:\-=][\s\t]*([^\n\t]{2,80}?)(?:\t|\s{3,}|$)/im,
   ],
   dokNr: [
-    /(?:Dok|Dokument)[\.\-\s]?Nr[\.:]?\s+([A-Z0-9\-\/]+)/im,
-    /\b(VB-ISO-[0-9]{6,}-[0-9]+)\b/m,
+    /(?:Dok|Dokument|Projekt|Auftrags)[-\.\s]?(?:Nr|Nummer|nr)[\.\s:]*\s*([A-Z0-9\-\/_]{2,30})/im,
+    /\b(VB[-\s]?ISO[-\s]?\d{6,}[-\s]?\d+)\b/im,
+    /\bAuftragsnr\.?\s*([A-Z0-9\-\/_]{2,30})/im,
   ],
   version: [
-    /Version[:\s]+(V?\d+\.\d+)/im,
-    /\bRev\.?\s*(V?\d+\.\d+)\b/im,
+    /(?:Version|Stand|Revision|Rev)[\.\s:]*\s*(V?\d+\.\d+)/im,
   ],
 
   // System / Untergrund
   produkt: [
-    /SET\s+EJOT\s+Iso[-\s]?Bar\s+ECO\s+(\d{3})/im,
-    /Iso[-\s]?Bar\s+ECO\s+(\d{3})/im,
-    /Produkt[:\s]+([A-Za-z0-9\-\s]{2,40}?)(?:\s{2,}|$)/im,
+    /SET\s*EJOT\s*Iso[-\s]?Bar\s*ECO\s*(\d{3})/im,
+    /Iso[-\s]?Bar\s*ECO\s*(\d{3})/im,
+    /\b(eco\s*\d{3})/im,
+    /Produkt[\s\t]*[:\-=][\s\t]*([A-Za-z0-9\-\s]{2,40}?)(?:\t|\s{3,}|$)/im,
   ],
   verankerungsgrund: [
-    /Verankerungsgrund[:\s]+([^\n]{2,60}?)(?:\s{2,}|$)/im,
-    /Untergrund[:\s]+([^\n]{2,60}?)(?:\s{2,}|$)/im,
+    /(?:Verankerungsgrund|Untergrund|Wandaufbau|Grundwand|Tragschicht|Verankerungsmaterial)[\s\t]*[:\-=][\s\t]*([^\n\t]{2,80}?)(?:\t|\s{3,}|$)/im,
   ],
   wdvs_dicke: [
-    /WDVS[\s\-]?Dicke[^\d]{0,15}(\d{1,3}(?:[\.,]\d+)?)/im,
-    /t[_\s]?WDVS[^\d]{0,10}(\d{1,3}(?:[\.,]\d+)?)/im,
-    /(?:D[äa]mmstoff|D[äa]mmung)[\s\-]?Dicke[^\d]{0,15}(\d{1,3}(?:[\.,]\d+)?)/im,
+    new RegExp(`(?:WDVS|D[äa]mmstoff|D[äa]mmung|Wärmedämmung)[\\s\\-]?(?:dicke|stärke|st\\.)${GAP(20)}${NUM}`, "im"),
+    new RegExp(`t[_\\s]?WDVS${GAP(15)}${NUM}`, "im"),
   ],
   dicke_klebschicht: [
-    /(?:t[_\s]?tol|Klebschicht|Mörtelbett)[^\d]{0,20}(\d{1,3}(?:[\.,]\d+)?)/im,
+    new RegExp(`(?:t[_\\s]?tol|Klebschicht|Mörtelbett|Klebmörtel|Klebebett)${GAP(25)}${NUM}`, "im"),
   ],
   verankerungstiefe: [
-    /(?:Verankerungstiefe|h[_\s]?ef(?:,min)?)[^\d]{0,15}(\d{1,3}(?:[\.,]\d+)?)/im,
+    new RegExp(`(?:Verankerungstiefe|Einbindetiefe|h[_\\s]?ef(?:,min|min)?)${GAP(20)}${NUM}`, "im"),
   ],
   gebaeudehoehe: [
-    /Geb[aä]udeh[oö]he[^\d]{0,15}(\d{1,3}(?:[\.,]\d+)?)/im,
-    /\bh[_\s]?Geb[^\d]{0,10}(\d{1,3}(?:[\.,]\d+)?)/im,
+    new RegExp(`(?:Geb[aä]udeh[oö]he|Bauwerksh[oö]he|H[oö]he\\s+(?:Geb|Bauwerk))${GAP(20)}${NUM}`, "im"),
+    new RegExp(`\\bh[_\\s]?Geb${GAP(12)}${NUM}`, "im"),
   ],
   druckfestigkeit: [
-    /Druckfestigkeit[^\d]{0,15}(\d{1,3}(?:[\.,]\d+)?)/im,
-    /(?:f[_\s]?ck|σ)[^\d]{0,15}(\d{1,3}(?:[\.,]\d+)?)\s*(?:N\/mm|MPa)/im,
+    new RegExp(`(?:Druckfestigkeit|f[_\\s]?ck|Festigkeit)${GAP(20)}${NUM}`, "im"),
+    new RegExp(`σ${GAP(15)}${NUM}\\s*(?:N\\/mm|MPa)`, "im"),
   ],
   rohdichte: [
-    /Rohdichte[^\d]{0,15}(\d{1,3}(?:[\.,]\d+)?)/im,
-    /(?:ρ|rho)[^\d]{0,10}(\d{1,3}(?:[\.,]\d+)?)\s*(?:kg\/dm|t\/m)/im,
+    new RegExp(`(?:Rohdichte|Trockenrohdichte|Dichte)${GAP(20)}${NUM}`, "im"),
+    new RegExp(`(?:ρ|rho)${GAP(12)}${NUM}\\s*(?:kg\\/dm|t\\/m)`, "im"),
   ],
   windlastzone: [
-    /Windlastzone[:\s]+(?:WZ\s*)?(\d|[IV]+)/im,
+    /Windlastzone[\s\t]*[:\-=]?\s*(?:WZ\s*)?(\d|[IV]+)/im,
     /\bWZ\s*(\d)\b/m,
+    /Windzone\s*(\d)/im,
   ],
   gelaendekategorie: [
-    /Gel[aä]ndekategorie[:\s]+(?:GK\s*)?([IV]+|\d)/im,
+    /Gel[aä]ndekategorie[\s\t]*[:\-=]?\s*(?:GK\s*)?([IV]+|\d)/im,
     /\bGK\s*([IV]+|\d)\b/m,
+    /Terrain[\s\-]?Kategorie\s*([IV]+|\d)/im,
   ],
 
-  // Raster
+  // Raster (LH / LV / Anker pro m²)
   LH: [
-    /horizontaler?\s+Abstand\s*\(?LH\)?[^\d]{0,15}(\d(?:[\.,]\d+)?)/im,
-    /\bLH[^\d]{0,8}(\d(?:[\.,]\d+)?)\s*m/im,
+    new RegExp(`horizontaler?\\s+Abstand\\s*\\(?LH\\)?${GAP(20)}${NUM}`, "im"),
+    new RegExp(`\\bLH${GAP(10)}${NUM}\\s*m`, "im"),
+    new RegExp(`Maschenweite\\s+(?:horizontal|H)${GAP(15)}${NUM}`, "im"),
   ],
   LV: [
-    /vertikaler?\s+Abstand\s*\(?LV\)?[^\d]{0,15}(\d(?:[\.,]\d+)?)/im,
-    /\bLV[^\d]{0,8}(\d(?:[\.,]\d+)?)\s*m/im,
+    new RegExp(`vertikaler?\\s+Abstand\\s*\\(?LV\\)?${GAP(20)}${NUM}`, "im"),
+    new RegExp(`\\bLV${GAP(10)}${NUM}\\s*m`, "im"),
+    new RegExp(`Maschenweite\\s+(?:vertikal|V)${GAP(15)}${NUM}`, "im"),
   ],
   stk_m2: [
-    /(?:ISO|Iso)[\s\-]?Bar\s+ECO\s+pro\s+m[²2][^\d]{0,8}(\d+(?:[\.,]\d+)?)/im,
-    /Anker\s+pro\s+m[²2][^\d]{0,8}(\d+(?:[\.,]\d+)?)/im,
+    new RegExp(`(?:ISO|Iso)[\\s\\-]?Bar\\s+ECO\\s+pro\\s+m[²2]${GAP(10)}${NUM}`, "im"),
+    new RegExp(`Anker\\s+pro\\s+m[²2]${GAP(10)}${NUM}`, "im"),
+    new RegExp(`Befestigungsdichte${GAP(15)}${NUM}`, "im"),
   ],
 
   // Pflanze
   pflanze_botanisch: [
-    /Pflanze\s*\(?botanisch\)?[:\s]+([A-Z][a-z]+\s+[a-z\-]+(?:\s+[a-z\-]+)?)/m,
-    /(?:Art|Botanisch)[:\s]+([A-Z][a-z]+\s+[a-z\-]+)/m,
+    /Pflanze\s*\(?botanisch\)?[\s\t]*[:\-=]\s*([A-Z][a-z]+\s+[a-z\-]+(?:\s+[a-z\-]+)?)/m,
+    /(?:Art|Botanisch|Botanischer\s+Name)[\s\t]*[:\-=]\s*([A-Z][a-z]+\s+[a-z\-]+(?:\s+[a-z\-]+)?)/m,
   ],
   pflanze_deutsch: [
-    /Pflanze\s*\(?deutsch\)?[:\s]+([^\n]{2,60}?)(?:\s{2,}|$)/im,
+    /Pflanze\s*\(?deutsch\)?[\s\t]*[:\-=]\s*([^\n\t]{2,60}?)(?:\t|\s{3,}|$)/im,
+    /Deutscher\s+Name[\s\t]*[:\-=]\s*([^\n\t]{2,60}?)(?:\t|\s{3,}|$)/im,
   ],
   lastklasse: [
-    /Lastklasse[:\s]+(?:LK\s*)?(\d)/im,
+    /Lastklasse[\s\t]*[:\-=]?\s*(?:LK\s*)?(\d)/im,
     /\bLK\s*(\d)\b/m,
   ],
   psi: [
-    /[ψΨ]\s*(?:\(.*?\))?[^\d]{0,15}(\d[\.,]\d+)/m,
-    /(?:Psi|Durchstr[oö]mung)[^\d]{0,15}(\d[\.,]\d+)/im,
+    /[ψΨ]\s*(?:\(.*?\))?[^\d\n]{0,15}(\d[\.,]\d+)/m,
+    /(?:Psi|Durchstr[oö]mung(?:sbeiwert)?|Permeabilität)[^\d\n]{0,20}(\d[\.,]\d+)/im,
   ],
 
   // Wind / Schnittgrößen
   ws: [
-    /w[_\s]?s\s*\(?Windsog\)?[^\d]{0,15}(\d+(?:[\.,]\d+)?)/im,
-    /\bws[^\d]{0,8}(\d+(?:[\.,]\d+)?)\s*kN/im,
+    new RegExp(`w[_\\s]*s\\s*\\(?(?:Windsog)?\\)?${GAP(20)}${NUM}\\s*kN`, "im"),
+    new RegExp(`\\bw\\s*s${GAP(15)}${NUM}\\s*kN`, "im"),
+    new RegExp(`Windsog${GAP(15)}${NUM}`, "im"),
   ],
   nek: [
-    /N[_\s]?Ek\s*\(?Winddruck\)?[^\d]{0,15}(\d+(?:[\.,]\d+)?)/im,
+    new RegExp(`N[_\\s]*Ek\\s*\\(?(?:Winddruck)?\\)?${GAP(20)}${NUM}`, "im"),
+    new RegExp(`Winddruck${GAP(20)}${NUM}`, "im"),
   ],
   ned_z: [
-    /N[_\s]?Ed[,\s]?z\s*\(?Zug\)?[^\d]{0,15}(\d+(?:[\.,]\d+)?)/im,
-    /N[_\s]?Ed[,\s]?Zug[^\d]{0,15}(\d+(?:[\.,]\d+)?)/im,
+    new RegExp(`N[_\\s]*Ed[,\\s]*z\\s*\\(?(?:Zug)?\\)?${GAP(20)}${NUM}`, "im"),
+    new RegExp(`N[_\\s]*Ed[,\\s]*Zug${GAP(20)}${NUM}`, "im"),
+    new RegExp(`Zugkraft${GAP(20)}${NUM}\\s*kN`, "im"),
   ],
   ned_d: [
-    /N[_\s]?Ed[,\s]?d\s*\(?Druck\)?[^\d]{0,15}(\d+(?:[\.,]\d+)?)/im,
-    /N[_\s]?Ed[,\s]?Druck[^\d]{0,15}(\d+(?:[\.,]\d+)?)/im,
+    new RegExp(`N[_\\s]*Ed[,\\s]*d\\s*\\(?(?:Druck)?\\)?${GAP(20)}${NUM}`, "im"),
+    new RegExp(`N[_\\s]*Ed[,\\s]*Druck${GAP(20)}${NUM}`, "im"),
+    new RegExp(`Druckkraft${GAP(20)}${NUM}\\s*kN`, "im"),
   ],
   ved: [
-    /V[_\s]?Ed\s*\(?Quer.*?\)?[^\d]{0,15}(\d+(?:[\.,]\d+)?)/im,
+    new RegExp(`V[_\\s]*Ed\\s*\\(?(?:Quer.*?)?\\)?${GAP(20)}${NUM}`, "im"),
+    new RegExp(`Querkraft${GAP(20)}${NUM}\\s*kN`, "im"),
   ],
   vrd: [
-    /V[_\s]?Rd\s*\(?Quertrag.*?\)?[^\d]{0,15}(\d+(?:[\.,]\d+)?)/im,
+    new RegExp(`V[_\\s]*Rd\\s*\\(?(?:Quertrag.*?)?\\)?${GAP(20)}${NUM}`, "im"),
+    new RegExp(`Quertragf[äa]higkeit${GAP(20)}${NUM}`, "im"),
   ],
 
-  // Nachweise (Ausnutzung)
+  // Nachweise (Ausnutzung — typically a ratio between 0 and ~1.5)
   nw_zug: [
-    /(?:Zug|N[_\s]?Ed[,\s]?z\s*\/\s*N[_\s]?Rd)[^\d]{0,30}(\d[\.,]\d{1,3})/im,
+    /(?:Zug|N[_\s]*Ed[,\s]*z\s*\/\s*N[_\s]*Rd)[^\d\n]{0,40}(\d[\.,]\d{1,3})/im,
+    /Ausnutzung\s+Zug[^\d\n]{0,30}(\d[\.,]\d{1,3})/im,
   ],
   nw_druck: [
-    /(?:Druck|N[_\s]?Ed[,\s]?d\s*\/\s*N[_\s]?Rd[,\s]?d)[^\d]{0,30}(\d[\.,]\d{1,3})/im,
+    /(?:Druck|N[_\s]*Ed[,\s]*d\s*\/\s*N[_\s]*Rd[,\s]*d)[^\d\n]{0,40}(\d[\.,]\d{1,3})/im,
+    /Ausnutzung\s+Druck[^\d\n]{0,30}(\d[\.,]\d{1,3})/im,
   ],
   nw_quer: [
-    /(?:Quer|V[_\s]?Ed\s*\/\s*V[_\s]?Rd)[^\d]{0,30}(\d[\.,]\d{1,3})/im,
+    /(?:Quer|V[_\s]*Ed\s*\/\s*V[_\s]*Rd)[^\d\n]{0,40}(\d[\.,]\d{1,3})/im,
+    /Ausnutzung\s+Quer[^\d\n]{0,30}(\d[\.,]\d{1,3})/im,
   ],
   nw_kombi: [
-    /Kombination[^\d]{0,30}(\d[\.,]\d{1,3})/im,
+    /Kombination[^\d\n]{0,40}(\d[\.,]\d{1,3})/im,
+    /(?:Kombinierte?\s+Ausnutzung|Interaktionsnachweis)[^\d\n]{0,30}(\d[\.,]\d{1,3})/im,
   ],
 
   // Fassade
   fassadenlaenge: [
-    /(?:Fassadenl[aä]nge|Fassadenbreite|Breite)[:\s]+(\d+(?:[\.,]\d+)?)/im,
+    new RegExp(`(?:Fassadenl[aä]nge|Fassadenbreite|Wandl[aä]nge|Wandbreite)${GAP(15)}${NUM}`, "im"),
   ],
   fassadenhoehe: [
-    /Fassadenh[oö]he[:\s]+(\d+(?:[\.,]\d+)?)/im,
+    new RegExp(`(?:Fassadenh[oö]he|Wandh[oö]he|H[oö]he\\s+Fassade)${GAP(15)}${NUM}`, "im"),
   ],
   geometrie_art: [
-    /Geometrie\s*\/?\s*Begr[uü]nungsart[:\s]+([^\n]{2,60}?)(?:\s{2,}|$)/im,
+    /Geometrie\s*\/?\s*Begr[uü]nungsart[\s\t]*[:\-=]\s*([^\n\t]{2,60}?)(?:\t|\s{3,}|$)/im,
+    /Begr[uü]nungsart[\s\t]*[:\-=]\s*([^\n\t]{2,60}?)(?:\t|\s{3,}|$)/im,
   ],
 };
 
-// Product-id heuristic — turn extracted size ("260") into stable id
+// ── Product / underground heuristics ────────────────────────────────
 const PRODUCT_MAP = { "200": "eco200", "260": "eco260", "320": "eco320", "380": "eco380" };
 
 const UNTERGRUND_HINTS = [
@@ -241,7 +324,7 @@ const UNTERGRUND_HINTS = [
   [/Beton\s*C30\/37/i, "beton_c3037"],
   [/Beton\s*C50\/60/i, "beton_c5060"],
   [/Kalksand[\-\s]?Vollstein|KS\s*Vollstein|Vollstein\s*KS/i, "ks_vollstein"],
-  [/Vollziegel|Mz\b/i, "vollziegel"],
+  [/Vollziegel|\bMz\b/i, "vollziegel"],
   [/Leichtbeton(?!.*Hohl)/i, "lbv"],
   [/Hohlblock.*Leichtbeton|\bHbl\b/i, "hbl"],
   [/Kalksandlochstein|\bKSL\b/i, "ksl"],
@@ -251,13 +334,15 @@ const UNTERGRUND_HINTS = [
   [/Naturstein/i, "naturstein"],
 ];
 
-const todayDe = () => new Date().toLocaleDateString("de-DE");
+const todayDe  = () => new Date().toLocaleDateString("de-DE");
 const todayDoc = () => `VB-ISO-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-001`;
 
-// Clean PDF text: collapse runs of whitespace into single space but keep newlines.
+// Light normalisation: collapse runs of spaces/tabs into a single space
+// per group (preserving tabs as column-boundary hints) and keep newlines.
 function clean(text) {
   return text
-    .replace(/[ \t]+/g, " ")
+    .replace(/[ ]+/g, " ")          // collapse runs of plain spaces
+    .replace(/[ \t]*\n[ \t]*/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
@@ -286,32 +371,58 @@ export function parseFields(rawText) {
     }
   }
 
-  // Normalize product id
-  if (values.produkt && PRODUCT_MAP[values.produkt]) {
-    values.produkt = PRODUCT_MAP[values.produkt];
-  }
-  // Map untergrund-label → id if we got a free-form label
-  if (!values.verankerungsgrund || !/^[a-z_0-9]+$/.test(values.verankerungsgrund)) {
-    for (const [re, id] of UNTERGRUND_HINTS) {
-      if (re.test(text)) { values.verankerungsgrund = id; break; }
+  // Normalize product id (extracted "260" → "eco260")
+  if (values.produkt) {
+    if (PRODUCT_MAP[values.produkt]) values.produkt = PRODUCT_MAP[values.produkt];
+    else {
+      const m = String(values.produkt).match(/(\d{3})/);
+      if (m && PRODUCT_MAP[m[1]]) values.produkt = PRODUCT_MAP[m[1]];
     }
   }
-  // Normalise WZ/GK roman to digit
+  // Try to detect product from a free-form mention if nothing else matched
+  if (!values.produkt) {
+    const m = text.match(/Iso[-\s]?Bar\s*ECO\s*(200|260|320|380)/i);
+    if (m && PRODUCT_MAP[m[1]]) {
+      values.produkt = PRODUCT_MAP[m[1]];
+      if (!hits.includes("produkt")) {
+        hits.push("produkt");
+        const idx = misses.indexOf("produkt");
+        if (idx >= 0) misses.splice(idx, 1);
+      }
+    }
+  }
+  // Verankerungsgrund: map free-form label → stable id
+  if (!values.verankerungsgrund || !/^[a-z_0-9]+$/.test(values.verankerungsgrund)) {
+    for (const [re, id] of UNTERGRUND_HINTS) {
+      if (re.test(text)) {
+        values.verankerungsgrund = id;
+        if (!hits.includes("verankerungsgrund")) {
+          hits.push("verankerungsgrund");
+          const idx = misses.indexOf("verankerungsgrund");
+          if (idx >= 0) misses.splice(idx, 1);
+        }
+        break;
+      }
+    }
+  }
+  // Normalise WZ Roman → digit
   if (values.windlastzone) {
     const m = { I: "1", II: "2", III: "3", IV: "4" };
     values.windlastzone = m[values.windlastzone] || values.windlastzone;
   }
+  // Normalise GK Arabic → Roman
   if (values.gelaendekategorie) {
-    const m = { I: "I", II: "II", III: "III", IV: "IV", 1: "I", 2: "II", 3: "III", 4: "IV" };
+    const m = { "1": "I", "2": "II", "3": "III", "4": "IV" };
     values.gelaendekategorie = m[values.gelaendekategorie] || values.gelaendekategorie;
   }
-  // Default datum if absent
+  // Default datum if absent (parser-fallback, not a "hit")
   if (!values.datum) values.datum = todayDe();
 
   return { values, hits, misses };
 }
 
-// Build a complete defaults object (everything the App needs) and overlay parsed values.
+// Build the complete defaults object and overlay parsed values.
+// `rawText` is also returned so the UI can show what we actually got.
 export function buildDocument(rawText) {
   const { values, hits, misses } = parseFields(rawText);
   const defaults = {
@@ -358,12 +469,16 @@ export function buildDocument(rawText) {
 
   const merged = { ...defaults, ...values };
   if (!merged.fassadenhoehe) merged.fassadenhoehe = merged.gebaeudehoehe || "3";
-  // Update first facade dims from parsed top-level
   merged.fassaden = [{
     name: "Fassade 1",
     breite: merged.fassadenlaenge,
     hoehe: merged.fassadenhoehe,
   }];
 
-  return { document: merged, hits, misses, rawTextLength: rawText.length };
+  return {
+    document: merged,
+    hits, misses,
+    rawTextLength: (rawText || "").length,
+    rawText: rawText || "",          // expose for the UI's "Roher Text" panel
+  };
 }
