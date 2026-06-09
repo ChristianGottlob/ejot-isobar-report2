@@ -6,6 +6,7 @@ import RealisticFacade from "./RealisticFacade";
 import RasterOverlay from "./RasterOverlay";
 import PlanAnnotator from "./PlanAnnotator";
 import { normalizeAnnotations, unionBBox, pointInRect, pointInAny, greeningAreaPx, lineInsideLengthPx, pxPerMeter, rectIntersectionArea } from "./planUtils";
+import { loadDocument, saveDocument, clearDocument } from "./idbStore";
 
 // ─── Colors ─────────────────────────────────────────────
 const R="#C8102E",RL="#C8102E10",RM="#C8102E28",BK="#1A1A1A",DK="#333",GY="#666",GL="#999",BG="#F7F6F4",BD="#D8D6D4",WH="#FFF",GN="#2E7D32",AM="#E68A00";
@@ -864,6 +865,29 @@ function MaterialSection({d,mat}){
 }
 
 // ═══════════════════════════════════════════════════════════
+// Has the user actually entered or imported anything?
+function hasContent(d){
+  if(!d) return false;
+  if(d.bauvorhaben||d.ort_plz||d.bearbeiter) return true;
+  if(Array.isArray(d.fassaden)){
+    for(const f of d.fassaden){
+      if(f.plan) return true;
+      if(f.annotations&&(f.annotations.facades?.length>0||f.annotations.windows?.length>0||f.annotations.doors?.length>0)) return true;
+    }
+  }
+  return false;
+}
+
+// Format "Gespeichert vor 7 s" / "vor 3 min" / "vor 2 h"
+function fmtAgo(ts){
+  if(!ts) return "";
+  const s=Math.floor((Date.now()-ts)/1000);
+  if(s<3) return "Gerade gespeichert";
+  if(s<60) return `Gespeichert vor ${s} s`;
+  if(s<3600) return `Gespeichert vor ${Math.floor(s/60)} min`;
+  return `Gespeichert vor ${Math.floor(s/3600)} h`;
+}
+
 export default function App(){
   const[step,setStep]=useState("upload");
   const[d,setD]=useState({});
@@ -872,7 +896,12 @@ export default function App(){
   const[parsing,setParsing]=useState(false);
   const[parseErr,setParseErr]=useState("");
   const[dragOver,setDragOver]=useState(false);
+  const[restored,setRestored]=useState(false);    // banner shown after auto-restore
+  const[lastSaved,setLastSaved]=useState(null);   // timestamp of last successful save
+  const[saving,setSaving]=useState(false);        // a save is queued / in flight
+  const[, forceTick]=useState(0);                 // re-render every 15s so fmtAgo stays fresh
   const fRef=useRef(null);
+  const hydratedRef=useRef(false);                // skip auto-save until after initial hydrate
   const setter=k=>v=>setD(x=>({...x,[k]:v}));
   const usable=useMemo(()=>FLL_PLANTS.filter(p=>p.lk!==null),[]);
   const mat=useMemo(()=>calcMaterial(d),[d.LH,d.LV,d.fassadenlaenge,d.fassadenhoehe,d.seilfuehrung,d.fassaden]);
@@ -900,6 +929,53 @@ export default function App(){
 
   const handleFile=useCallback(e=>{const f=e.target.files?.[0];if(f)ingestFile(f);},[ingestFile]);
   const handleDrop=useCallback(e=>{e.preventDefault();setDragOver(false);const f=e.dataTransfer?.files?.[0];if(f)ingestFile(f);},[ingestFile]);
+
+  // ─── AUTO-SAVE / RESTORE (IndexedDB) ─────────────────────
+  // On mount: try to restore the last document.  If found and non-empty,
+  // jump straight to the edit step and show a small banner.
+  useEffect(()=>{(async()=>{
+    const saved=await loadDocument();
+    if(saved&&saved.d&&hasContent(saved.d)){
+      setD(saved.d);
+      setStep(saved.step==="upload"?"edit":(saved.step||"edit"));
+      if(saved.pdfN) setPdfN(saved.pdfN);
+      setLastSaved(saved.savedAt||Date.now());
+      setRestored(true);
+    }
+    hydratedRef.current=true;
+  })();},[]);
+  // Debounced save: 1.2 s after the last change to {d, step, pdfN}.
+  // The cleanup callback cancels the timer if another change comes in,
+  // so we never write more often than once per debounce window.
+  useEffect(()=>{
+    if(!hydratedRef.current) return;
+    if(step==="upload"||!hasContent(d)) return;
+    setSaving(true);
+    const handle=setTimeout(async()=>{
+      const ok=await saveDocument({d,step,pdfN,savedAt:Date.now()});
+      if(ok) setLastSaved(Date.now());
+      setSaving(false);
+    },1200);
+    return()=>clearTimeout(handle);
+  },[d,step,pdfN]);
+  // Periodic re-render so "vor X s" stays current
+  useEffect(()=>{const id=setInterval(()=>forceTick(t=>t+1),15000);return()=>clearInterval(id);},[]);
+
+  // "Neu" — start fresh, confirm if there's unsaved work
+  const startNew=useCallback(async()=>{
+    if(hasContent(d)){
+      const ok=window.confirm("Aktuelles Projekt wird zurückgesetzt.\n\nWeiter?");
+      if(!ok) return;
+    }
+    await clearDocument();
+    setD({});
+    setPdfN("");
+    setParseInfo(null);
+    setParseErr("");
+    setRestored(false);
+    setLastSaved(null);
+    setStep("upload");
+  },[d]);
 
   // ─── PDF EXPORT ───────────────────────────────────────
   const previewRef=useRef(null);
@@ -964,6 +1040,79 @@ export default function App(){
     const sec=map[which];
     if(sec)exportPdf(which,sec.ref,`EJOT_IsoBar_${sec.name}_${d.dokNr||"Report"}.pdf`);
   };
+
+  // CSV export of the material list — for direct hand-off to Einkauf.
+  // German Excel-friendly: ';' separator, BOM, comma decimal, dot thousands.
+  const exportCsv=useCallback(()=>{
+    setShowExportMenu(false);
+    const fassaden=d.fassaden||[];
+    const stats=fassaden.map(f=>calcFacadeStats(f,d));
+    const tot={
+      anker:stats.reduce((s,x)=>s+x.anker,0),
+      sk:stats.reduce((s,x)=>s+x.sk,0),
+      area:stats.reduce((s,x)=>s+x.area,0),
+      sV:stats.reduce((s,x)=>s+x.sV,0),
+      sH:stats.reduce((s,x)=>s+x.sH,0),
+      sD:stats.reduce((s,x)=>s+x.sD,0),
+    };
+    const totalSeilGes=(tot.sV+tot.sH+tot.sD)*1.1;
+    const setInfo=SETS.find(s=>s.id===d.produkt);
+    const matSK=fassaden[0]?.seilkreuztyp||d.seilkreuztyp||"ohne";
+    const skInfo=SEILKREUZE.find(s=>s.id===matSK);
+    const rows=[];
+    rows.push(["EJOT Iso-Bar ECO — Materialgrobplanung"]);
+    rows.push([`Dokument: ${d.dokNr||"–"}`,`Version: ${d.version||"–"}`,`Datum: ${d.datum||""}`]);
+    rows.push([`Bauvorhaben: ${d.bauvorhaben||"–"}`,`Ort: ${d.ort_plz||"–"}`,`Bearbeiter: ${d.bearbeiter||"–"}`]);
+    rows.push([]);
+
+    // Headline summary
+    rows.push(["Position","Bezeichnung","Menge","Einheit","Artikelnummer","Hinweis"]);
+    let p=1;
+    rows.push([p++,setInfo?setInfo.l:"EJOT Iso-Bar ECO (Ankerpunkt)",fmtInt(tot.anker),"Stk",setInfo?.art||"",""]);
+    if(tot.sV>0) rows.push([p++,"Seil Edelstahl V4A ø4mm – vertikal",fmtDec(tot.sV,1),"m","",""]);
+    if(tot.sH>0) rows.push([p++,"Seil Edelstahl V4A ø4mm – horizontal",fmtDec(tot.sH,1),"m","",""]);
+    if(tot.sD>0) rows.push([p++,"Seil Edelstahl V4A ø4mm – diagonal",fmtDec(tot.sD,1),"m","",""]);
+    rows.push([p++,"Seil gesamt (alle Richtungen)",fmtDec(totalSeilGes,1),"m","","inkl. ca. +10 % Verschnitt"]);
+    if(tot.sk>0&&skInfo) rows.push([p++,skInfo.l,fmtInt(tot.sk),"Stk",skInfo.art||"",""]);
+    rows.push([p++,"Endkappen / Seilhülsen",fmtInt(tot.anker*2),"Stk","","2 pro Ankerpunkt"]);
+    rows.push([]);
+
+    // Per-facade / per-greening-rect breakdown
+    rows.push(["Aufschlüsselung je Begrünungsfläche"]);
+    rows.push(["Fassade","Fläche","B [m]","H [m]","Brutto [m²]","Aussparung [m²]","Netto [m²]","Anker","Seilkreuze","Seil V [m]","Seil H [m]","Seil D [m]","aus Plan"]);
+    stats.forEach(f=>{
+      (f.rects||[]).forEach(r=>{
+        rows.push([
+          f.name, r.label,
+          fmtDec(r.breite_m,2), fmtDec(r.hoehe_m,2),
+          fmtDec(r.area_brutto,2), fmtDec(r.area_excl,2), fmtDec(r.area,2),
+          r.anker, r.sk,
+          fmtDec(r.sV,1), fmtDec(r.sH,1), fmtDec(r.sD,1),
+          f.fromPlan?"ja":"nein",
+        ]);
+      });
+    });
+    rows.push([
+      "Gesamt","","","",
+      fmtDec(stats.reduce((s,x)=>s+x.area_brutto,0),2),
+      fmtDec(stats.reduce((s,x)=>s+x.area_excl,0),2),
+      fmtDec(tot.area,2),
+      tot.anker, tot.sk,
+      fmtDec(tot.sV,1), fmtDec(tot.sH,1), fmtDec(tot.sD,1),"",
+    ]);
+
+    const escape=(c)=>{const s=String(c??"");return /[";\n,]/.test(s)?`"${s.replace(/"/g,'""')}"`:s;};
+    const csv="﻿"+rows.map(r=>r.map(escape).join(";")).join("\r\n");
+    const blob=new Blob([csv],{type:"text/csv;charset=utf-8"});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement("a");
+    a.href=url;
+    a.download=`EJOT_IsoBar_Materialliste_${d.dokNr||"Report"}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(url),1000);
+  },[d]);
 
   useEffect(()=>{
     if(!showExportMenu)return;
@@ -1035,15 +1184,20 @@ export default function App(){
           <div style={{width:34,height:34,borderRadius:8,background:`linear-gradient(135deg, ${R}, #8E0B22)`,display:"flex",alignItems:"center",justifyContent:"center",color:WH,fontWeight:900,fontSize:15,boxShadow:"0 2px 6px rgba(200,16,46,.30)"}}>E</div>
           <div>
             <div style={{fontWeight:900,fontSize:14,color:R,lineHeight:1}}>EJOT<sup style={{fontSize:6,color:BK}}>®</sup> Iso-Bar ECO</div>
-            <div style={{fontSize:10,color:GY,marginTop:2}}>
-              {d.bauvorhaben||"Neues Projekt"} {d.ort_plz&&<>· {d.ort_plz}</>}
-              {pdfN&&<span style={{color:GL,marginLeft:6}}>← {pdfN}</span>}
+            <div style={{fontSize:10,color:GY,marginTop:2,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+              <span>{d.bauvorhaben||"Neues Projekt"} {d.ort_plz&&<>· {d.ort_plz}</>}</span>
+              {pdfN&&<span style={{color:GL}}>← {pdfN}</span>}
+              {(saving||lastSaved)&&<span title="Wird lokal in deinem Browser gespeichert (IndexedDB). Nichts wird hochgeladen."
+                style={{display:"inline-flex",alignItems:"center",gap:4,padding:"1px 7px",borderRadius:10,background:saving?"#E3F2FD":"#E8F5E9",color:saving?"#1565C0":"#1B5E20",border:`1px solid ${saving?"#90CAF9":"#A5D6A7"}`,fontWeight:600,fontSize:9.5}}>
+                <span style={{width:6,height:6,borderRadius:"50%",background:saving?"#1565C0":"#2E7D32",boxShadow:saving?"":""}}/>
+                {saving?"Speichert…":fmtAgo(lastSaved)}
+              </span>}
             </div>
           </div>
         </div>
         {/* Tab strip + actions */}
         <div style={{display:"flex",gap:6,alignItems:"center",paddingBottom:10}}>
-          <button onClick={()=>setStep("upload")} title="Neue Datei laden"
+          <button onClick={startNew} title="Neues Projekt starten (aktuelles wird zurückgesetzt)"
             onMouseEnter={e=>{e.currentTarget.style.background=BG;e.currentTarget.style.borderColor=GL;}}
             onMouseLeave={e=>{e.currentTarget.style.background=WH;e.currentTarget.style.borderColor=BD;}}
             style={{padding:"6px 10px",fontSize:11,border:`1px solid ${BD}`,borderRadius:6,background:WH,cursor:"pointer",color:DK,fontWeight:600,display:"flex",alignItems:"center",gap:4,transition:"all .15s"}}>
@@ -1078,10 +1232,37 @@ export default function App(){
                 textAlign:"left",cursor:"pointer",borderRadius:5,fontSize:11.5,fontWeight:700,color:R}}
                 onMouseEnter={e=>e.currentTarget.style.background=RL}
                 onMouseLeave={e=>e.currentTarget.style.background="none"}>⬇ Alle 3 PDFs exportieren</button>
+              <div style={{borderTop:`1px solid ${BD}`,margin:"4px 0"}}/>
+              <div style={{padding:"7px 11px",fontWeight:700,fontSize:9.5,color:GL,textTransform:"uppercase",letterSpacing:.5}}>Daten</div>
+              <button onClick={exportCsv} style={{display:"block",width:"100%",padding:"8px 11px",background:"none",border:"none",
+                textAlign:"left",cursor:"pointer",borderRadius:5,fontSize:11.5,fontWeight:600,color:DK,display:"flex",alignItems:"center",gap:8}}
+                onMouseEnter={e=>e.currentTarget.style.background=BG}
+                onMouseLeave={e=>e.currentTarget.style.background="none"}>
+                <span>📊</span>
+                <span>Materialliste als CSV<br/><span style={{fontSize:9.5,color:GL,fontWeight:500}}>Excel-kompatibel (DE) · für Einkauf</span></span>
+              </button>
             </div>}
           </div>
         </div>
       </div>
+
+      {/* Restoration banner (shown once after auto-restore) */}
+      {restored&&step!=="upload"&&<div style={{maxWidth:980,margin:"12px auto 0",padding:"0 14px"}}>
+        <div style={{display:"flex",gap:10,alignItems:"center",padding:"10px 14px",background:"#E8F5E9",border:"1px solid #2E7D3240",borderRadius:8,fontSize:12}}>
+          <span style={{fontSize:18}}>📂</span>
+          <div style={{flex:1}}>
+            <div style={{fontWeight:700,color:"#1B5E20"}}>Letzte Sitzung wiederhergestellt</div>
+            <div style={{color:GY,fontSize:10.5,marginTop:1}}>
+              Alle deine Daten werden lokal in deinem Browser gespeichert (IndexedDB) — nichts wird hochgeladen.
+              Mit "Neu" oben links startest du jederzeit von vorne.
+            </div>
+          </div>
+          <button onClick={()=>setRestored(false)}
+            style={{padding:"6px 10px",fontSize:11,border:"1px solid #2E7D3260",borderRadius:5,background:WH,cursor:"pointer",color:"#1B5E20",fontWeight:600}}>
+            Verstanden
+          </button>
+        </div>
+      </div>}
 
       {/* Parse-feedback banner (after upload) */}
       {parseInfo&&step==="edit"&&<div style={{maxWidth:980,margin:"12px auto 0",padding:"0 14px"}}>
