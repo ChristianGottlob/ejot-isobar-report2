@@ -5,7 +5,7 @@ import { extractPdfText, buildDocument, loadPlanImage } from "./pdfExtract";
 import RealisticFacade from "./RealisticFacade";
 import RasterOverlay from "./RasterOverlay";
 import PlanAnnotator from "./PlanAnnotator";
-import { normalizeAnnotations, unionBBox, pointInAny, greeningAreaPx, lineInsideLengthPx, pxPerMeter } from "./planUtils";
+import { normalizeAnnotations, unionBBox, pointInRect, pointInAny, greeningAreaPx, lineInsideLengthPx, pxPerMeter, rectIntersectionArea } from "./planUtils";
 
 // ─── Colors ─────────────────────────────────────────────
 const R="#C8102E",RL="#C8102E10",RM="#C8102E28",BK="#1A1A1A",DK="#333",GY="#666",GL="#999",BG="#F7F6F4",BD="#D8D6D4",WH="#FFF",GN="#2E7D32",AM="#E68A00";
@@ -190,11 +190,11 @@ function fmtDec(n, d = 2) { return Number.isFinite(n) ? (d === 1 ? _NF1 : d === 
 
 // ── Per-facade material stats ─────────────────────────────
 // Returns:  {name, breite, hoehe, area_brutto, area_excl, area,
-//            anker, sk, cols, rows, sV, sH, sD, fromPlan}
-// If the facade has a plan + at least one annotated greening rect, the
-// numbers are derived from the plan (scaled by the user's typed breite/höhe).
-// Windows/doors marked on the plan are deducted from anchors, cables, area.
-// Otherwise: simple rectangular calc with typed breite × höhe.
+//            anker, sk, cols, rows, sV, sH, sD, fromPlan, rects[]}
+// `rects` is the per-greening-rectangle breakdown — when the user marks N
+// areas on the plan we get N sub-rows; each gets its OWN anchor grid placed
+// inside that rectangle.  Aggregating bbox-wide (the previous behaviour)
+// silently dropped anchors that fell in the gaps between disjoint rects.
 function calcFacadeStats(f, d) {
   const lh_m = pf(f.lh) || pf(d.LH) || 0.9;
   const lv_m = pf(f.lv) || pf(d.LV) || 0.9;
@@ -222,110 +222,138 @@ function calcFacadeStats(f, d) {
       if (raster === "gitter") skCount = cols * rows + cols * (rows + 1) + (cols + 1) * rows;
       else if (raster === "diagonal") skCount = cols * rows;
     }
-    return {
-      name: f.name, breite: fw_m, hoehe: fh_m,
+    const single = {
+      name: f.name,
+      label: f.name,
+      breite_m: fw_m, hoehe_m: fh_m,
       area_brutto: fw_m * fh_m,
       area_excl: 0,
       area: fw_m * fh_m,
       anker, sk: skCount,
       cols: cols + 1, rows: rows + 1,
       sV, sH, sD,
+    };
+    return {
+      name: f.name, breite: fw_m, hoehe: fh_m,
+      area_brutto: single.area_brutto,
+      area_excl: 0,
+      area: single.area,
+      anker, sk: skCount,
+      cols: cols + 1, rows: rows + 1,
+      sV, sH, sD,
       fromPlan: false,
+      rects: [single],
     };
   }
 
-  // Plan-aware.  Prefer explicit scale (calibrated by user) over the
-  // bbox-vs-typed-breite assumption — that's the only way the resulting
-  // anchor count and cable lengths are trustworthy when the user marks
-  // only part of the facade.
+  // Plan-aware.  One anchor grid PER greening rect — placing the grid in
+  // each rect avoids losing anchors to the gaps between disjoint rects.
+  // Scale: prefer the user's explicit calibration; fall back to bbox vs
+  // typed dimensions otherwise.
   const bbox = unionBBox(ann.facades);
-  const pxPerMUniform = pxPerMeter(ann, bbox, fw_m, fh_m);  // single value
-  const haveCalibratedScale = !!ann.scale;
-  // When calibrated, both axes use the same pxPerM (uniform).  When falling
-  // back to bbox, use per-axis ratios so the grid fits the marked region.
-  const pxPerMx = haveCalibratedScale ? pxPerMUniform : (fw_m > 0 ? bbox.w / fw_m : 1);
-  const pxPerMy = haveCalibratedScale ? pxPerMUniform : (fh_m > 0 ? bbox.h / fh_m : 1);
-  if (!pxPerMx || !pxPerMy) {
-    // No usable scale — return zeros so the user sees "calibration missing"
+  const pxM = pxPerMeter(ann, bbox, fw_m, fh_m);
+  if (!pxM || pxM <= 0) {
     return {
       name: f.name, breite: fw_m, hoehe: fh_m,
       area_brutto: 0, area_excl: 0, area: 0,
       anker: 0, sk: 0, cols: 0, rows: 0,
       sV: 0, sH: 0, sD: 0,
       fromPlan: true,
+      rects: [],
     };
   }
-  const cellWpx = lh_m * pxPerMx;
-  const cellHpx = lv_m * pxPerMy;
-  const cols = Math.max(0, Math.floor(fw_m / lh_m));
-  const rows = Math.max(0, Math.floor(fh_m / lv_m));
-  const totalGridW = cols * cellWpx;
-  const totalGridH = rows * cellHpx;
-  const ax0 = bbox.x + (bbox.w - totalGridW) / 2;
-  const ay0 = bbox.y + (bbox.h - totalGridH) / 2;
+  const cellWpx = lh_m * pxM;
+  const cellHpx = lv_m * pxM;
   const exclusions = [...ann.windows, ...ann.doors];
+  const diagPx = Math.sqrt(cellWpx * cellWpx + cellHpx * cellHpx);
+  const diagM  = Math.sqrt(lh_m * lh_m + lv_m * lv_m);
 
-  // Anchor count: include if inside any greening AND outside every exclusion.
-  // Same slack policy as the renderer.
-  let anker = 0;
-  for (let c = 0; c <= cols; c++) for (let r = 0; r <= rows; r++) {
-    const p = { x: ax0 + c * cellWpx, y: ay0 + r * cellHpx };
-    if (!pointInAny(p, ann.facades, 1)) continue;
-    if (pointInAny(p, exclusions, -2)) continue;
-    anker++;
-  }
+  const rects = ann.facades.map((g, idx) => {
+    const breite_m = g.w / pxM;
+    const hoehe_m  = g.h / pxM;
+    const colsR = Math.max(0, Math.floor(breite_m / lh_m));
+    const rowsR = Math.max(0, Math.floor(hoehe_m / lv_m));
+    const totalGridW = colsR * cellWpx;
+    const totalGridH = rowsR * cellHpx;
+    const ax0 = g.x + (g.w - totalGridW) / 2;
+    const ay0 = g.y + (g.h - totalGridH) / 2;
+    const onlyHere = [g];
 
-  // Cable lengths in meters (sampled, then divided by px/m)
-  let sV = 0, sH = 0, sD = 0;
-  if (hasV) for (let c = 0; c <= cols; c++) {
-    sV += lineInsideLengthPx(ax0 + c * cellWpx, ay0, ax0 + c * cellWpx, ay0 + totalGridH,
-                             ann.facades, exclusions) / pxPerMy;
-  }
-  if (hasH) for (let r = 0; r <= rows; r++) {
-    sH += lineInsideLengthPx(ax0, ay0 + r * cellHpx, ax0 + totalGridW, ay0 + r * cellHpx,
-                             ann.facades, exclusions) / pxPerMx;
-  }
-  if (hasD) {
-    const diagPx = Math.sqrt(cellWpx * cellWpx + cellHpx * cellHpx);
-    const diagM  = Math.sqrt(lh_m * lh_m + lv_m * lv_m);
-    for (let c = 0; c < cols; c++) for (let r = 0; r < rows; r++) {
-      const len1 = lineInsideLengthPx(ax0 + c * cellWpx, ay0 + r * cellHpx,
+    let anker = 0;
+    for (let c = 0; c <= colsR; c++) for (let r = 0; r <= rowsR; r++) {
+      const p = { x: ax0 + c * cellWpx, y: ay0 + r * cellHpx };
+      if (!pointInRect(p, g, 1)) continue;
+      if (pointInAny(p, exclusions, -2)) continue;
+      anker++;
+    }
+
+    let sV = 0, sH = 0, sD = 0;
+    if (hasV) for (let c = 0; c <= colsR; c++) {
+      sV += lineInsideLengthPx(ax0 + c * cellWpx, ay0, ax0 + c * cellWpx, ay0 + totalGridH,
+                               onlyHere, exclusions) / pxM;
+    }
+    if (hasH) for (let r = 0; r <= rowsR; r++) {
+      sH += lineInsideLengthPx(ax0, ay0 + r * cellHpx, ax0 + totalGridW, ay0 + r * cellHpx,
+                               onlyHere, exclusions) / pxM;
+    }
+    if (hasD) {
+      for (let c = 0; c < colsR; c++) for (let r = 0; r < rowsR; r++) {
+        const l1 = lineInsideLengthPx(ax0 + c * cellWpx, ay0 + r * cellHpx,
                                        ax0 + (c + 1) * cellWpx, ay0 + (r + 1) * cellHpx,
-                                       ann.facades, exclusions);
-      const len2 = lineInsideLengthPx(ax0 + (c + 1) * cellWpx, ay0 + r * cellHpx,
+                                       onlyHere, exclusions);
+        const l2 = lineInsideLengthPx(ax0 + (c + 1) * cellWpx, ay0 + r * cellHpx,
                                        ax0 + c * cellWpx, ay0 + (r + 1) * cellHpx,
-                                       ann.facades, exclusions);
-      sD += ((len1 + len2) / diagPx) * diagM;
+                                       onlyHere, exclusions);
+        sD += ((l1 + l2) / diagPx) * diagM;
+      }
     }
-  }
 
-  // Seilkreuze: filter their positions through greening minus exclusions
-  let skCount = 0;
-  if (sk !== "ohne") {
-    const skPts = [];
-    if (raster === "gitter") {
-      for (let c = 0; c < cols; c++) for (let r = 0; r < rows; r++) skPts.push({ x: ax0 + (c + 0.5) * cellWpx, y: ay0 + (r + 0.5) * cellHpx });
-      for (let c = 0; c < cols; c++) for (let r = 0; r <= rows; r++) skPts.push({ x: ax0 + (c + 0.5) * cellWpx, y: ay0 + r * cellHpx });
-      for (let c = 0; c <= cols; c++) for (let r = 0; r < rows; r++) skPts.push({ x: ax0 + c * cellWpx, y: ay0 + (r + 0.5) * cellHpx });
-    } else if (raster === "diagonal") {
-      for (let c = 0; c < cols; c++) for (let r = 0; r < rows; r++) skPts.push({ x: ax0 + (c + 0.5) * cellWpx, y: ay0 + (r + 0.5) * cellHpx });
+    let skR = 0;
+    if (sk !== "ohne") {
+      const skPts = [];
+      if (raster === "gitter") {
+        for (let c = 0; c < colsR; c++) for (let r = 0; r < rowsR; r++) skPts.push({ x: ax0 + (c + 0.5) * cellWpx, y: ay0 + (r + 0.5) * cellHpx });
+        for (let c = 0; c < colsR; c++) for (let r = 0; r <= rowsR; r++) skPts.push({ x: ax0 + (c + 0.5) * cellWpx, y: ay0 + r * cellHpx });
+        for (let c = 0; c <= colsR; c++) for (let r = 0; r < rowsR; r++) skPts.push({ x: ax0 + c * cellWpx, y: ay0 + (r + 0.5) * cellHpx });
+      } else if (raster === "diagonal") {
+        for (let c = 0; c < colsR; c++) for (let r = 0; r < rowsR; r++) skPts.push({ x: ax0 + (c + 0.5) * cellWpx, y: ay0 + (r + 0.5) * cellHpx });
+      }
+      skR = skPts.filter(p => pointInRect(p, g, 1) && !pointInAny(p, exclusions, -2)).length;
     }
-    skCount = skPts.filter(p => pointInAny(p, ann.facades, 1) && !pointInAny(p, exclusions, -2)).length;
-  }
 
-  const area_brutto_px = ann.facades.reduce((s, g) => s + g.w * g.h, 0);
-  const greening_px = greeningAreaPx(ann.facades, exclusions);
-  const denom = pxPerMx * pxPerMy;
-  const area_brutto = denom > 0 ? area_brutto_px / denom : 0;
-  const area_netto  = denom > 0 ? greening_px / denom : 0;
+    const area_brutto = breite_m * hoehe_m;
+    let area_excl_px = 0;
+    for (const e of exclusions) area_excl_px += rectIntersectionArea(g, e);
+    const area_excl = area_excl_px / (pxM * pxM);
+    const area = Math.max(0, area_brutto - area_excl);
 
+    return {
+      name: f.name + (ann.facades.length > 1 ? ` · Fläche ${idx + 1}` : ""),
+      label: ann.facades.length > 1 ? `Fläche ${idx + 1}` : f.name,
+      rectIndex: idx,
+      breite_m, hoehe_m,
+      area_brutto, area_excl, area,
+      anker, sk: skR,
+      cols: colsR + 1, rows: rowsR + 1,
+      sV, sH, sD,
+    };
+  });
+
+  // Aggregate
+  const sumKey = k => rects.reduce((s, r) => s + r[k], 0);
   return {
     name: f.name, breite: fw_m, hoehe: fh_m,
-    area_brutto, area_excl: Math.max(0, area_brutto - area_netto), area: area_netto,
-    anker, sk: skCount,
-    cols: cols + 1, rows: rows + 1,
-    sV, sH, sD,
+    area_brutto: sumKey("area_brutto"),
+    area_excl:   sumKey("area_excl"),
+    area:        sumKey("area"),
+    anker:       sumKey("anker"),
+    sk:          sumKey("sk"),
+    sV:          sumKey("sV"),
+    sH:          sumKey("sH"),
+    sD:          sumKey("sD"),
+    cols: 0, rows: 0,
     fromPlan: true,
+    rects,
   };
 }
 
@@ -741,37 +769,62 @@ function MaterialSection({d,mat}){
           <RasterOverlay LH={matLH} LV={matLV} fW={matW} fH={matH} rasterType={matRaster}
             seilkreuztyp={matSK} size={460} plan={matPlan} annotations={matAnn}/></div></div>
 
-      {(fassaden.length>1||anyFromPlan)&&<div style={{border:`1px solid ${BD}`,borderRadius:4,padding:12,marginBottom:14}}>
+      {(fassaden.length>1||anyFromPlan||facadeStats.some(f=>f.rects&&f.rects.length>1))&&<div style={{border:`1px solid ${BD}`,borderRadius:4,padding:12,marginBottom:14}}>
         <div style={{fontWeight:700,fontSize:10.5,textTransform:"uppercase",letterSpacing:.5,marginBottom:8,color:BK,display:"flex",justifyContent:"space-between"}}>
-          <span>Aufschlüsselung je Fassade</span>
+          <span>Aufschlüsselung je Begrünungsfläche</span>
           {anyFromPlan&&<span style={{fontWeight:600,fontSize:9,color:GY,textTransform:"none",letterSpacing:0}}>📐 = aus Plan ermittelt</span>}
         </div>
         <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
-          <thead><tr>{["Fassade","B × H [m]","Brutto","Aussp.","Netto","Anker","Seilkreuze","Gesamt"].map(h=>
+          <thead><tr>{["Fassade / Fläche","B × H [m]","Brutto","Aussp.","Netto","Anker","Seilkreuze","Seil V","Seil H","Seil D"].map(h=>
             <th key={h} style={{background:BG,fontWeight:700,padding:"4px 6px",textAlign:"left",borderBottom:`1px solid ${BD}`,fontSize:10}}>{h}</th>)}</tr></thead>
           <tbody>
-            {facadeStats.map((f,i)=><tr key={i}>
-              <td style={{padding:"3px 6px",borderBottom:`1px solid ${BD}`,fontWeight:600}}>
-                {f.fromPlan&&<span title="aus Plan" style={{marginRight:4}}>📐</span>}{f.name}
-              </td>
-              <td style={{padding:"3px 6px",borderBottom:`1px solid ${BD}`}}>{fmtDec(f.breite,1)} × {fmtDec(f.hoehe,1)}</td>
-              <td style={{padding:"3px 6px",borderBottom:`1px solid ${BD}`}}>{fmtArea(f.area_brutto)}</td>
-              <td style={{padding:"3px 6px",borderBottom:`1px solid ${BD}`,color:f.area_excl>0?AM:GL}}>{f.area_excl>0?`− ${fmtArea(f.area_excl)}`:"–"}</td>
-              <td style={{padding:"3px 6px",borderBottom:`1px solid ${BD}`,fontWeight:600}}>{fmtArea(f.area)}</td>
-              <td style={{padding:"3px 6px",borderBottom:`1px solid ${BD}`,fontWeight:700,color:R}}>{fmtInt(f.anker)}</td>
-              <td style={{padding:"3px 6px",borderBottom:`1px solid ${BD}`,fontWeight:700,color:"#1565C0"}}>{fmtInt(f.sk)}</td>
-              <td style={{padding:"3px 6px",borderBottom:`1px solid ${BD}`,fontWeight:700}}>{fmtInt(f.anker+f.sk)}</td></tr>)}
-            <tr style={{background:BG}}>
-              <td style={{padding:"4px 6px",fontWeight:700}} colSpan={2}>Gesamt</td>
-              <td style={{padding:"4px 6px",fontWeight:700}}>{fmtArea(totalAreaBrutto)}</td>
-              <td style={{padding:"4px 6px",fontWeight:700,color:AM}}>{totalAreaExcl>0?`− ${fmtArea(totalAreaExcl)}`:"–"}</td>
-              <td style={{padding:"4px 6px",fontWeight:700}}>{fmtArea(totalArea)}</td>
-              <td style={{padding:"4px 6px",fontWeight:700,color:R}}>{fmtInt(totalAnker)}</td>
-              <td style={{padding:"4px 6px",fontWeight:700,color:"#1565C0"}}>{fmtInt(totalSK)}</td>
-              <td style={{padding:"4px 6px",fontWeight:700}}>{fmtInt(totalAnker+totalSK)}</td></tr>
+            {facadeStats.flatMap((f,fi)=>{
+              const showSubTotal = f.fromPlan && f.rects && f.rects.length > 1;
+              const rows = (f.rects||[]).map((r,ri)=>{
+                const rectLabel = f.rects.length > 1
+                  ? <><span style={{color:GY}}>{f.name} ·</span> <span style={{fontWeight:700}}>{r.label}</span></>
+                  : <span style={{fontWeight:600}}>{f.name}</span>;
+                return(<tr key={`${fi}-${ri}`}>
+                  <td style={{padding:"3px 6px",borderBottom:`1px solid ${BD}`}}>
+                    {f.fromPlan&&<span title="aus Plan" style={{marginRight:4}}>📐</span>}{rectLabel}
+                  </td>
+                  <td style={{padding:"3px 6px",borderBottom:`1px solid ${BD}`}}>{fmtDec(r.breite_m,1)} × {fmtDec(r.hoehe_m,1)}</td>
+                  <td style={{padding:"3px 6px",borderBottom:`1px solid ${BD}`}}>{fmtArea(r.area_brutto)}</td>
+                  <td style={{padding:"3px 6px",borderBottom:`1px solid ${BD}`,color:r.area_excl>0?AM:GL}}>{r.area_excl>0?`− ${fmtArea(r.area_excl)}`:"–"}</td>
+                  <td style={{padding:"3px 6px",borderBottom:`1px solid ${BD}`,fontWeight:600}}>{fmtArea(r.area)}</td>
+                  <td style={{padding:"3px 6px",borderBottom:`1px solid ${BD}`,fontWeight:700,color:R}}>{fmtInt(r.anker)}</td>
+                  <td style={{padding:"3px 6px",borderBottom:`1px solid ${BD}`,fontWeight:700,color:"#1565C0"}}>{fmtInt(r.sk)}</td>
+                  <td style={{padding:"3px 6px",borderBottom:`1px solid ${BD}`}}>{r.sV>0?fmtDec(r.sV,1)+" m":"–"}</td>
+                  <td style={{padding:"3px 6px",borderBottom:`1px solid ${BD}`}}>{r.sH>0?fmtDec(r.sH,1)+" m":"–"}</td>
+                  <td style={{padding:"3px 6px",borderBottom:`1px solid ${BD}`}}>{r.sD>0?fmtDec(r.sD,1)+" m":"–"}</td></tr>);
+              });
+              if(showSubTotal) rows.push(<tr key={`${fi}-sub`} style={{background:"#F7F6F4"}}>
+                <td style={{padding:"3px 6px",borderBottom:`1px solid ${BD}`,fontStyle:"italic",color:DK}}>Σ {f.name}</td>
+                <td style={{padding:"3px 6px",borderBottom:`1px solid ${BD}`}}></td>
+                <td style={{padding:"3px 6px",borderBottom:`1px solid ${BD}`,fontWeight:600}}>{fmtArea(f.area_brutto)}</td>
+                <td style={{padding:"3px 6px",borderBottom:`1px solid ${BD}`,color:AM}}>{f.area_excl>0?`− ${fmtArea(f.area_excl)}`:"–"}</td>
+                <td style={{padding:"3px 6px",borderBottom:`1px solid ${BD}`,fontWeight:700}}>{fmtArea(f.area)}</td>
+                <td style={{padding:"3px 6px",borderBottom:`1px solid ${BD}`,fontWeight:700,color:R}}>{fmtInt(f.anker)}</td>
+                <td style={{padding:"3px 6px",borderBottom:`1px solid ${BD}`,fontWeight:700,color:"#1565C0"}}>{fmtInt(f.sk)}</td>
+                <td style={{padding:"3px 6px",borderBottom:`1px solid ${BD}`,fontWeight:600}}>{f.sV>0?fmtDec(f.sV,1)+" m":"–"}</td>
+                <td style={{padding:"3px 6px",borderBottom:`1px solid ${BD}`,fontWeight:600}}>{f.sH>0?fmtDec(f.sH,1)+" m":"–"}</td>
+                <td style={{padding:"3px 6px",borderBottom:`1px solid ${BD}`,fontWeight:600}}>{f.sD>0?fmtDec(f.sD,1)+" m":"–"}</td></tr>);
+              return rows;
+            })}
+            <tr style={{background:`linear-gradient(90deg, ${RL}, transparent)`}}>
+              <td style={{padding:"5px 6px",fontWeight:700,fontSize:11.5}}>Gesamt</td>
+              <td style={{padding:"5px 6px"}}></td>
+              <td style={{padding:"5px 6px",fontWeight:700}}>{fmtArea(totalAreaBrutto)}</td>
+              <td style={{padding:"5px 6px",fontWeight:700,color:AM}}>{totalAreaExcl>0?`− ${fmtArea(totalAreaExcl)}`:"–"}</td>
+              <td style={{padding:"5px 6px",fontWeight:700}}>{fmtArea(totalArea)}</td>
+              <td style={{padding:"5px 6px",fontWeight:700,color:R,fontSize:12}}>{fmtInt(totalAnker)}</td>
+              <td style={{padding:"5px 6px",fontWeight:700,color:"#1565C0",fontSize:12}}>{fmtInt(totalSK)}</td>
+              <td style={{padding:"5px 6px",fontWeight:700}}>{totalSeilV>0?fmtDec(totalSeilV,1)+" m":"–"}</td>
+              <td style={{padding:"5px 6px",fontWeight:700}}>{totalSeilH>0?fmtDec(totalSeilH,1)+" m":"–"}</td>
+              <td style={{padding:"5px 6px",fontWeight:700}}>{totalSeilD>0?fmtDec(totalSeilD,1)+" m":"–"}</td></tr>
           </tbody></table>
         {anyFromPlan&&<div style={{fontSize:9.5,color:GL,marginTop:6}}>
-          Werte mit 📐 wurden aus den Plan-Annotationen ermittelt: Anker und Kabel berücksichtigen alle markierten Begrünungsflächen abzüglich Fenster/Türen.
+          Werte mit 📐 wurden aus den Plan-Annotationen ermittelt: Jede Begrünungsfläche bekommt ihr eigenes Ankerraster, gefiltert durch Fenster/Türen. Σ-Zeilen sind die Summe pro Fassade.
         </div>}
       </div>}
 

@@ -584,11 +584,16 @@ export default function PlanAnnotator({ plan, annotations, onChange, height = 48
             onPointerLeave={() => { if (!drag && !pan) setHover(null); }}
             onContextMenu={(e) => e.preventDefault()}
           >
-            {/* Facade rects */}
+            {/* Facade rects — labels & dimensions strictly INSIDE the rect
+                so they can't collide with neighbouring rects.  A semi-opaque
+                pill behind the text keeps it readable on any backdrop. */}
             {ann.facades.map((r, i) => {
               const sel = isSelected("facade", r.id);
               const dim = pxPerM ? `${fmtM(r.w)} × ${fmtM(r.h)}` : null;
-              const labelFs = Math.max(11, plan.w / 80);
+              const fs = Math.max(11, plan.w / 80);
+              const idLabel = `Begrünung ${ann.facades.length > 1 ? i + 1 : ""}`.trim();
+              const labelW = Math.min(r.w - 6, fs * (idLabel.length * 0.55 + 1));
+              const showDim = dim && r.h > fs * 3.2;
               return (
                 <g key={r.id}>
                   <rect x={r.x} y={r.y} width={r.w} height={r.h}
@@ -601,24 +606,31 @@ export default function PlanAnnotator({ plan, annotations, onChange, height = 48
                       fill="none" stroke={COL_FACADE} strokeWidth="2"
                       strokeDasharray="3,3" vectorEffect="non-scaling-stroke" />
                   )}
-                  <text x={r.x + 6} y={r.y + labelFs + 2}
-                    fontSize={labelFs} fill={COL_FACADE}
+                  {/* Label pill (white background, clipped to rect) */}
+                  <rect x={r.x + 3} y={r.y + 3} width={Math.max(0, labelW + 8)} height={fs * 1.4}
+                    fill="#FFFFFFD0" rx="3" />
+                  <text x={r.x + 7} y={r.y + fs + 4}
+                    fontSize={fs} fill={COL_FACADE}
                     fontWeight="700" pointerEvents="none">
-                    🌿 Begrünung {ann.facades.length > 1 ? i + 1 : ""}
+                    🌿 {idLabel}
                   </text>
-                  {dim && (
-                    <text x={r.x + r.w / 2} y={r.y + r.h + labelFs + 4}
-                      fontSize={labelFs * 0.95} fill={COL_FACADE} fontWeight="700"
-                      textAnchor="middle" pointerEvents="none">{dim}</text>
-                  )}
+                  {showDim && (<>
+                    <rect x={r.x + 3} y={r.y + fs * 1.5 + 4} width={Math.min(r.w - 6, fs * 5.8)} height={fs * 1.2}
+                      fill="#FFFFFFD0" rx="3" />
+                    <text x={r.x + 7} y={r.y + fs * 2.45 + 6}
+                      fontSize={fs * 0.85} fill={COL_FACADE}
+                      fontWeight="700" pointerEvents="none">{dim}</text>
+                  </>)}
                 </g>
               );
             })}
-            {/* Windows */}
+            {/* Windows — compact "F · 1,2 × 1,8 m" inside top-left */}
             {ann.windows.map((r) => {
               const sel = isSelected("window", r.id);
               const dim = pxPerM ? `${fmtM(r.w)} × ${fmtM(r.h)}` : null;
               const fs = Math.max(9, plan.w / 100);
+              const txt = dim && r.w > fs * 9 ? `F · ${dim}` : "F";
+              const pillW = Math.min(r.w - 4, fs * (txt.length * 0.55 + 1));
               return (
                 <g key={r.id}>
                   <rect x={r.x} y={r.y} width={r.w} height={r.h}
@@ -630,20 +642,20 @@ export default function PlanAnnotator({ plan, annotations, onChange, height = 48
                       fill="none" stroke={COL_WINDOW} strokeWidth="2"
                       strokeDasharray="3,3" vectorEffect="non-scaling-stroke" />
                   )}
-                  <text x={r.x + 4} y={r.y + fs + 2} fontSize={fs}
-                    fill={COL_WINDOW} fontWeight="700" pointerEvents="none">F</text>
-                  {dim && r.w > 60 && (
-                    <text x={r.x + r.w / 2} y={r.y + r.h - 3} fontSize={fs * 0.92}
-                      fill={COL_WINDOW} fontWeight="600" textAnchor="middle" pointerEvents="none">{dim}</text>
-                  )}
+                  <rect x={r.x + 2} y={r.y + 2} width={Math.max(0, pillW + 6)} height={fs * 1.4}
+                    fill="#FFFFFFC8" rx="2" />
+                  <text x={r.x + 5} y={r.y + fs + 4} fontSize={fs}
+                    fill={COL_WINDOW} fontWeight="700" pointerEvents="none">{txt}</text>
                 </g>
               );
             })}
-            {/* Doors */}
+            {/* Doors — compact "T · …" inside top-left */}
             {ann.doors.map((r) => {
               const sel = isSelected("door", r.id);
               const dim = pxPerM ? `${fmtM(r.w)} × ${fmtM(r.h)}` : null;
               const fs = Math.max(9, plan.w / 100);
+              const txt = dim && r.w > fs * 9 ? `T · ${dim}` : "T";
+              const pillW = Math.min(r.w - 4, fs * (txt.length * 0.55 + 1));
               return (
                 <g key={r.id}>
                   <rect x={r.x} y={r.y} width={r.w} height={r.h}
@@ -655,12 +667,10 @@ export default function PlanAnnotator({ plan, annotations, onChange, height = 48
                       fill="none" stroke={COL_DOOR} strokeWidth="2"
                       strokeDasharray="3,3" vectorEffect="non-scaling-stroke" />
                   )}
-                  <text x={r.x + 4} y={r.y + fs + 2} fontSize={fs}
-                    fill={COL_DOOR} fontWeight="700" pointerEvents="none">T</text>
-                  {dim && r.w > 60 && (
-                    <text x={r.x + r.w / 2} y={r.y + r.h - 3} fontSize={fs * 0.92}
-                      fill={COL_DOOR} fontWeight="600" textAnchor="middle" pointerEvents="none">{dim}</text>
-                  )}
+                  <rect x={r.x + 2} y={r.y + 2} width={Math.max(0, pillW + 6)} height={fs * 1.4}
+                    fill="#FFFFFFC8" rx="2" />
+                  <text x={r.x + 5} y={r.y + fs + 4} fontSize={fs}
+                    fill={COL_DOOR} fontWeight="700" pointerEvents="none">{txt}</text>
                 </g>
               );
             })}
