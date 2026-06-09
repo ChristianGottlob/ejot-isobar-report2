@@ -765,9 +765,23 @@ function MaterialSection({d,mat}){
           <KV l="Seilführung" v={RASTER.find(r=>r.id===matRaster)?.l}/>
           <KV l="Seilkreuztyp" v={(SEILKREUZE.find(s=>s.id===matSK)||{}).l||"–"}/>
           {setInfo&&<KV l="SET Produkt" v={setInfo.l} b/>}</div>
-        <div style={{flex:1.5}}>
-          <RasterOverlay LH={matLH} LV={matLV} fW={matW} fH={matH} rasterType={matRaster}
-            seilkreuztyp={matSK} size={460} plan={matPlan} annotations={matAnn}/></div></div>
+        <div style={{flex:1.5,display:"flex",flexDirection:"column",gap:10}}>
+          {/* Plan-based RasterOverlay — shown only when a plan + greening annotations exist */}
+          {matPlan&&matAnn&&(matAnn.facades||[]).length>0&&<div>
+            <div style={{fontSize:9.5,fontWeight:700,color:GY,textTransform:"uppercase",letterSpacing:.4,marginBottom:4}}>Im Plan</div>
+            <RasterOverlay LH={matLH} LV={matLV} fW={matW} fH={matH} rasterType={matRaster}
+              seilkreuztyp={matSK} size={460} plan={matPlan} annotations={matAnn}/>
+          </div>}
+          {/* Schematic raster — always shown, makes the cable pattern + Seilkreuze unmistakable */}
+          <div>
+            <div style={{fontSize:9.5,fontWeight:700,color:GY,textTransform:"uppercase",letterSpacing:.4,marginBottom:4}}>
+              Schematische Rasterdarstellung
+              <span style={{fontWeight:500,color:GL,marginLeft:6,textTransform:"none",letterSpacing:0}}>· {RASTER.find(rr=>rr.id===matRaster)?.l}{matSK!=="ohne"?` + ${SEILKREUZE.find(s=>s.id===matSK)?.l}`:""}</span>
+            </div>
+            <RasterOverlay LH={matLH} LV={matLV} fW={matW} fH={matH} rasterType={matRaster}
+              seilkreuztyp={matSK} size={460} forceProcedural/>
+          </div>
+        </div></div>
 
       {(fassaden.length>1||anyFromPlan||facadeStats.some(f=>f.rects&&f.rects.length>1))&&<div style={{border:`1px solid ${BD}`,borderRadius:4,padding:12,marginBottom:14}}>
         <div style={{fontWeight:700,fontSize:10.5,textTransform:"uppercase",letterSpacing:.5,marginBottom:8,color:BK,display:"flex",justifyContent:"space-between"}}>
@@ -1229,10 +1243,23 @@ export default function App(){
               <Field label="LV" value={f.lv||d.LV||"0.9"} onChange={v=>updateF("lv",v)} unit="m" half/>
             </div>
           </div>
-          <div style={{flex:1,minWidth:300,background:BG,borderRadius:8,padding:10,textAlign:"center"}}>
-            <RasterOverlay LH={fLH} LV={fLV} fW={f.breite||"3"} fH={f.hoehe||"3"} rasterType={fRaster}
-              seilkreuztyp={fSK} size={340} plan={f.plan} annotations={f.annotations}/>
-            <div style={{fontSize:10,color:DK,fontWeight:600,marginTop:4}}>{f.name}: {f.breite||"–"} × {f.hoehe||"–"} m = {((pf(f.breite)||0)*(pf(f.hoehe)||0)).toFixed(1)} m²</div>
+          <div style={{flex:1,minWidth:300,display:"flex",flexDirection:"column",gap:8}}>
+            {/* Plan-based preview (when plan + annotations) — shows anchors/cables on the real plan */}
+            {f.plan&&f.annotations&&(f.annotations.facades||[]).length>0&&<div style={{background:BG,borderRadius:8,padding:10,textAlign:"center"}}>
+              <div style={{fontSize:9.5,fontWeight:700,color:GY,textTransform:"uppercase",letterSpacing:.4,marginBottom:4,textAlign:"left"}}>Live im Plan</div>
+              <RasterOverlay LH={fLH} LV={fLV} fW={f.breite||"3"} fH={f.hoehe||"3"} rasterType={fRaster}
+                seilkreuztyp={fSK} size={340} plan={f.plan} annotations={f.annotations}/>
+            </div>}
+            {/* Schematic raster (always shown) — clear cable pattern + Seilkreuze, independent of plan */}
+            <div style={{background:BG,borderRadius:8,padding:10,textAlign:"center"}}>
+              <div style={{fontSize:9.5,fontWeight:700,color:GY,textTransform:"uppercase",letterSpacing:.4,marginBottom:4,textAlign:"left"}}>
+                Schematische Rasterdarstellung
+                <span style={{fontWeight:500,color:GL,marginLeft:6,textTransform:"none",letterSpacing:0}}>· {RASTER.find(rr=>rr.id===fRaster)?.l}{fSK!=="ohne"?` + ${SEILKREUZE.find(s=>s.id===fSK)?.l}`:""}</span>
+              </div>
+              <RasterOverlay LH={fLH} LV={fLV} fW={f.breite||"3"} fH={f.hoehe||"3"} rasterType={fRaster}
+                seilkreuztyp={fSK} size={340} forceProcedural/>
+              <div style={{fontSize:10,color:DK,fontWeight:600,marginTop:4}}>{f.name}: {f.breite||"–"} × {f.hoehe||"–"} m = {((pf(f.breite)||0)*(pf(f.hoehe)||0)).toFixed(1)} m²</div>
+            </div>
           </div>
         </div>
 
