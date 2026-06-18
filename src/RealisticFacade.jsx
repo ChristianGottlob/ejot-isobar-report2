@@ -133,6 +133,7 @@ const RASTER_LABEL = {
 export default function RealisticFacade({
   fW = 10, fH = 6, LH = 0.9, LV = 0.9,
   rasterType = "gitter", seilkreuztyp = "ohne",
+  lage1 = 0,        // Höhe der ersten Lage (Startversatz unten) in Metern
   coverage = 65, maturity = "mature",
   windows = "auto", formCode = "S",
   showLabels = true, showAnchors = true,
@@ -145,6 +146,7 @@ export default function RealisticFacade({
   const h = pf(fH) || 6;
   const lh = pf(LH) || 0.9;
   const lv = pf(LV) || 0.9;
+  const off = Math.max(0, pf(lage1) || 0);
   const ann = useMemo(() => normalizeAnnotations(annotations), [annotations]);
   const havePlan = !forceProcedural && !!(plan && plan.dataUrl && ann.facades.length > 0);
 
@@ -185,11 +187,13 @@ export default function RealisticFacade({
     cellH = (lv * facadeBox.h) / h;
   }
 
+  const offsetBottomPx = off * (cellH / lv);   // px/m = cellH/lv (Plan- wie Schemamodus)
   const grid = useMemo(() => buildPlanGrid({
     greeningRects, exclusions: exclusionRects,
     cellW, cellH, rasterType,
     hasSeilkreuze: false,   // foliage view ignores Seilkreuze – they're a detail of the technical raster
-  }), [greeningRects, exclusionRects, cellW, cellH, rasterType]);
+    offsetBottomPx,
+  }), [greeningRects, exclusionRects, cellW, cellH, rasterType, offsetBottomPx]);
   const anchors = grid.anchors;
   const cables  = grid.cables;
 

@@ -135,6 +135,7 @@ export function buildPlanGrid({
   cellW, cellH,
   rasterType = "gitter",
   hasSeilkreuze = false,
+  offsetBottomPx = 0,   // Startversatz der untersten Lage (px); >0 verankert das Raster bodenseitig
 }) {
   const anchors = [];
   const cables = [];      // {x1,y1,x2,y2,dir,rectIndex}
@@ -145,13 +146,17 @@ export function buildPlanGrid({
   const drawH = rasterType === "gitter" || rasterType === "horizontal";
   const drawD = rasterType === "diagonal";
 
+  const offPx = Math.max(0, offsetBottomPx || 0);
   greeningRects.forEach((g, rectIndex) => {
+    const effH  = Math.max(0, g.h - offPx);
     const colsR = Math.max(0, Math.floor(g.w / cellW));
-    const rowsR = Math.max(0, Math.floor(g.h / cellH));
+    const rowsR = Math.max(0, Math.floor(effH / cellH));
     const totalW = colsR * cellW;
     const totalH = rowsR * cellH;
     const ax0 = g.x + (g.w - totalW) / 2;
-    const ay0 = g.y + (g.h - totalH) / 2;
+    // Mit Versatz: unterste Reihe offPx über dem Boden, Raster läuft nach oben.
+    // Ohne Versatz: wie bisher mittig in der Fläche.
+    const ay0 = offPx > 0 ? g.y + g.h - offPx - totalH : g.y + (g.h - totalH) / 2;
 
     // Anchors — inside THIS rect, outside every exclusion
     for (let c = 0; c <= colsR; c++) for (let r = 0; r <= rowsR; r++) {

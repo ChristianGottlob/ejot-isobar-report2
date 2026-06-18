@@ -605,15 +605,16 @@ export default function PlanAnnotator({ plan, annotations, onChange, height = 48
               const tallEnough = r.h > fs * 4;
               return (
                 <g key={r.id}>
+                  {/* Filled translucent area (color with high transparency) makes the
+                      marked surface obvious; the dashed outline stays a thin hairline. */}
                   <rect x={r.x} y={r.y} width={r.w} height={r.h}
-                    fill={`${COL_FACADE}1F`} stroke={COL_FACADE}
-                    strokeWidth={baseStroke * 1.4} strokeDasharray="10,6"
-                    vectorEffect="non-scaling-stroke"
-                    opacity={sel ? 1 : 0.9} />
+                    fill={COL_FACADE} fillOpacity={sel ? 0.30 : 0.16}
+                    stroke={COL_FACADE} strokeWidth={1} strokeDasharray="4,4"
+                    vectorEffect="non-scaling-stroke" />
                   {sel && (
-                    <rect x={r.x - 4} y={r.y - 4} width={r.w + 8} height={r.h + 8}
-                      fill="none" stroke={COL_FACADE} strokeWidth="2"
-                      strokeDasharray="3,3" vectorEffect="non-scaling-stroke" />
+                    <rect x={r.x} y={r.y} width={r.w} height={r.h}
+                      fill="none" stroke={COL_FACADE} strokeWidth={1.25}
+                      vectorEffect="non-scaling-stroke" />
                   )}
 
                   {wideFull ? (

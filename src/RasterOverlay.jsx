@@ -21,6 +21,7 @@ function pf(v) { return parseFloat(String(v ?? "").replace(",", ".")); }
 export default function RasterOverlay({
   LH = 0.9, LV = 0.9, fW = 10, fH = 6,
   rasterType = "gitter", seilkreuztyp = "ohne",
+  lage1 = 0,        // Höhe der ersten Lage (Startversatz unten) in Metern
   size = 420,
   maxHeight,        // optional pixel cap on rendered height; protects tall/narrow facades from blowing up vertically
   plan = null, annotations = null,
@@ -30,6 +31,7 @@ export default function RasterOverlay({
   const h = Math.max(0.5, pf(fH) || 6);
   const lh = Math.max(0.05, pf(LH) || 0.9);
   const lv = Math.max(0.05, pf(LV) || 0.9);
+  const off = Math.max(0, pf(lage1) || 0);
   const ann = useMemo(() => normalizeAnnotations(annotations), [annotations]);
   const havePlan = !forceProcedural && !!(plan && plan.dataUrl && ann.facades.length > 0);
 
@@ -76,12 +78,17 @@ export default function RasterOverlay({
     cellW = (lh * facadeBox.w) / w;
     cellH = (lv * facadeBox.h) / h;
   }
+  // Startversatz der ersten Lage in Pixeln (px/m = cellH/lv, gilt für Plan- und Schemamodus).
+  const offsetBottomPx = off * (cellH / lv);
   // Procedural dimension overlay uses the (single) facadeBox layout — only
   // shown when there's effectively one greening area (procedural fallback).
+  const rowsEff = Math.max(0, Math.floor((facadeBox.h - offsetBottomPx) / cellH));
   const totalGridW = cols * cellW;
-  const totalGridH = rows * cellH;
+  const totalGridH = rowsEff * cellH;
   const ox = facadeBox.x + (facadeBox.w - totalGridW) / 2;
-  const oy = facadeBox.y + (facadeBox.h - totalGridH) / 2;
+  const oy = offsetBottomPx > 0
+    ? facadeBox.y + facadeBox.h - offsetBottomPx - totalGridH
+    : facadeBox.y + (facadeBox.h - totalGridH) / 2;
 
   const hasSK = seilkreuztyp && seilkreuztyp !== "ohne";
 
@@ -93,7 +100,8 @@ export default function RasterOverlay({
     greeningRects, exclusions,
     cellW, cellH, rasterType,
     hasSeilkreuze: hasSK,
-  }), [greeningRects, exclusions, cellW, cellH, rasterType, hasSK]);
+    offsetBottomPx,
+  }), [greeningRects, exclusions, cellW, cellH, rasterType, hasSK, offsetBottomPx]);
 
   const lines = useMemo(() => [
     ...grid.cables.map(c => ({ ...c, sub: false })),

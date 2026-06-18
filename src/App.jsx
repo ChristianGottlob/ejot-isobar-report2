@@ -153,20 +153,48 @@ const FOLIAGE_MATURITY=[
   {v:"mature",l:"Etabliert (4–7 Jahre)"},
   {v:"dense",l:"Dicht ausgewachsen (8+ Jahre)"},
 ];
+// Höhe der ersten (untersten) Ankerlage über dem Boden.  Die unterste Reihe
+// sitzt auf diesem Startversatz; das Raster läuft im LV-Abstand nach oben.
+// "0" = kein Versatz (bisheriges Verhalten, Raster über die volle Höhe).
+const LAGE1_HOEHEN=[
+  {v:"0",   l:"kein Versatz (0 m)"},
+  {v:"0.5", l:"0,50 m"},
+  {v:"0.75",l:"0,75 m"},
+  {v:"1",   l:"1,00 m"},
+  {v:"1.25",l:"1,25 m"},
+  {v:"1.5", l:"1,50 m"},
+  {v:"2",   l:"2,00 m"},
+];
+
+// Endkappen / Seilhülsen werden je SEILENDE gesetzt — einmal am Anfang und
+// einmal am Ende jedes gespannten Seils, NICHT pro Ankerpunkt.
+//   vertikal:   (Spalten+1) Seile   → je 2 Enden
+//   horizontal: (Reihen+1) Seile    → je 2 Enden
+//   diagonal:   beide Richtungen, grob (Spalten+Reihen) Seile → je 2 Enden
+function endcaps(hasV,hasH,hasD,colsCells,rowsCells){
+  const c=Math.max(0,colsCells),r=Math.max(0,rowsCells);
+  let ends=0;
+  if(hasV) ends+=(c+1)*2;
+  if(hasH) ends+=(r+1)*2;
+  if(hasD) ends+=(c+r)*2;
+  return ends;
+}
 
 // ─── Material calculator ────────────────────────────────
 function calcMaterial(d){
   const f0=(d.fassaden||[])[0]||{};
   const lh=pf(f0.lh||d.LH)||.9,lv=pf(f0.lv||d.LV)||.9;
   const fw=pf(f0.breite||d.fassadenlaenge)||10,fh=pf(f0.hoehe||d.fassadenhoehe)||10;
-  const cols=Math.floor(fw/lh),rows=Math.floor(fh/lv);
+  const off=pf(f0.lage1||d.Lage1)||0;            // Startversatz der untersten Lage
+  const fhEff=Math.max(0,fh-off);                // begrünte/berankte Höhe oberhalb des Versatzes
+  const cols=Math.floor(fw/lh),rows=Math.floor(fhEff/lv);
   const pts=(cols+1)*(rows+1);
-  const area=fw*fh;
+  const area=fw*fhEff;
   const rt=f0.seilfuehrung||d.seilfuehrung||"gitter";
   const hasV=rt==="gitter"||rt==="vertikal";
   const hasH=rt==="gitter"||rt==="horizontal";
   const hasD=rt==="diagonal";
-  const seilV=hasV?(cols+1)*fh:0;
+  const seilV=hasV?(cols+1)*fhEff:0;
   const seilH=hasH?(rows+1)*fw:0;
   const seilD=hasD?cols*rows*Math.sqrt(lh*lh+lv*lv)*2:0;
   const seilGes=seilV+seilH+seilD;
@@ -174,8 +202,8 @@ function calcMaterial(d){
   return {pts,area,cols:cols+1,rows:rows+1,
     seilV:seilV.toFixed(1),seilH:seilH.toFixed(1),seilD:seilD.toFixed(1),
     seilGes:(seilGes*1.1).toFixed(1),kreuze90,hasV,hasH,hasD,
-    endkappen:pts*2,
-    stkM2:(pts/area).toFixed(2)};
+    endkappen:endcaps(hasV,hasH,hasD,cols,rows),
+    stkM2:area>0?(pts/area).toFixed(2):"0.00"};
 }
 function pf(v){return parseFloat(String(v).replace(",","."));}
 function fm(v,d=2){return v?Number(v).toFixed(d).replace(".",","):"–";}
@@ -203,6 +231,9 @@ function calcFacadeStats(f, d) {
   const sk = f.seilkreuztyp || d.seilkreuztyp || "ohne";
   const fw_m = pf(f.breite) || 0;
   const fh_m = pf(f.hoehe) || 0;
+  // Höhe der ersten Lage (Startversatz unten): die unterste Ankerreihe sitzt
+  // auf dieser Höhe, das Raster läuft im LV-Abstand bis zur Oberkante.
+  const off_m = pf(f.lage1) || pf(d.Lage1) || 0;
 
   const ann = normalizeAnnotations(f.annotations);
   const havePlan = !!(f.plan && ann.facades.length > 0);
@@ -212,10 +243,11 @@ function calcFacadeStats(f, d) {
   const hasD = raster === "diagonal";
 
   if (!havePlan) {
+    const fhEff = Math.max(0, fh_m - off_m);                 // berankte Höhe oberhalb des Versatzes
     const cols = Math.max(0, Math.floor(fw_m / lh_m));
-    const rows = Math.max(0, Math.floor(fh_m / lv_m));
+    const rows = Math.max(0, Math.floor(fhEff / lv_m));
     const anker = (cols + 1) * (rows + 1);
-    const sV = hasV ? (cols + 1) * fh_m : 0;
+    const sV = hasV ? (cols + 1) * fhEff : 0;
     const sH = hasH ? (rows + 1) * fw_m : 0;
     const sD = hasD ? cols * rows * Math.sqrt(lh_m * lh_m + lv_m * lv_m) * 2 : 0;
     let skCount = 0;
@@ -227,12 +259,13 @@ function calcFacadeStats(f, d) {
       name: f.name,
       label: f.name,
       breite_m: fw_m, hoehe_m: fh_m,
-      area_brutto: fw_m * fh_m,
+      area_brutto: fw_m * fhEff,
       area_excl: 0,
-      area: fw_m * fh_m,
+      area: fw_m * fhEff,
       anker, sk: skCount,
       cols: cols + 1, rows: rows + 1,
       sV, sH, sD,
+      endkappen: endcaps(hasV, hasH, hasD, cols, rows),
     };
     return {
       name: f.name, breite: fw_m, hoehe: fh_m,
@@ -242,6 +275,7 @@ function calcFacadeStats(f, d) {
       anker, sk: skCount,
       cols: cols + 1, rows: rows + 1,
       sV, sH, sD,
+      endkappen: single.endkappen,
       fromPlan: false,
       rects: [single],
     };
@@ -258,13 +292,14 @@ function calcFacadeStats(f, d) {
       name: f.name, breite: fw_m, hoehe: fh_m,
       area_brutto: 0, area_excl: 0, area: 0,
       anker: 0, sk: 0, cols: 0, rows: 0,
-      sV: 0, sH: 0, sD: 0,
+      sV: 0, sH: 0, sD: 0, endkappen: 0,
       fromPlan: true,
       rects: [],
     };
   }
   const cellWpx = lh_m * pxM;
   const cellHpx = lv_m * pxM;
+  const offPx   = off_m * pxM;                    // Startversatz der untersten Lage in Plan-Pixeln
   const exclusions = [...ann.windows, ...ann.doors];
   const diagPx = Math.sqrt(cellWpx * cellWpx + cellHpx * cellHpx);
   const diagM  = Math.sqrt(lh_m * lh_m + lv_m * lv_m);
@@ -272,12 +307,17 @@ function calcFacadeStats(f, d) {
   const rects = ann.facades.map((g, idx) => {
     const breite_m = g.w / pxM;
     const hoehe_m  = g.h / pxM;
+    const effHpx   = Math.max(0, g.h - offPx);    // berankbare Höhe oberhalb des Versatzes
     const colsR = Math.max(0, Math.floor(breite_m / lh_m));
-    const rowsR = Math.max(0, Math.floor(hoehe_m / lv_m));
+    const rowsR = Math.max(0, Math.floor(effHpx / cellHpx));
     const totalGridW = colsR * cellWpx;
     const totalGridH = rowsR * cellHpx;
     const ax0 = g.x + (g.w - totalGridW) / 2;
-    const ay0 = g.y + (g.h - totalGridH) / 2;
+    // Mit Versatz: unterste Reihe sitzt offPx über dem Boden, Raster läuft nach
+    // oben.  Ohne Versatz: wie bisher mittig in der Fläche.
+    const ay0 = offPx > 0
+      ? g.y + g.h - offPx - totalGridH
+      : g.y + (g.h - totalGridH) / 2;
     const onlyHere = [g];
 
     let anker = 0;
@@ -326,7 +366,9 @@ function calcFacadeStats(f, d) {
     let area_excl_px = 0;
     for (const e of exclusions) area_excl_px += rectIntersectionArea(g, e);
     const area_excl = area_excl_px / (pxM * pxM);
-    const area = Math.max(0, area_brutto - area_excl);
+    // Der unberankte Bodenstreifen unterhalb der ersten Lage zählt nicht zur Begrünungsfläche.
+    const baseStrip = offPx > 0 ? breite_m * Math.min(off_m, hoehe_m) : 0;
+    const area = Math.max(0, area_brutto - area_excl - baseStrip);
 
     return {
       name: f.name + (ann.facades.length > 1 ? ` · Fläche ${idx + 1}` : ""),
@@ -337,6 +379,7 @@ function calcFacadeStats(f, d) {
       anker, sk: skR,
       cols: colsR + 1, rows: rowsR + 1,
       sV, sH, sD,
+      endkappen: endcaps(hasV, hasH, hasD, colsR, rowsR),
     };
   });
 
@@ -352,6 +395,7 @@ function calcFacadeStats(f, d) {
     sV:          sumKey("sV"),
     sH:          sumKey("sH"),
     sD:          sumKey("sD"),
+    endkappen:   sumKey("endkappen"),
     cols: 0, rows: 0,
     fromPlan: true,
     rects,
@@ -581,6 +625,7 @@ function FacadeReportCard({d,facade,index,total,formCode,coverage,maturity}){
   const fSK=facade.seilkreuztyp||d.seilkreuztyp||"ohne";
   const fLH=facade.lh||d.LH||"0.9";
   const fLV=facade.lv||d.LV||"0.9";
+  const fLage1=facade.lage1??d.Lage1??"0";
   const fW=facade.breite||"10";
   const fH=facade.hoehe||"6";
   const havePlan=!!(facade.plan&&facade.annotations&&(facade.annotations.facades||[]).length>0);
@@ -593,7 +638,7 @@ function FacadeReportCard({d,facade,index,total,formCode,coverage,maturity}){
           {total>1?<span style={{color:GL,fontWeight:600}}>Fassade {index+1} · </span>:null}
           {facade.name||`Fassade ${index+1}`}
         </span>
-        <span style={{fontSize:11,color:GY,marginLeft:8}}>· {fW} × {fH} m</span>
+        <span style={{fontSize:11,color:GY,marginLeft:8}}>· {fW} × {fH} m{(pf(fLage1)||0)>0?` · 1. Lage ${fm(pf(fLage1),2)} m`:""}</span>
       </div>
       <span style={{fontSize:10.5,color:GY,fontWeight:600}}>
         {RASTER.find(r=>r.id===fRaster)?.l}
@@ -607,7 +652,7 @@ function FacadeReportCard({d,facade,index,total,formCode,coverage,maturity}){
       </div>
       <div style={{display:"flex",justifyContent:"center"}}>
         <RealisticFacade fW={fW} fH={fH} LH={fLH} LV={fLV} rasterType={fRaster}
-          seilkreuztyp={fSK} coverage={coverage} maturity={maturity}
+          lage1={fLage1} seilkreuztyp={fSK} coverage={coverage} maturity={maturity}
           formCode={formCode} size={820} maxHeight={640}
           plan={facade.plan} annotations={facade.annotations}/>
       </div>
@@ -619,7 +664,7 @@ function FacadeReportCard({d,facade,index,total,formCode,coverage,maturity}){
       </div>
       <div style={{display:"flex",justifyContent:"center"}}>
         <RealisticFacade fW={fW} fH={fH} LH={fLH} LV={fLV} rasterType={fRaster}
-          seilkreuztyp={fSK} coverage={coverage} maturity={maturity}
+          lage1={fLage1} seilkreuztyp={fSK} coverage={coverage} maturity={maturity}
           formCode={formCode} size={520} maxHeight={520} forceProcedural/>
       </div>
     </div>
@@ -646,6 +691,7 @@ function FacadeRasterCard({d,facade,index,total}){
   const fSK=facade.seilkreuztyp||d.seilkreuztyp||"ohne";
   const fLH=facade.lh||d.LH||"0.9";
   const fLV=facade.lv||d.LV||"0.9";
+  const fLage1=facade.lage1??d.Lage1??"0";
   const fW=facade.breite||"10";
   const fH=facade.hoehe||"6";
   const havePlan=!!(facade.plan&&facade.annotations&&(facade.annotations.facades||[]).length>0);
@@ -658,7 +704,7 @@ function FacadeRasterCard({d,facade,index,total}){
           {total>1?<span style={{color:GL,fontWeight:600}}>Fassade {index+1} · </span>:null}
           {facade.name||`Fassade ${index+1}`}
         </span>
-        <span style={{fontSize:11,color:GY,marginLeft:8}}>· {fW} × {fH} m · LH {fLH} / LV {fLV}</span>
+        <span style={{fontSize:11,color:GY,marginLeft:8}}>· {fW} × {fH} m · LH {fLH} / LV {fLV}{(pf(fLage1)||0)>0?` · 1. Lage ${fm(pf(fLage1),2)} m`:""}</span>
       </div>
       <span style={{fontSize:10.5,color:GY,fontWeight:600}}>
         {RASTER.find(r=>r.id===fRaster)?.l}
@@ -672,7 +718,7 @@ function FacadeRasterCard({d,facade,index,total}){
       </div>
       <div style={{display:"flex",justifyContent:"center"}}>
         <RasterOverlay LH={fLH} LV={fLV} fW={fW} fH={fH} rasterType={fRaster}
-          seilkreuztyp={fSK} size={820} maxHeight={620}
+          lage1={fLage1} seilkreuztyp={fSK} size={820} maxHeight={620}
           plan={facade.plan} annotations={facade.annotations}/>
       </div>
     </div>}
@@ -683,7 +729,7 @@ function FacadeRasterCard({d,facade,index,total}){
       </div>
       <div style={{display:"flex",justifyContent:"center"}}>
         <RasterOverlay LH={fLH} LV={fLV} fW={fW} fH={fH} rasterType={fRaster}
-          seilkreuztyp={fSK} size={460} maxHeight={480} forceProcedural/>
+          lage1={fLage1} seilkreuztyp={fSK} size={460} maxHeight={480} forceProcedural/>
       </div>
     </div>
     {/* Per-facade material subtotal */}
@@ -705,6 +751,7 @@ function PreviewSection({d,maxNw,mat,withRealistic=true}){
   const prvSK=f0.seilkreuztyp||d.seilkreuztyp||"ohne";
   const prvLH=f0.lh||d.LH||"0.9";
   const prvLV=f0.lv||d.LV||"0.9";
+  const prvLage1=f0.lage1??d.Lage1??"0";
   const prvW=f0.breite||d.fassadenlaenge||"3";
   const prvH=f0.hoehe||d.fassadenhoehe||"3";
   const prvPlan=f0.plan||null;
@@ -769,7 +816,7 @@ function PreviewSection({d,maxNw,mat,withRealistic=true}){
         <div style={{flex:1.4,border:`1px solid ${BD}`,borderRadius:4,padding:12}}>
           <div style={{fontWeight:700,fontSize:10.5,textTransform:"uppercase",letterSpacing:.5,marginBottom:6,color:BK}}>Raster ({RASTER.find(r=>r.id===prvRaster)?.l})</div>
           <RasterOverlay LH={prvLH} LV={prvLV} fW={prvW} fH={prvH} rasterType={prvRaster}
-            seilkreuztyp={prvSK} size={420} plan={prvPlan} annotations={prvAnn}/>
+            lage1={prvLage1} seilkreuztyp={prvSK} size={420} plan={prvPlan} annotations={prvAnn}/>
           <div style={{fontSize:8.5,color:GL,marginTop:4}}>Schematisch – ersetzt keine Ausführungsplanung.</div></div></div>
       <div style={{border:`1px solid ${BD}`,borderRadius:4,padding:12}}>
         <div style={{fontWeight:700,fontSize:10.5,textTransform:"uppercase",letterSpacing:.5,marginBottom:6,color:BK}}>Lasten &amp; Widerstände</div>
@@ -884,6 +931,7 @@ function MaterialSection({d,mat}){
   const totalSeilV = facadeStats.reduce((s, x) => s + x.sV, 0);
   const totalSeilH = facadeStats.reduce((s, x) => s + x.sH, 0);
   const totalSeilD = facadeStats.reduce((s, x) => s + x.sD, 0);
+  const totalEndkappen = facadeStats.reduce((s, x) => s + (x.endkappen || 0), 0); // je Seilende, nicht pro Anker
   const totalSeilGes = (totalSeilV + totalSeilH + totalSeilD) * 1.1;
   const setInfo=SETS.find(s=>s.id===d.produkt);
   const skInfo=SEILKREUZE.find(s=>s.id===matSK);
@@ -894,7 +942,7 @@ function MaterialSection({d,mat}){
   if(anyD) items.push(["Seil Edelstahl V4A ø4mm – diagonal",fmtDec(totalSeilD,1),"m","2× pro Feld"]);
   items.push(["Seil gesamt (alle Richtungen)",fmtDec(totalSeilGes,1),"m","inkl. Verschnitt ca. +10 %"]);
   if(totalSK>0&&skInfo) items.push([`${skInfo.l}`,fmtInt(totalSK),"Stk",skInfo.art?`Art. ${skInfo.art}`:"alle Fassaden"]);
-  items.push(["Endkappen / Seilhülsen",fmtInt(totalAnker*2),"Stk","2 pro Ankerpunkt"]);
+  items.push(["Endkappen / Seilhülsen",fmtInt(totalEndkappen),"Stk","je Seilende (Anfang + Ende jedes Seils)"]);
 
   const showBreakdown=fassaden.length>1||anyFromPlan||facadeStats.some(f=>f.rects&&f.rects.length>1);
   return(<div style={{background:WH}}>
@@ -915,7 +963,7 @@ function MaterialSection({d,mat}){
         <Stat label="Iso-Bar ECO" value={fmtInt(totalAnker)} unit="Stk" accent/>
         <Stat label="Seilkreuze" value={fmtInt(totalSK)} unit="Stk" color="#1565C0"/>
         <Stat label="Seil gesamt" value={fmtLen(totalSeilGes)} hint="inkl. +10 % Verschnitt"/>
-        <Stat label="Endkappen" value={fmtInt(totalAnker*2)} unit="Stk"/>
+        <Stat label="Endkappen" value={fmtInt(totalEndkappen)} unit="Stk" hint="je Seilende"/>
         {anyFromPlan&&<Stat label="Quelle" value="aus Plan" valueSize={14} color={R}/>}
       </div>
 
@@ -1072,7 +1120,7 @@ export default function App(){
   const hydratedRef=useRef(false);                // skip auto-save until after initial hydrate
   const setter=k=>v=>setD(x=>({...x,[k]:v}));
   const usable=useMemo(()=>FLL_PLANTS.filter(p=>p.lk!==null),[]);
-  const mat=useMemo(()=>calcMaterial(d),[d.LH,d.LV,d.fassadenlaenge,d.fassadenhoehe,d.seilfuehrung,d.fassaden]);
+  const mat=useMemo(()=>calcMaterial(d),[d.LH,d.LV,d.Lage1,d.fassadenlaenge,d.fassadenhoehe,d.seilfuehrung,d.fassaden]);
   const maxNw=Math.max(...[d.nw_zug,d.nw_druck,d.nw_quer,d.nw_kombi].map(v=>pf(v)||0),0);
 
   const selectPlant=bot=>{const p=FLL_PLANTS.find(x=>x.bot===bot);
@@ -1245,6 +1293,7 @@ export default function App(){
       sV:stats.reduce((s,x)=>s+x.sV,0),
       sH:stats.reduce((s,x)=>s+x.sH,0),
       sD:stats.reduce((s,x)=>s+x.sD,0),
+      endkappen:stats.reduce((s,x)=>s+(x.endkappen||0),0),
     };
     const totalSeilGes=(tot.sV+tot.sH+tot.sD)*1.1;
     const setInfo=SETS.find(s=>s.id===d.produkt);
@@ -1265,7 +1314,7 @@ export default function App(){
     if(tot.sD>0) rows.push([p++,"Seil Edelstahl V4A ø4mm – diagonal",fmtDec(tot.sD,1),"m","",""]);
     rows.push([p++,"Seil gesamt (alle Richtungen)",fmtDec(totalSeilGes,1),"m","","inkl. ca. +10 % Verschnitt"]);
     if(tot.sk>0&&skInfo) rows.push([p++,skInfo.l,fmtInt(tot.sk),"Stk",skInfo.art||"",""]);
-    rows.push([p++,"Endkappen / Seilhülsen",fmtInt(tot.anker*2),"Stk","","2 pro Ankerpunkt"]);
+    rows.push([p++,"Endkappen / Seilhülsen",fmtInt(tot.endkappen),"Stk","","je Seilende (Anfang + Ende jedes Seils)"]);
     rows.push([]);
 
     // Per-facade / per-greening-rect breakdown
@@ -1599,13 +1648,15 @@ export default function App(){
               <Field label="LH" value={f.lh||d.LH||"0.9"} onChange={v=>updateF("lh",v)} unit="m" half/>
               <Field label="LV" value={f.lv||d.LV||"0.9"} onChange={v=>updateF("lv",v)} unit="m" half/>
             </div>
+            <Field label="Höhe 1. Lage (Startversatz unten)" value={f.lage1??d.Lage1??"0"} onChange={v=>updateF("lage1",v)} sel
+              opts={LAGE1_HOEHEN} hint="Unterste Ankerreihe sitzt auf dieser Höhe; das Raster läuft im LV-Abstand nach oben."/>
           </div>
           <div style={{flex:1,minWidth:300,display:"flex",flexDirection:"column",gap:8}}>
             {/* Plan-based preview (when plan + annotations) — shows anchors/cables on the real plan */}
             {f.plan&&f.annotations&&(f.annotations.facades||[]).length>0&&<div style={{background:BG,borderRadius:8,padding:10,textAlign:"center"}}>
               <div style={{fontSize:9.5,fontWeight:700,color:GY,textTransform:"uppercase",letterSpacing:.4,marginBottom:4,textAlign:"left"}}>Live im Plan</div>
               <RasterOverlay LH={fLH} LV={fLV} fW={f.breite||"3"} fH={f.hoehe||"3"} rasterType={fRaster}
-                seilkreuztyp={fSK} size={340} plan={f.plan} annotations={f.annotations}/>
+                lage1={f.lage1??d.Lage1??"0"} seilkreuztyp={fSK} size={340} plan={f.plan} annotations={f.annotations}/>
             </div>}
             {/* Schematic raster (always shown) — clear cable pattern + Seilkreuze, independent of plan */}
             <div style={{background:BG,borderRadius:8,padding:10,textAlign:"center"}}>
@@ -1614,7 +1665,7 @@ export default function App(){
                 <span style={{fontWeight:500,color:GL,marginLeft:6,textTransform:"none",letterSpacing:0}}>· {RASTER.find(rr=>rr.id===fRaster)?.l}{fSK!=="ohne"?` + ${SEILKREUZE.find(s=>s.id===fSK)?.l}`:""}</span>
               </div>
               <RasterOverlay LH={fLH} LV={fLV} fW={f.breite||"3"} fH={f.hoehe||"3"} rasterType={fRaster}
-                seilkreuztyp={fSK} size={340} forceProcedural/>
+                lage1={f.lage1??d.Lage1??"0"} seilkreuztyp={fSK} size={340} forceProcedural/>
               <div style={{fontSize:10,color:DK,fontWeight:600,marginTop:4}}>{f.name}: {f.breite||"–"} × {f.hoehe||"–"} m = {((pf(f.breite)||0)*(pf(f.hoehe)||0)).toFixed(1)} m²</div>
             </div>
           </div>
