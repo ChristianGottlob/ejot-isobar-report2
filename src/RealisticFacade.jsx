@@ -137,6 +137,7 @@ export default function RealisticFacade({
   windows = "auto", formCode = "S",
   showLabels = true, showAnchors = true,
   size = 760,
+  maxHeight,        // optional pixel cap on rendered height
   plan = null, annotations = null,
   forceProcedural = false,
 }) {
@@ -300,7 +301,12 @@ export default function RealisticFacade({
   const badgeFs = Math.max(10, badgeH * 0.42);
 
   return (
-    <svg viewBox={`0 0 ${vbW} ${vbH}`} width="100%" style={{ maxWidth: size, display: "block" }} role="img" aria-label="Fassadenvorschau">
+    <svg viewBox={`0 0 ${vbW} ${vbH}`} width="100%"
+      style={{
+        maxWidth: maxHeight && vbH > 0 ? Math.min(size, maxHeight * (vbW / vbH)) : size,
+        display: "block", margin: "0 auto",
+      }}
+      role="img" aria-label="Fassadenvorschau">
       <defs>
         <mask id={maskId}>
           {greeningRects.map((r, i) => (
