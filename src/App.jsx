@@ -1425,7 +1425,7 @@ export default function App(){
                 onMouseLeave={e=>e.currentTarget.style.background="none"}>⬇ Alle 3 PDFs exportieren</button>
               <div style={{borderTop:`1px solid ${BD}`,margin:"4px 0"}}/>
               <div style={{padding:"7px 11px",fontWeight:700,fontSize:9.5,color:GL,textTransform:"uppercase",letterSpacing:.5}}>Daten</div>
-              <button onClick={exportCsv} style={{display:"block",width:"100%",padding:"8px 11px",background:"none",border:"none",
+              <button onClick={exportCsv} style={{width:"100%",padding:"8px 11px",background:"none",border:"none",
                 textAlign:"left",cursor:"pointer",borderRadius:5,fontSize:11.5,fontWeight:600,color:DK,display:"flex",alignItems:"center",gap:8}}
                 onMouseEnter={e=>e.currentTarget.style.background=BG}
                 onMouseLeave={e=>e.currentTarget.style.background="none"}>
