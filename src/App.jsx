@@ -568,6 +568,110 @@ function FacadePlanPanel({facade,onUpdate}){
 }
 
 // ─── PDF Section Components (reusable for on-screen + off-screen) ───
+// One-fassade visualization card used by both PreviewSection and MaterialSection
+// when the project contains multiple facades.  Shows:
+//   - Header: facade name + dimensions + raster type + Seilkreuztyp
+//   - Plan-based realistic view (only if a plan + greening rect exist)
+//   - Schematic view (always)
+//   - A small stat row pulled from calcFacadeStats(f, d)
+function FacadeReportCard({d,facade,index,total,formCode,coverage,maturity,size=520}){
+  const fRaster=facade.seilfuehrung||d.seilfuehrung||"gitter";
+  const fSK=facade.seilkreuztyp||d.seilkreuztyp||"ohne";
+  const fLH=facade.lh||d.LH||"0.9";
+  const fLV=facade.lv||d.LV||"0.9";
+  const fW=facade.breite||"10";
+  const fH=facade.hoehe||"6";
+  const havePlan=!!(facade.plan&&facade.annotations&&(facade.annotations.facades||[]).length>0);
+  const stats=calcFacadeStats(facade,d);
+  return(<div style={{border:`1px solid ${BD}`,borderRadius:6,padding:10,marginBottom:14,background:"#FAFAF8",pageBreakInside:"avoid",breakInside:"avoid"}}>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:8,paddingBottom:6,borderBottom:`1px solid ${BD}`}}>
+      <div>
+        <span style={{fontWeight:800,fontSize:13,color:BK}}>
+          {total>1?<span style={{color:GL,fontWeight:600}}>Fassade {index+1} · </span>:null}
+          {facade.name||`Fassade ${index+1}`}
+        </span>
+        <span style={{fontSize:10.5,color:GY,marginLeft:8}}>· {fW} × {fH} m</span>
+      </div>
+      <span style={{fontSize:10,color:GY,fontWeight:600}}>
+        {RASTER.find(r=>r.id===fRaster)?.l}
+        {fSK!=="ohne"&&<span style={{color:GL}}> + {SEILKREUZE.find(s=>s.id===fSK)?.l}</span>}
+      </span>
+    </div>
+    <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+      {havePlan&&<div style={{flex:1,minWidth:300}}>
+        <div style={{fontSize:9.5,fontWeight:700,color:GY,textTransform:"uppercase",letterSpacing:.4,marginBottom:4}}>Im Plan</div>
+        <RealisticFacade fW={fW} fH={fH} LH={fLH} LV={fLV} rasterType={fRaster}
+          seilkreuztyp={fSK} coverage={coverage} maturity={maturity}
+          formCode={formCode} size={size} plan={facade.plan} annotations={facade.annotations}/>
+      </div>}
+      <div style={{flex:1,minWidth:300}}>
+        <div style={{fontSize:9.5,fontWeight:700,color:GY,textTransform:"uppercase",letterSpacing:.4,marginBottom:4}}>Schematisch</div>
+        <RealisticFacade fW={fW} fH={fH} LH={fLH} LV={fLV} rasterType={fRaster}
+          seilkreuztyp={fSK} coverage={coverage} maturity={maturity}
+          formCode={formCode} size={size} forceProcedural/>
+      </div>
+    </div>
+    {/* Per-facade stat row */}
+    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(110px,1fr))",gap:8,marginTop:10,paddingTop:8,borderTop:`1px solid ${BD}`,fontSize:11}}>
+      <div><span style={{color:GY,fontWeight:600,fontSize:9.5,textTransform:"uppercase",letterSpacing:.4,display:"block",marginBottom:1}}>Netto-Fläche</span><span style={{fontWeight:700,color:BK,fontSize:12}}>{fmtArea(stats.area)}</span></div>
+      <div><span style={{color:GY,fontWeight:600,fontSize:9.5,textTransform:"uppercase",letterSpacing:.4,display:"block",marginBottom:1}}>Iso-Bar ECO</span><span style={{fontWeight:700,color:R,fontSize:12}}>{fmtInt(stats.anker)} <span style={{fontSize:9.5,color:GY,fontWeight:600}}>Stk</span></span></div>
+      {stats.sk>0&&<div><span style={{color:GY,fontWeight:600,fontSize:9.5,textTransform:"uppercase",letterSpacing:.4,display:"block",marginBottom:1}}>Seilkreuze</span><span style={{fontWeight:700,color:"#1565C0",fontSize:12}}>{fmtInt(stats.sk)} <span style={{fontSize:9.5,color:GY,fontWeight:600}}>Stk</span></span></div>}
+      {(stats.sV+stats.sH+stats.sD)>0&&<div><span style={{color:GY,fontWeight:600,fontSize:9.5,textTransform:"uppercase",letterSpacing:.4,display:"block",marginBottom:1}}>Seil gesamt</span><span style={{fontWeight:700,color:BK,fontSize:12}}>{fmtLen((stats.sV+stats.sH+stats.sD)*1.1)}</span></div>}
+      {stats.fromPlan&&<div><span style={{color:GY,fontWeight:600,fontSize:9.5,textTransform:"uppercase",letterSpacing:.4,display:"block",marginBottom:1}}>Quelle</span><span style={{fontWeight:700,color:R,fontSize:11}}>📐 Plan</span></div>}
+    </div>
+  </div>);
+}
+
+// Per-facade card for the MaterialSection — uses the technical RasterOverlay
+// (CAD anchors + Seilkreuze) rather than the foliage RealisticFacade.
+function FacadeRasterCard({d,facade,index,total,size=460}){
+  const fRaster=facade.seilfuehrung||d.seilfuehrung||"gitter";
+  const fSK=facade.seilkreuztyp||d.seilkreuztyp||"ohne";
+  const fLH=facade.lh||d.LH||"0.9";
+  const fLV=facade.lv||d.LV||"0.9";
+  const fW=facade.breite||"10";
+  const fH=facade.hoehe||"6";
+  const havePlan=!!(facade.plan&&facade.annotations&&(facade.annotations.facades||[]).length>0);
+  const stats=calcFacadeStats(facade,d);
+  return(<div style={{border:`1px solid ${BD}`,borderRadius:6,padding:10,marginBottom:14,background:"#FAFAF8",pageBreakInside:"avoid",breakInside:"avoid"}}>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:8,paddingBottom:6,borderBottom:`1px solid ${BD}`}}>
+      <div>
+        <span style={{fontWeight:800,fontSize:13,color:BK}}>
+          {total>1?<span style={{color:GL,fontWeight:600}}>Fassade {index+1} · </span>:null}
+          {facade.name||`Fassade ${index+1}`}
+        </span>
+        <span style={{fontSize:10.5,color:GY,marginLeft:8}}>· {fW} × {fH} m · LH {fLH} / LV {fLV}</span>
+      </div>
+      <span style={{fontSize:10,color:GY,fontWeight:600}}>
+        {RASTER.find(r=>r.id===fRaster)?.l}
+        {fSK!=="ohne"&&<span style={{color:GL}}> + {SEILKREUZE.find(s=>s.id===fSK)?.l}</span>}
+      </span>
+    </div>
+    <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+      {havePlan&&<div style={{flex:1,minWidth:300}}>
+        <div style={{fontSize:9.5,fontWeight:700,color:GY,textTransform:"uppercase",letterSpacing:.4,marginBottom:4}}>Im Plan</div>
+        <RasterOverlay LH={fLH} LV={fLV} fW={fW} fH={fH} rasterType={fRaster}
+          seilkreuztyp={fSK} size={size} plan={facade.plan} annotations={facade.annotations}/>
+      </div>}
+      <div style={{flex:1,minWidth:300}}>
+        <div style={{fontSize:9.5,fontWeight:700,color:GY,textTransform:"uppercase",letterSpacing:.4,marginBottom:4}}>Schematisch</div>
+        <RasterOverlay LH={fLH} LV={fLV} fW={fW} fH={fH} rasterType={fRaster}
+          seilkreuztyp={fSK} size={size} forceProcedural/>
+      </div>
+    </div>
+    {/* Per-facade material subtotal */}
+    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(110px,1fr))",gap:8,marginTop:10,paddingTop:8,borderTop:`1px solid ${BD}`,fontSize:11}}>
+      <div><span style={{color:GY,fontWeight:600,fontSize:9.5,textTransform:"uppercase",letterSpacing:.4,display:"block",marginBottom:1}}>Brutto</span><span style={{fontWeight:700,color:BK,fontSize:11.5}}>{fmtArea(stats.area_brutto)}</span></div>
+      {stats.area_excl>0&&<div><span style={{color:GY,fontWeight:600,fontSize:9.5,textTransform:"uppercase",letterSpacing:.4,display:"block",marginBottom:1}}>Aussparungen</span><span style={{fontWeight:700,color:AM,fontSize:11.5}}>− {fmtArea(stats.area_excl)}</span></div>}
+      <div><span style={{color:GY,fontWeight:600,fontSize:9.5,textTransform:"uppercase",letterSpacing:.4,display:"block",marginBottom:1}}>Netto</span><span style={{fontWeight:700,color:BK,fontSize:11.5}}>{fmtArea(stats.area)}</span></div>
+      <div><span style={{color:GY,fontWeight:600,fontSize:9.5,textTransform:"uppercase",letterSpacing:.4,display:"block",marginBottom:1}}>Iso-Bar ECO</span><span style={{fontWeight:700,color:R,fontSize:12}}>{fmtInt(stats.anker)} <span style={{fontSize:9.5,color:GY,fontWeight:600}}>Stk</span></span></div>
+      {stats.sk>0&&<div><span style={{color:GY,fontWeight:600,fontSize:9.5,textTransform:"uppercase",letterSpacing:.4,display:"block",marginBottom:1}}>Seilkreuze</span><span style={{fontWeight:700,color:"#1565C0",fontSize:12}}>{fmtInt(stats.sk)} <span style={{fontSize:9.5,color:GY,fontWeight:600}}>Stk</span></span></div>}
+      {(stats.sV+stats.sH+stats.sD)>0&&<div><span style={{color:GY,fontWeight:600,fontSize:9.5,textTransform:"uppercase",letterSpacing:.4,display:"block",marginBottom:1}}>Seil V+H+D</span><span style={{fontWeight:700,color:BK,fontSize:11.5}}>{fmtLen(stats.sV+stats.sH+stats.sD)}</span></div>}
+      {stats.fromPlan&&<div><span style={{color:GY,fontWeight:600,fontSize:9.5,textTransform:"uppercase",letterSpacing:.4,display:"block",marginBottom:1}}>Quelle</span><span style={{fontWeight:700,color:R,fontSize:11}}>📐 Plan</span></div>}
+    </div>
+  </div>);
+}
+
 function PreviewSection({d,maxNw,mat,withRealistic=true}){
   const f0=(d.fassaden||[])[0]||{};
   const prvRaster=f0.seilfuehrung||d.seilfuehrung||"gitter";
@@ -587,37 +691,22 @@ function PreviewSection({d,maxNw,mat,withRealistic=true}){
         Dokument: {d.dokNr||"–"} · Version: {d.version||"–"} · Datum: {d.datum}</div>
 
       {withRealistic&&(()=>{
-        const facadesArr=(prvAnn?.facades?.length>0?prvAnn.facades:(prvAnn?.facade?[prvAnn.facade]:[]));
-        const havePlanWithFacades=!!(prvPlan&&facadesArr.length>0);
+        const fassaden=d.fassaden||[];
+        if(fassaden.length===0) return null;
+        const cov=pf(d.coverage)||65;
+        const mat=d.maturity||"mature";
+        const unannotatedPlans=fassaden.filter(f=>f.plan&&!(f.annotations?.facades?.length>0));
         return(<>
-          <div style={{border:`1px solid ${BD}`,borderRadius:6,padding:8,marginBottom:14,background:"#FAFAF8"}}>
-            <div style={{fontWeight:700,fontSize:10.5,textTransform:"uppercase",letterSpacing:.5,marginBottom:6,color:BK,paddingLeft:6,display:"flex",justifyContent:"space-between",alignItems:"baseline"}}>
-              <span>Fassadenbegrünung – {havePlanWithFacades?"Vorschau im Plan":"Realistische Vorschau"}
-                {selectedPlant&&<span style={{fontWeight:400,color:GY,marginLeft:8,textTransform:"none",letterSpacing:0}}>· {selectedPlant.de} ({selectedPlant.bot})</span>}
-              </span>
-              {havePlanWithFacades&&facadesArr.length>1&&<span style={{fontSize:9.5,fontWeight:600,color:GY,textTransform:"none",letterSpacing:0}}>{facadesArr.length} Begrünungsflächen</span>}
-            </div>
-            <RealisticFacade fW={prvW} fH={prvH} LH={prvLH} LV={prvLV} rasterType={prvRaster}
-              seilkreuztyp={prvSK} coverage={pf(d.coverage)||65} maturity={d.maturity||"mature"}
-              formCode={formCode} size={760}
-              plan={prvPlan} annotations={prvAnn}/>
-            {prvPlan&&facadesArr.length===0&&<div style={{padding:"6px 10px",background:"#FFF8E1",border:`1px solid ${AM}40`,borderRadius:5,fontSize:10.5,color:DK,marginTop:6}}>
-              ⓘ Plan hochgeladen aber noch keine Begrünungsfläche markiert – im Edit-Tab unter "Fassadenflächen" mindestens ein Rechteck ziehen.
-            </div>}
-          </div>
-
-          {/* Schematische Übersicht — zusätzlich zur Plan-Vorschau, immer im Procedural-Modus */}
-          {havePlanWithFacades&&<div style={{border:`1px solid ${BD}`,borderRadius:6,padding:8,marginBottom:14,background:"#FAFAF8"}}>
-            <div style={{fontWeight:700,fontSize:10.5,textTransform:"uppercase",letterSpacing:.5,marginBottom:6,color:BK,paddingLeft:6}}>
-              Schematische Begrünungs-Übersicht
-              <span style={{fontWeight:400,color:GY,marginLeft:8,textTransform:"none",letterSpacing:0}}>· wie sich die Fassade entwickeln kann</span>
-            </div>
-            <div style={{display:"flex",justifyContent:"center"}}>
-              <RealisticFacade fW={prvW} fH={prvH} LH={prvLH} LV={prvLV} rasterType={prvRaster}
-                seilkreuztyp={prvSK} coverage={pf(d.coverage)||65} maturity={d.maturity||"mature"}
-                formCode={formCode} size={560}
-                forceProcedural/>
-            </div>
+          {fassaden.length>1&&<div style={{fontWeight:800,fontSize:11,textTransform:"uppercase",letterSpacing:.5,color:BK,marginBottom:8,paddingLeft:2,display:"flex",alignItems:"baseline",gap:8}}>
+            <span>Fassaden im Detail</span>
+            <span style={{fontWeight:500,fontSize:10,color:GY,textTransform:"none",letterSpacing:0}}>
+              {fassaden.length} Fassaden{selectedPlant?` · ${selectedPlant.de} (${selectedPlant.bot})`:""}
+            </span>
+          </div>}
+          {fassaden.map((f,i)=><FacadeReportCard key={i} d={d} facade={f} index={i} total={fassaden.length}
+            formCode={formCode} coverage={cov} maturity={mat} size={fassaden.length>1?460:560}/>)}
+          {unannotatedPlans.length>0&&<div style={{padding:"6px 10px",background:"#FFF8E1",border:`1px solid ${AM}40`,borderRadius:5,fontSize:10.5,color:DK,marginBottom:14}}>
+            ⓘ {unannotatedPlans.length} {unannotatedPlans.length===1?"Plan ist":"Pläne sind"} hochgeladen, aber noch keine Begrünungsfläche markiert — im Edit-Tab unter "Fassadenflächen" mindestens ein Rechteck ziehen.
           </div>}
         </>);
       })()}
@@ -753,14 +842,9 @@ function MaterialSection({d,mat}){
   const fassaden=d.fassaden||[{name:"Fassade 1",breite:d.fassadenlaenge||"10",hoehe:d.fassadenhoehe||"6"}];
   const glh=pf(d.LH)||.9,glv=pf(d.LV)||.9;
   const f0=fassaden[0]||{};
-  const matRaster=f0.seilfuehrung||d.seilfuehrung||"gitter";
-  const matSK=f0.seilkreuztyp||d.seilkreuztyp||"ohne";
-  const matLH=f0.lh||d.LH||"0.9";
-  const matLV=f0.lv||d.LV||"0.9";
-  const matW=f0.breite||d.fassadenlaenge||"10";
-  const matH=f0.hoehe||d.fassadenhoehe||"6";
-  const matPlan=f0.plan||null;
-  const matAnn=f0.annotations||null;
+  // matRaster/matSK/etc were only used by the single-facade preview that
+  // has been replaced with the per-facade FacadeRasterCard loop below.
+  const matSK=f0.seilkreuztyp||d.seilkreuztyp||"ohne";   // still needed for the Stückliste's skInfo lookup
   // Per-facade stats — plan-aware where annotations exist, simple formula otherwise.
   const facadeStats = fassaden.map(f => calcFacadeStats(f, d));
   const anyV = facadeStats.some(s => s.sV > 0);
@@ -808,12 +892,14 @@ function MaterialSection({d,mat}){
         {anyFromPlan&&<Stat label="Quelle" value="aus Plan" valueSize={14} color={R}/>}
       </div>
 
-      <div style={{display:"flex",gap:12,marginBottom:14}}>
-        <div style={{flex:1,border:`1px solid ${BD}`,borderRadius:4,padding:12}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:8}}>
-            <div style={{fontWeight:700,fontSize:10.5,textTransform:"uppercase",letterSpacing:.5,color:BK}}>Eingangswerte</div>
-            {anyFromPlan&&<span style={{fontSize:9,fontWeight:700,color:R,background:RL,padding:"1px 6px",borderRadius:3}}>📐 aus Plan ermittelt</span>}
-          </div>
+      {/* Eingangswerte — compact summary card (global totals; per-facade
+          settings live in the per-facade cards below). */}
+      <div style={{border:`1px solid ${BD}`,borderRadius:4,padding:12,marginBottom:14}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:8}}>
+          <div style={{fontWeight:700,fontSize:10.5,textTransform:"uppercase",letterSpacing:.5,color:BK}}>Eingangswerte (Projekt-Gesamt)</div>
+          {anyFromPlan&&<span style={{fontSize:9,fontWeight:700,color:R,background:RL,padding:"1px 6px",borderRadius:3}}>📐 aus Plan ermittelt</span>}
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:"4px 18px"}}>
           {anyFromPlan&&totalAreaBrutto>0
             ? <>
                 <KV l="Brutto-Fläche" v={fmtArea(totalAreaBrutto)}/>
@@ -822,27 +908,19 @@ function MaterialSection({d,mat}){
               </>
             : <KV l="Gesamtfläche" v={fmtArea(totalArea)} b/>}
           <KV l="Fassaden" v={`${fassaden.length} Stk.`}/>
-          <KV l="LH / LV" v={`${matLH} / ${matLV} m`}/>
-          <KV l="Seilführung" v={RASTER.find(r=>r.id===matRaster)?.l}/>
-          <KV l="Seilkreuztyp" v={(SEILKREUZE.find(s=>s.id===matSK)||{}).l||"–"}/>
-          {setInfo&&<KV l="SET Produkt" v={setInfo.l} b/>}</div>
-        <div style={{flex:1.5,display:"flex",flexDirection:"column",gap:10}}>
-          {/* Plan-based RasterOverlay — shown only when a plan + greening annotations exist */}
-          {matPlan&&matAnn&&(matAnn.facades||[]).length>0&&<div>
-            <div style={{fontSize:9.5,fontWeight:700,color:GY,textTransform:"uppercase",letterSpacing:.4,marginBottom:4}}>Im Plan</div>
-            <RasterOverlay LH={matLH} LV={matLV} fW={matW} fH={matH} rasterType={matRaster}
-              seilkreuztyp={matSK} size={460} plan={matPlan} annotations={matAnn}/>
-          </div>}
-          {/* Schematic raster — always shown, makes the cable pattern + Seilkreuze unmistakable */}
-          <div>
-            <div style={{fontSize:9.5,fontWeight:700,color:GY,textTransform:"uppercase",letterSpacing:.4,marginBottom:4}}>
-              Schematische Rasterdarstellung
-              <span style={{fontWeight:500,color:GL,marginLeft:6,textTransform:"none",letterSpacing:0}}>· {RASTER.find(rr=>rr.id===matRaster)?.l}{matSK!=="ohne"?` + ${SEILKREUZE.find(s=>s.id===matSK)?.l}`:""}</span>
-            </div>
-            <RasterOverlay LH={matLH} LV={matLV} fW={matW} fH={matH} rasterType={matRaster}
-              seilkreuztyp={matSK} size={460} forceProcedural/>
-          </div>
-        </div></div>
+          {setInfo&&<KV l="SET Produkt" v={setInfo.l} b/>}
+        </div>
+      </div>
+
+      {/* Per-facade visualisation — one card per facade, plan + schematic + subtotal */}
+      {fassaden.length>0&&<div style={{marginBottom:14}}>
+        {fassaden.length>1&&<div style={{fontWeight:800,fontSize:11,textTransform:"uppercase",letterSpacing:.5,color:BK,marginBottom:8,paddingLeft:2,display:"flex",alignItems:"baseline",gap:8}}>
+          <span>Rasterdarstellung je Fassade</span>
+          <span style={{fontWeight:500,fontSize:10,color:GY,textTransform:"none",letterSpacing:0}}>{fassaden.length} Fassaden</span>
+        </div>}
+        {fassaden.map((f,i)=><FacadeRasterCard key={i} d={d} facade={f} index={i} total={fassaden.length}
+          size={fassaden.length>1?420:460}/>)}
+      </div>}
 
       {(fassaden.length>1||anyFromPlan||facadeStats.some(f=>f.rects&&f.rects.length>1))&&<div style={{border:`1px solid ${BD}`,borderRadius:4,padding:12,marginBottom:14}}>
         <div style={{fontWeight:700,fontSize:10.5,textTransform:"uppercase",letterSpacing:.5,marginBottom:8,color:BK,display:"flex",justifyContent:"space-between"}}>
