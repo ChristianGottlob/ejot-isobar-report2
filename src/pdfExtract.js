@@ -306,7 +306,9 @@ const PATTERNS = {
     /(?:Quer|V[_\s]*Ed\s*\/\s*V[_\s]*Rd)[^\d\n]{0,40}(\d[\.,]\d{1,3})/im,
     /Ausnutzung\s+Quer[^\d\n]{0,30}(\d[\.,]\d{1,3})/im,
   ],
-  nw_kombi: [
+  nw_kombi: [   // Vorbemessung: "SQRT(Vd^2+Nd^2) / FRd"  (the value carries digits in the formula, so match across the closing paren to the ratio)
+    /(?:SQRT|WURZEL)\s*\([^)\n]*\)[^\n]*?(\d[\.,]\d{1,4})/im,
+    /√\s*\([^)\n]*\)[^\n]*?(\d[\.,]\d{1,4})/im,
     /Kombination[^\d\n]{0,40}(\d[\.,]\d{1,3})/im,
     /(?:Kombinierte?\s+Ausnutzung|Interaktionsnachweis)[^\d\n]{0,30}(\d[\.,]\d{1,3})/im,
   ],
