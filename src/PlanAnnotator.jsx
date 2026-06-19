@@ -33,7 +33,7 @@ const MODE_HINTS = {
   facade: "Rechtecke um jede zu begrünende Wandfläche ziehen. Mehrere sind erlaubt.",
   window: "Rechtecke um Fenster ziehen. Anker und Bewuchs sparen diese aus.",
   door:   "Rechtecke um Türen ziehen. Anker und Bewuchs sparen diese aus.",
-  scale:  "Strecke ziehen, deren tatsächliche Länge du kennst (z.B. eine Bemaßung im Plan). Danach Länge in Metern eingeben.",
+  scale:  "Senkrechte Strecke ziehen (vertikal), deren tatsächliche Höhe du kennst. Danach Länge in Metern eingeben.",
 };
 const MODE_COLORS = {
   facade: COL_FACADE,
@@ -247,11 +247,13 @@ export default function PlanAnnotator({ plan, annotations, onChange, height = 48
     if (!drag) return;
     const dStart = drag.a, dEnd = drag.b;
     setDrag(null);
-    // Scale-mode: drag defines a measurement line, then prompt for meters.
+    // Scale-mode: drag defines a STRICTLY VERTICAL measurement line (x locked
+    // to the start), then prompt for meters.
     if (mode === "scale") {
-      const linePx = Math.hypot(dEnd.x - dStart.x, dEnd.y - dStart.y);
+      const p2 = { x: dStart.x, y: dEnd.y };
+      const linePx = Math.abs(p2.y - dStart.y);
       if (linePx < 10) return;  // ignore tiny drags
-      setScaleDraft({ p1: dStart, p2: dEnd });
+      setScaleDraft({ p1: dStart, p2 });
       // suggest a starting value if a scale was already in place
       setScaleInput(ann.scale && ann.scale.m ? String(ann.scale.m) : "");
       return;
@@ -608,12 +610,12 @@ export default function PlanAnnotator({ plan, annotations, onChange, height = 48
                   {/* Filled translucent area (color with high transparency) makes the
                       marked surface obvious; the dashed outline stays a thin hairline. */}
                   <rect x={r.x} y={r.y} width={r.w} height={r.h}
-                    fill={COL_FACADE} fillOpacity={sel ? 0.30 : 0.16}
-                    stroke={COL_FACADE} strokeWidth={1} strokeDasharray="4,4"
+                    fill={COL_FACADE} fillOpacity={sel ? 0.28 : 0.14}
+                    stroke={COL_FACADE} strokeWidth={0.6} strokeDasharray="2,2"
                     vectorEffect="non-scaling-stroke" />
                   {sel && (
                     <rect x={r.x} y={r.y} width={r.w} height={r.h}
-                      fill="none" stroke={COL_FACADE} strokeWidth={1.25}
+                      fill="none" stroke={COL_FACADE} strokeWidth={0.9}
                       vectorEffect="non-scaling-stroke" />
                   )}
 
@@ -747,12 +749,17 @@ export default function PlanAnnotator({ plan, annotations, onChange, height = 48
                   stroke={COL_SCALE} strokeWidth="2" strokeDasharray="6,4" vectorEffect="non-scaling-stroke" />
               </g>
             )}
-            {/* Drag preview */}
-            {dragRect && (
+            {/* Drag preview — scale-mode shows a vertical line, all other modes a thin rect */}
+            {drag && mode === "scale" && (
+              <line x1={drag.a.x} y1={drag.a.y} x2={drag.a.x} y2={drag.b.y}
+                stroke={COL_SCALE} strokeWidth="1.5" strokeDasharray="6,4"
+                vectorEffect="non-scaling-stroke" pointerEvents="none" />
+            )}
+            {dragRect && mode !== "scale" && (
               <rect x={dragRect.x} y={dragRect.y} width={dragRect.w} height={dragRect.h}
-                fill={`${MODE_COLORS[mode] || R}22`} stroke={MODE_COLORS[mode] || R}
-                strokeWidth={baseStroke} vectorEffect="non-scaling-stroke"
-                strokeDasharray="6,4" pointerEvents="none" />
+                fill={`${MODE_COLORS[mode] || R}1A`} stroke={MODE_COLORS[mode] || R}
+                strokeWidth={0.8} vectorEffect="non-scaling-stroke"
+                strokeDasharray="3,2" pointerEvents="none" />
             )}
             {/* Per-item × delete button (top-right corner of focused rect) */}
             {focusRect && focusItem && (
