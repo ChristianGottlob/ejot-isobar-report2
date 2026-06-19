@@ -128,14 +128,14 @@ export const FIELD_LABELS = {
   psi:                "ψ (Durchströmung)",
   ws:                 "Windsog ws",
   nek:                "Winddruck N_Ek",
-  ned_z:              "Zug N_Ed,z",
-  ned_d:              "Druck N_Ed,d",
-  ved:                "Querkraft V_Ed",
-  vrd:                "Quertragfähigkeit V_Rd",
-  nw_zug:             "Nachweis Zug",
-  nw_druck:           "Nachweis Druck",
-  nw_quer:            "Nachweis Quer",
-  nw_kombi:           "Nachweis Kombination",
+  ned_z:              "Zug N_d",
+  ned_d:              "Druck N_Ed",
+  ved:                "Querkraft V_d",
+  vrd:                "Bemessungswert Tragfähigkeit F_Rd",
+  nw_zug:             "Nachweis Zug (N_d/F_Rd)",
+  nw_druck:           "Nachweis Druck (N_Ed/F_Rd)",
+  nw_quer:            "Nachweis Quer (V_d/F_Rd)",
+  nw_kombi:           "Nachweis Quer/Zug",
   fassadenlaenge:     "Fassadenlänge",
   fassadenhoehe:      "Fassadenhöhe",
   geometrie_art:      "Geometrie / Begrünungsart",
@@ -265,35 +265,44 @@ const PATTERNS = {
     new RegExp(`N[_\\s]*Ek\\s*\\(?(?:Winddruck)?\\)?${GAP(20)}${NUM}`, "im"),
     new RegExp(`Winddruck${GAP(20)}${NUM}`, "im"),
   ],
-  ned_z: [
+  // Vorbemessung notation (Vd / Nd / NEd / FRd) first, Eurocode-Anbauteil
+  // notation (N_Ed,z / N_Ed,d / V_Ed / V_Rd) kept as fallback for old PDFs.
+  ned_z: [   // Nd – Zugkraft aus Windsog
+    new RegExp(`\\bN\\s*d\\b[^\\n]*?${NUM}\\s*kN`, "im"),
     new RegExp(`N[_\\s]*Ed[,\\s]*z\\s*\\(?(?:Zug)?\\)?${GAP(20)}${NUM}`, "im"),
     new RegExp(`N[_\\s]*Ed[,\\s]*Zug${GAP(20)}${NUM}`, "im"),
     new RegExp(`Zugkraft${GAP(20)}${NUM}\\s*kN`, "im"),
   ],
-  ned_d: [
+  ned_d: [   // NEd – Druckkraft aus Winddruck
+    new RegExp(`\\bN\\s*Ed\\b[^\\n]*?${NUM}\\s*kN`, "im"),
     new RegExp(`N[_\\s]*Ed[,\\s]*d\\s*\\(?(?:Druck)?\\)?${GAP(20)}${NUM}`, "im"),
     new RegExp(`N[_\\s]*Ed[,\\s]*Druck${GAP(20)}${NUM}`, "im"),
     new RegExp(`Druckkraft${GAP(20)}${NUM}\\s*kN`, "im"),
   ],
-  ved: [
+  ved: [     // Vd – Querkraft aus Eigenlast
+    new RegExp(`\\bV\\s*d\\b[^\\n]*?${NUM}\\s*kN`, "im"),
     new RegExp(`V[_\\s]*Ed\\s*\\(?(?:Quer.*?)?\\)?${GAP(20)}${NUM}`, "im"),
     new RegExp(`Querkraft${GAP(20)}${NUM}\\s*kN`, "im"),
   ],
-  vrd: [
+  vrd: [     // FRd – Bemessungswert der Tragfähigkeit
+    new RegExp(`\\bF\\s*Rd\\b[^\\n]*?${NUM}\\s*kN`, "im"),
     new RegExp(`V[_\\s]*Rd\\s*\\(?(?:Quertrag.*?)?\\)?${GAP(20)}${NUM}`, "im"),
     new RegExp(`Quertragf[äa]higkeit${GAP(20)}${NUM}`, "im"),
   ],
 
   // Nachweise (Ausnutzung — typically a ratio between 0 and ~1.5)
   nw_zug: [
+    /N\s*d\s*\/\s*F\s*Rd[^\d\n]{0,20}(\d[\.,]\d{1,4})/im,
     /(?:Zug|N[_\s]*Ed[,\s]*z\s*\/\s*N[_\s]*Rd)[^\d\n]{0,40}(\d[\.,]\d{1,3})/im,
     /Ausnutzung\s+Zug[^\d\n]{0,30}(\d[\.,]\d{1,3})/im,
   ],
   nw_druck: [
+    /N\s*Ed\s*\/\s*F\s*Rd[^\d\n]{0,20}(\d[\.,]\d{1,4})/im,
     /(?:Druck|N[_\s]*Ed[,\s]*d\s*\/\s*N[_\s]*Rd[,\s]*d)[^\d\n]{0,40}(\d[\.,]\d{1,3})/im,
     /Ausnutzung\s+Druck[^\d\n]{0,30}(\d[\.,]\d{1,3})/im,
   ],
   nw_quer: [
+    /V\s*d\s*\/\s*F\s*Rd[^\d\n]{0,20}(\d[\.,]\d{1,4})/im,
     /(?:Quer|V[_\s]*Ed\s*\/\s*V[_\s]*Rd)[^\d\n]{0,40}(\d[\.,]\d{1,3})/im,
     /Ausnutzung\s+Quer[^\d\n]{0,30}(\d[\.,]\d{1,3})/im,
   ],

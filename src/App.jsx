@@ -810,8 +810,8 @@ function PreviewSection({d,maxNw,mat,withRealistic=true}){
           {maxNw>.85&&<div style={{display:"inline-block",padding:"1px 6px",borderRadius:3,fontSize:9,fontWeight:700,
             background:maxNw>1?"#FFEBEE":"#FFF3E0",color:maxNw>1?R:AM,marginBottom:6,border:`1px solid ${maxNw>1?R:AM}40`}}>
             {maxNw>1?"ÜBERSCHREITUNG":"GRENZBEREICH"} max: {maxNw.toFixed(2)}</div>}
-          <NwBar label="Zug, N_Ed,z / N_Rd" value={d.nw_zug}/><NwBar label="Druck, N_Ed,d / N_Rd,d" value={d.nw_druck}/>
-          <NwBar label="Quer, V_Ed / V_Rd" value={d.nw_quer}/><NwBar label="Kombination (max)" value={d.nw_kombi}/>
+          <NwBar label="Zug: N_d / F_Rd" value={d.nw_zug}/><NwBar label="Druck: N_Ed / F_Rd" value={d.nw_druck}/>
+          <NwBar label="Quer: V_d / F_Rd" value={d.nw_quer}/><NwBar label="Quer/Zug: √(V_d²+N_d²) / F_Rd" value={d.nw_kombi}/>
           <div style={{fontSize:8.5,color:GL,marginTop:8}}>Zulassungsbezug: Z-21.8-2083</div></div>
         <div style={{flex:1.4,border:`1px solid ${BD}`,borderRadius:4,padding:12}}>
           <div style={{fontWeight:700,fontSize:10.5,textTransform:"uppercase",letterSpacing:.5,marginBottom:6,color:BK}}>Raster ({RASTER.find(r=>r.id===prvRaster)?.l})</div>
@@ -822,7 +822,7 @@ function PreviewSection({d,maxNw,mat,withRealistic=true}){
         <div style={{fontWeight:700,fontSize:10.5,textTransform:"uppercase",letterSpacing:.5,marginBottom:6,color:BK}}>Lasten &amp; Widerstände</div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"2px 16px"}}>
           {[["Lastklasse",d.lastklasse],["ψ (Durchströmung)",d.psi],["w_s (Windsog) [kN/m²]",d.ws],["N_Ek (Winddruck) [kN/m²]",d.nek],
-            ["N_Ed,z (Zug) [kN]",d.ned_z],["N_Ed,d (Druck) [kN]",d.ned_d],["V_Ed (Quer) [kN]",d.ved],["V_Rd (Quertrag.) [kN]",d.vrd]].map(([k,v])=>
+            ["N_d (Zug) [kN]",d.ned_z],["N_Ed (Druck) [kN]",d.ned_d],["V_d (Quer) [kN]",d.ved],["F_Rd (Tragfähigkeit) [kN]",d.vrd]].map(([k,v])=>
             <div key={k} style={{display:"flex",justifyContent:"space-between",padding:"2px 0",borderBottom:`1px solid ${BG}`,fontSize:11.5}}>
               <span style={{color:GY}}><Sub>{k}</Sub></span><span style={{fontWeight:700,color:BK}}>{v||"–"}</span></div>)}</div></div>
       <div style={{borderTop:`1px solid ${BD}`,marginTop:14,padding:"6px 0 0",display:"flex",justifyContent:"space-between",fontSize:9,color:GL}}>
@@ -1580,10 +1580,10 @@ export default function App(){
   <Sec title="Windlasten & Schnittgrößen" icon="🌬"><div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
     <Field label="w_s (Windsog)" value={d.ws} onChange={setter("ws")} unit="kN/m²" half/>
     <Field label="N_Ek (Winddruck)" value={d.nek} onChange={setter("nek")} unit="kN/m²" half/>
-    <Field label="N_Ed,z (Zug)" value={d.ned_z} onChange={setter("ned_z")} unit="kN" half/>
-    <Field label="N_Ed,d (Druck)" value={d.ned_d} onChange={setter("ned_d")} unit="kN" half/>
-    <Field label="V_Ed (Querkraft)" value={d.ved} onChange={setter("ved")} unit="kN" half/>
-    <Field label="V_Rd (Quertragfähigkeit)" value={d.vrd} onChange={setter("vrd")} unit="kN" half/></div></Sec>
+    <Field label="N_d (Zug)" value={d.ned_z} onChange={setter("ned_z")} unit="kN" half hint="Zugkraft aus Windsog (N_d = LV·w_s·ψ·1,5)"/>
+    <Field label="N_Ed (Druck)" value={d.ned_d} onChange={setter("ned_d")} unit="kN" half hint="Druckkraft aus Winddruck (N_Ed = N_Ek·LV·ψ·1,5)"/>
+    <Field label="V_d (Querkraft)" value={d.ved} onChange={setter("ved")} unit="kN" half hint="Querkraft aus Eigenlast (V_d = LV·g·1,35)"/>
+    <Field label="F_Rd (Bemessungswert Tragfähigkeit)" value={d.vrd} onChange={setter("vrd")} unit="kN" half hint="F_Rd = F_Rk / γ_M"/></div></Sec>
 
   <Sec title="Kernergebnisse" icon="◎" accent><div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
     <Field label="Max. Abstand LH" value={d.LH} onChange={setter("LH")} unit="m" half/>
@@ -1592,16 +1592,16 @@ export default function App(){
 
   <Sec title="Nachweise (≤ 1,0)" icon="✓" accent>
     <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:12}}>
-      <Field label="N_Ed,z / N_Rd (Zug)" value={d.nw_zug} onChange={setter("nw_zug")} half/>
-      <Field label="N_Ed,d / N_Rd,d (Druck)" value={d.nw_druck} onChange={setter("nw_druck")} half/>
-      <Field label="V_Ed / V_Rd (Querkraft)" value={d.nw_quer} onChange={setter("nw_quer")} half/>
-      <Field label="Kombination (max)" value={d.nw_kombi} onChange={setter("nw_kombi")} half/></div>
+      <Field label="Zug: N_d / F_Rd" value={d.nw_zug} onChange={setter("nw_zug")} half/>
+      <Field label="Druck: N_Ed / F_Rd" value={d.nw_druck} onChange={setter("nw_druck")} half/>
+      <Field label="Quer: V_d / F_Rd" value={d.nw_quer} onChange={setter("nw_quer")} half/>
+      <Field label="Quer/Zug: √(V_d²+N_d²) / F_Rd" value={d.nw_kombi} onChange={setter("nw_kombi")} half/></div>
     {(pf(d.nw_zug)||pf(d.nw_druck)||pf(d.nw_quer)||pf(d.nw_kombi))>0&&<div style={{border:`1px solid ${BD}`,borderRadius:6,padding:14,background:BG}}>
       <div style={{fontWeight:700,fontSize:10.5,textTransform:"uppercase",letterSpacing:.5,marginBottom:10,color:BK}}>Ausnutzungsgrad</div>
-      <NwBar label="Zug, N_Ed,z / N_Rd" value={d.nw_zug}/>
-      <NwBar label="Druck, N_Ed,d / N_Rd,d" value={d.nw_druck}/>
-      <NwBar label="Quer, V_Ed / V_Rd" value={d.nw_quer}/>
-      <NwBar label="Kombination (max)" value={d.nw_kombi}/>
+      <NwBar label="Zug: N_d / F_Rd" value={d.nw_zug}/>
+      <NwBar label="Druck: N_Ed / F_Rd" value={d.nw_druck}/>
+      <NwBar label="Quer: V_d / F_Rd" value={d.nw_quer}/>
+      <NwBar label="Quer/Zug: √(V_d²+N_d²) / F_Rd" value={d.nw_kombi}/>
       {maxNw>0&&<div style={{marginTop:8,fontSize:11,fontWeight:700,color:maxNw<=1?GN:R}}>
         {maxNw<=1?"✓ Alle Nachweise erfüllt":`✗ Überschreitung! max: ${maxNw.toFixed(2)}`}</div>}
     </div>}</Sec>
