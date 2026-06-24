@@ -4,6 +4,7 @@ import { jsPDF } from "jspdf";
 import { extractPdfText, buildDocument, loadPlanImage, FIELD_LABELS } from "./pdfExtract";
 import RealisticFacade from "./RealisticFacade";
 import RasterOverlay from "./RasterOverlay";
+import DetailCrop from "./DetailCrop";
 import PlanAnnotator from "./PlanAnnotator";
 import { normalizeAnnotations, unionBBox, pointInRect, pointInAny, greeningAreaPx, lineInsideLengthPx, pxPerMeter, rectIntersectionArea } from "./planUtils";
 import { loadDocument, saveDocument, clearDocument } from "./idbStore";
@@ -402,6 +403,36 @@ function calcFacadeStats(f, d) {
   };
 }
 
+// Resolve a facade's effective max spacings (per-facade override → global default).
+function facadeSpacing(f, d) {
+  return {
+    lh: pf(f.lh) || pf(d.LH) || 0.9,
+    lv: pf(f.lv) || pf(d.LV) || 0.9,
+    raster: f.seilfuehrung || d.seilfuehrung || "gitter",
+    sk: f.seilkreuztyp || d.seilkreuztyp || "ohne",
+  };
+}
+
+// Pick the governing (maßgebliche) facade — the one with the LARGEST tributary
+// area LH·LV per anchor, i.e. the worst case for load per Halterung.  Used to
+// draw a single representative detail crop when facades/areas have differing
+// spacings and not all can be shown.  Returns {facade, index, spacing, varies}.
+function governingFacade(fassaden, d) {
+  if (!fassaden || fassaden.length === 0) return null;
+  let best = null;
+  const keys = new Set();
+  fassaden.forEach((f, index) => {
+    const sp = facadeSpacing(f, d);
+    keys.add(`${sp.lh}|${sp.lv}|${sp.raster}|${sp.sk}`);
+    const trib = sp.lh * sp.lv;
+    if (!best || trib > best.trib ||
+        (trib === best.trib && sp.lh > best.spacing.lh)) {
+      best = { facade: f, index, spacing: sp, trib };
+    }
+  });
+  return { ...best, varies: keys.size > 1 };
+}
+
 // ─── Components ─────────────────────────────────────────
 function Sub({children:s}){
   if(typeof s!=="string")return s;
@@ -732,6 +763,16 @@ function FacadeRasterCard({d,facade,index,total}){
           lage1={fLage1} seilkreuztyp={fSK} size={460} maxHeight={480} forceProcedural/>
       </div>
     </div>
+    {/* Enlarged detail crop — maximum spacings, clearly dimensioned */}
+    <div style={{marginTop:14}}>
+      <div style={labelStyle}>
+        <span>🔍 Detailausschnitt – Maximalabstände</span>
+        <span style={{fontWeight:500,color:GL,letterSpacing:0,textTransform:"none"}}>Vergrößerter Ausschnitt, maßgebliche Abstände bemaßt</span>
+      </div>
+      <div style={{display:"flex",justifyContent:"center"}}>
+        <DetailCrop LH={fLH} LV={fLV} rasterType={fRaster} seilkreuztyp={fSK} size={440}/>
+      </div>
+    </div>
     {/* Per-facade material subtotal */}
     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(110px,1fr))",gap:8,marginTop:12,paddingTop:10,borderTop:`1px solid ${BD}`,fontSize:11}}>
       <div><span style={{color:GY,fontWeight:600,fontSize:9.5,textTransform:"uppercase",letterSpacing:.4,display:"block",marginBottom:1}}>Brutto</span><span style={{fontWeight:700,color:BK,fontSize:11.5}}>{fmtArea(stats.area_brutto)}</span></div>
@@ -759,6 +800,7 @@ function PreviewSection({d,maxNw,mat,withRealistic=true}){
   const selectedPlant=FLL_PLANTS.find(p=>p.bot===d.pflanze_botanisch);
   const formCode=selectedPlant?selectedPlant.form:"S";
   const fassaden=d.fassaden||[];
+  const gov=governingFacade(fassaden,d);
   const cov=pf(d.coverage)||65;
   const maturityVal=d.maturity||"mature";
   const unannotatedPlans=fassaden.filter(f=>f.plan&&!(f.annotations?.facades?.length>0));
@@ -818,6 +860,17 @@ function PreviewSection({d,maxNw,mat,withRealistic=true}){
           <RasterOverlay LH={prvLH} LV={prvLV} fW={prvW} fH={prvH} rasterType={prvRaster}
             lage1={prvLage1} seilkreuztyp={prvSK} size={420} plan={prvPlan} annotations={prvAnn}/>
           <div style={{fontSize:8.5,color:GL,marginTop:4}}>Schematisch – ersetzt keine Ausführungsplanung.</div></div></div>
+      {gov&&<div style={{border:`1px solid ${RM}`,borderRadius:4,padding:12,marginBottom:14}}>
+        <div style={{fontWeight:700,fontSize:10.5,textTransform:"uppercase",letterSpacing:.5,marginBottom:2,color:R}}>Detailausschnitt – Maximalabstände</div>
+        <div style={{fontSize:9.5,color:GL,marginBottom:8}}>
+          {gov.varies
+            ? <>Größte Abstände aller {fassaden.length} Fassaden – {gov.facade.name||`Fassade ${gov.index+1}`} (L<sub>H</sub> {fm(gov.spacing.lh)} / L<sub>V</sub> {fm(gov.spacing.lv)} m) maßgebend dargestellt.</>
+            : <>Vergrößerter Ausschnitt mit eindeutig bemaßten Maximalabständen.</>}
+        </div>
+        <DetailCrop LH={gov.spacing.lh} LV={gov.spacing.lv} rasterType={gov.spacing.raster}
+          seilkreuztyp={gov.spacing.sk} size={460}
+          areaLabel={gov.facade.name||`Fassade ${gov.index+1}`} governing={gov.varies}/>
+      </div>}
       <div style={{border:`1px solid ${BD}`,borderRadius:4,padding:12}}>
         <div style={{fontWeight:700,fontSize:10.5,textTransform:"uppercase",letterSpacing:.5,marginBottom:6,color:BK}}>Lasten &amp; Widerstände</div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"2px 16px"}}>
@@ -1667,6 +1720,14 @@ export default function App(){
               <RasterOverlay LH={fLH} LV={fLV} fW={f.breite||"3"} fH={f.hoehe||"3"} rasterType={fRaster}
                 lage1={f.lage1??d.Lage1??"0"} seilkreuztyp={fSK} size={340} forceProcedural/>
               <div style={{fontSize:10,color:DK,fontWeight:600,marginTop:4}}>{f.name}: {f.breite||"–"} × {f.hoehe||"–"} m = {((pf(f.breite)||0)*(pf(f.hoehe)||0)).toFixed(1)} m²</div>
+            </div>
+            {/* Detailausschnitt — Maximalabstände eindeutig bemaßt */}
+            <div style={{background:BG,borderRadius:8,padding:10,textAlign:"center"}}>
+              <div style={{fontSize:9.5,fontWeight:700,color:GY,textTransform:"uppercase",letterSpacing:.4,marginBottom:4,textAlign:"left"}}>
+                Detailausschnitt
+                <span style={{fontWeight:500,color:GL,marginLeft:6,textTransform:"none",letterSpacing:0}}>· Maximalabstände</span>
+              </div>
+              <DetailCrop LH={fLH} LV={fLV} rasterType={fRaster} seilkreuztyp={fSK} size={320}/>
             </div>
           </div>
         </div>

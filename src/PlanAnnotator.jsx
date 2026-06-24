@@ -33,7 +33,7 @@ const MODE_HINTS = {
   facade: "Rechtecke um jede zu begrünende Wandfläche ziehen. Mehrere sind erlaubt.",
   window: "Rechtecke um Fenster ziehen. Anker und Bewuchs sparen diese aus.",
   door:   "Rechtecke um Türen ziehen. Anker und Bewuchs sparen diese aus.",
-  scale:  "Senkrechte Strecke ziehen (vertikal), deren tatsächliche Höhe du kennst. Danach Länge in Metern eingeben.",
+  scale:  "Strecke ziehen, deren tatsächliche Länge du kennst – vertikal oder horizontal (rastet auf die dominante Richtung). Danach Länge in Metern eingeben.",
 };
 const MODE_COLORS = {
   facade: COL_FACADE,
@@ -247,11 +247,15 @@ export default function PlanAnnotator({ plan, annotations, onChange, height = 48
     if (!drag) return;
     const dStart = drag.a, dEnd = drag.b;
     setDrag(null);
-    // Scale-mode: drag defines a STRICTLY VERTICAL measurement line (x locked
-    // to the start), then prompt for meters.
+    // Scale-mode: drag defines an AXIS-ALIGNED measurement line, snapped to
+    // whichever axis the drag dominates (vertical or horizontal), then prompt
+    // for meters.
     if (mode === "scale") {
-      const p2 = { x: dStart.x, y: dEnd.y };
-      const linePx = Math.abs(p2.y - dStart.y);
+      const adx = Math.abs(dEnd.x - dStart.x), ady = Math.abs(dEnd.y - dStart.y);
+      const p2 = ady >= adx
+        ? { x: dStart.x, y: dEnd.y }   // vertical
+        : { x: dEnd.x, y: dStart.y };  // horizontal
+      const linePx = Math.max(adx, ady);
       if (linePx < 10) return;  // ignore tiny drags
       setScaleDraft({ p1: dStart, p2 });
       // suggest a starting value if a scale was already in place
@@ -749,12 +753,18 @@ export default function PlanAnnotator({ plan, annotations, onChange, height = 48
                   stroke={COL_SCALE} strokeWidth="2" strokeDasharray="6,4" vectorEffect="non-scaling-stroke" />
               </g>
             )}
-            {/* Drag preview — scale-mode shows a vertical line, all other modes a thin rect */}
-            {drag && mode === "scale" && (
-              <line x1={drag.a.x} y1={drag.a.y} x2={drag.a.x} y2={drag.b.y}
-                stroke={COL_SCALE} strokeWidth="1.5" strokeDasharray="6,4"
-                vectorEffect="non-scaling-stroke" pointerEvents="none" />
-            )}
+            {/* Drag preview — scale-mode shows an axis-snapped line (vertical or
+                horizontal), all other modes a thin rect */}
+            {drag && mode === "scale" && (() => {
+              const adx = Math.abs(drag.b.x - drag.a.x), ady = Math.abs(drag.b.y - drag.a.y);
+              const x2 = ady >= adx ? drag.a.x : drag.b.x;
+              const y2 = ady >= adx ? drag.b.y : drag.a.y;
+              return (
+                <line x1={drag.a.x} y1={drag.a.y} x2={x2} y2={y2}
+                  stroke={COL_SCALE} strokeWidth="1.5" strokeDasharray="6,4"
+                  vectorEffect="non-scaling-stroke" pointerEvents="none" />
+              );
+            })()}
             {dragRect && mode !== "scale" && (
               <rect x={dragRect.x} y={dragRect.y} width={dragRect.w} height={dragRect.h}
                 fill={`${MODE_COLORS[mode] || R}1A`} stroke={MODE_COLORS[mode] || R}
