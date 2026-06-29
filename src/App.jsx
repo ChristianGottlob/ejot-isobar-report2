@@ -1186,26 +1186,16 @@ function fmtAgo(ts){
 // document-Felder, die sonst aus der PDF extrahiert werden — Report,
 // RasterOverlay & DetailCrop laufen dadurch unverändert weiter.
 // ─────────────────────────────────────────────────────────────────
-function VorbemessungDE({ d, setD, hasPdf }){
-  const set = k => v => setD(x => ({ ...x, [k]: v }));
-  const modus = d.vm_modus || (hasPdf ? "pdf" : "rechnen");
-  const setModus = m => setD(x => ({ ...x, vm_modus: m }));
-  const untergrund = d.vm_untergrund || "beton";   // "beton" | "mauerwerk"
-  const system = d.vm_system || "raster";          // "raster" | "linear"
-  const land = d.vm_land || "DE";                  // "DE" | "AT"
-  const isMW = untergrund === "mauerwerk";
-  const isLin = system === "linear";
-  const isAT = land === "AT";
-
-  // GK-Default aus evtl. schon gesetzter Geländekategorie ableiten.
+// Baut das Engine-Eingabeobjekt aus dem document `d` (gleiche Defaults wie das
+// Live-Panel) — zentral, damit Panel und Statik-Report identisch rechnen.
+function buildVmInput(d){
   const gkDefault = (() => {
     const g = String(d.gelaendekategorie || "");
     if (["I","II","III","IV"].includes(g)) return g;
     if (g === "BV") return "binnenland";
     return "II";
   })();
-
-  const inp = {
+  return {
     gebaeudehoehe:     d.gebaeudehoehe || "10",
     gebaeudelaenge:    d.vm_geb_laenge || "10",
     gebaeudebreite:    d.vm_geb_breite || "10",
@@ -1220,37 +1210,59 @@ function VorbemessungDE({ d, setD, hasPdf }){
     steinart:          d.vm_steinart || "ks_vollstein",
     seillaenge:        d.vm_seillaenge || "10",
   };
+}
 
-  // ── Österreich: ÖNORM-Windmodul (qp, cpe) → ws/Nek-Override für die Engine ──
-  const atStadt = isAT ? findStadt(d.vm_at_stadt || "Wien, alle übrige B.") : null;
-  const atWind = useMemo(() => {
-    if (!isAT || !atStadt) return null;
-    try {
-      return windAUT({
-        vb0: atStadt.vb0, seehoeheStadt: atStadt.seehoehe,
-        seehoehe: pf(d.vm_at_seehoehe) || atStadt.seehoehe,
-        gelaendekategorie: d.vm_at_gk || "III",
-        gebaeudehoehe: pf(inp.gebaeudehoehe), gebaeudelaenge: pf(inp.gebaeudelaenge), gebaeudebreite: pf(inp.gebaeudebreite),
-      });
-    } catch { return null; }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAT, atStadt, d.vm_at_seehoehe, d.vm_at_gk, inp.gebaeudehoehe, inp.gebaeudelaenge, inp.gebaeudebreite]);
+// Führt die Vorbemessung gemäß `d` aus (Land/Untergrund/System → richtige Engine,
+// bei AT mit ÖNORM-Wind-Override).  Reine Funktion → von Panel & Statik-Report genutzt.
+function runVorbemessung(d){
+  const untergrund = d.vm_untergrund || "beton";
+  const system = d.vm_system || "raster";
+  const land = d.vm_land || "DE";
+  const isMW = untergrund === "mauerwerk", isLin = system === "linear", isAT = land === "AT";
+  const inp = buildVmInput(d);
+  let atWind = null, atStadt = null;
+  if (isAT) {
+    atStadt = findStadt(d.vm_at_stadt || "Wien, alle übrige B.");
+    if (atStadt) {
+      try {
+        atWind = windAUT({
+          vb0: atStadt.vb0, seehoeheStadt: atStadt.seehoehe,
+          seehoehe: pf(d.vm_at_seehoehe) || atStadt.seehoehe,
+          gelaendekategorie: d.vm_at_gk || "III",
+          gebaeudehoehe: pf(inp.gebaeudehoehe), gebaeudelaenge: pf(inp.gebaeudelaenge), gebaeudebreite: pf(inp.gebaeudebreite),
+        });
+      } catch { atWind = null; }
+    }
+  }
+  let res = null, err = null;
+  try {
+    const fn = isLin
+      ? (isMW ? computeLinearMauerwerk : computeLinearBeton)
+      : (isMW ? computeVorbemessungMW : computeVorbemessungDE);
+    const engineInp = atWind
+      ? { ...inp, wind: { ws: atWind.ws, nek: atWind.nek, qz: atWind.nek, cpeA: atWind.cpeA } }
+      : inp;
+    res = fn(engineInp);
+  } catch (e) { err = e.message || String(e); }
+  return { res, err, inp, atWind, atStadt, untergrund, system, land, isMW, isLin, isAT };
+}
 
-  const calc = useMemo(() => {
-    try {
-      const fn = isLin
-        ? (isMW ? computeLinearMauerwerk : computeLinearBeton)
-        : (isMW ? computeVorbemessungMW : computeVorbemessungDE);
-      const engineInp = atWind
-        ? { ...inp, wind: { ws: atWind.ws, nek: atWind.nek, qz: atWind.nek, cpeA: atWind.cpeA } }
-        : inp;
-      return { res: fn(engineInp), err: null };
-    } catch (e) { return { res: null, err: e.message || String(e) }; }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [untergrund, system, atWind, inp.gebaeudehoehe, inp.gebaeudelaenge, inp.gebaeudebreite, inp.windzone,
-      inp.gelaendekategorie, inp.lastklasse, inp.daemmdicke, inp.putzdicke,
-      inp.ttol, inp.betonklasse, inp.temperatur, inp.steinart, inp.seillaenge]);
-  const { res, err } = calc;
+function VorbemessungDE({ d, setD, hasPdf }){
+  const set = k => v => setD(x => ({ ...x, [k]: v }));
+  const modus = d.vm_modus || (hasPdf ? "pdf" : "rechnen");
+  const setModus = m => setD(x => ({ ...x, vm_modus: m }));
+  const untergrund = d.vm_untergrund || "beton";   // "beton" | "mauerwerk"
+  const system = d.vm_system || "raster";          // "raster" | "linear"
+  const land = d.vm_land || "DE";                  // "DE" | "AT"
+  const isMW = untergrund === "mauerwerk";
+  const isLin = system === "linear";
+  const isAT = land === "AT";
+
+  const inp = buildVmInput(d);
+  const { res, err, atWind, atStadt } = useMemo(() => runVorbemessung(d), [
+    JSON.stringify(buildVmInput(d)), d.vm_untergrund, d.vm_system, d.vm_land,
+    d.vm_at_stadt, d.vm_at_seehoehe, d.vm_at_gk,
+  ]);
 
   // ── Normalisierte Ergebnis-Ansicht (vereinheitlicht Beton/Mauerwerk · Raster/Linear) ──
   const view = useMemo(() => {
@@ -1475,6 +1487,245 @@ function VorbemessungDE({ d, setD, hasPdf }){
   );
 }
 
+// ─────────────────────────────────────────────────────────────────
+// Detaillierte Statik-/Vorbemessungs-Ausgabe — rekonstruiert die komplette
+// Berechnung (wie das EJOT-Excel-Berechnungsblatt) aus den Eingaben in `d`:
+// Eingangswerte → Windlast → Geometrie → Tragfähigkeit → Lasten →
+// Bemessung (min. Befestiger / Raster bzw. Seil) → Schnittgrößen → Nachweise
+// → Verformung → Produktwahl.  Quellen je Wert (DIN/ÖNORM/Z-21.8-2083/FLL).
+// ─────────────────────────────────────────────────────────────────
+function StatikSection({ d }){
+  const { res, err, inp, atWind, atStadt, isMW, isLin, isAT, land, untergrund, system } = runVorbemessung(d);
+
+  const Block = ({ title, children, note }) => (
+    <div data-pdf-page="statik" style={{ marginBottom: 16, breakInside: "avoid" }}>
+      <div style={{ fontSize: 11, fontWeight: 800, color: R, textTransform: "uppercase", letterSpacing: .5,
+        borderBottom: `2px solid ${R}`, paddingBottom: 3, marginBottom: 8 }}>{title}</div>
+      {children}
+      {note && <div style={{ fontSize: 9, color: GL, marginTop: 4 }}>{note}</div>}
+    </div>
+  );
+  // Eine Zeile: Bezeichnung · (Formel/Wert) · Wert · Einheit · Quelle
+  const Row = ({ l, f, v, u, src, strong }) => (
+    <tr style={{ borderBottom: `1px solid ${BD}` }}>
+      <td style={{ padding: "3px 6px", fontSize: 10.5, color: DK, fontWeight: strong ? 700 : 500 }}>{l}</td>
+      <td style={{ padding: "3px 6px", fontSize: 9.5, color: GY, fontFamily: "ui-monospace, Consolas, monospace" }}>{f || ""}</td>
+      <td style={{ padding: "3px 6px", fontSize: 10.5, color: BK, fontWeight: 700, textAlign: "right", whiteSpace: "nowrap" }}>{v}</td>
+      <td style={{ padding: "3px 6px", fontSize: 9.5, color: GL }}>{u || ""}</td>
+      <td style={{ padding: "3px 6px", fontSize: 8.5, color: GL }}>{src || ""}</td>
+    </tr>
+  );
+  const Table = ({ children }) => (
+    <table style={{ width: "100%", borderCollapse: "collapse", border: `1px solid ${BD}` }}><tbody>{children}</tbody></table>
+  );
+  // Nachweis-Zeile mit Ampel
+  const NwRow = ({ l, f, nw }) => {
+    const ok = nw.ok, col = ok ? GN : R;
+    return (
+      <tr style={{ borderBottom: `1px solid ${BD}` }}>
+        <td style={{ padding: "3px 6px", fontSize: 10.5, color: DK, fontWeight: 600 }}>{l}</td>
+        <td style={{ padding: "3px 6px", fontSize: 9.5, color: GY, fontFamily: "ui-monospace, Consolas, monospace" }}>{f}</td>
+        <td style={{ padding: "3px 6px", fontSize: 11, color: col, fontWeight: 800, textAlign: "right" }}>{fm(nw.wert)}{nw.einheit ? " " + nw.einheit : ""}</td>
+        <td style={{ padding: "3px 6px", fontSize: 9.5, color: GY }}>≤ {nw.grenze}{nw.einheit ? " " + nw.einheit : ""}</td>
+        <td style={{ padding: "3px 6px", fontSize: 10, color: col, fontWeight: 800, textAlign: "center" }}>{ok ? "✓" : "✗ n.i.O."}</td>
+      </tr>
+    );
+  };
+
+  const fmm = (v) => fm(v) + " mm";
+  const t = res?.tragfaehigkeit, sg = res?.schnittgroessen, nw = res?.nachweise, g = res?.geometrie;
+  const mb = isLin ? res?.linear?.minBefDetail : res?.raster?.minBefDetail;
+  const sysLabel = `${isLin ? "Linear (Seil)" : "Raster (Gitter)"} · ${isMW ? "Mauerwerk" : "Beton"} · ${isAT ? "Österreich (ÖNORM)" : "Deutschland (DIN)"}`;
+
+  return (
+    <div style={{ background: WH, padding: "26px 30px", fontFamily: "'Segoe UI',system-ui,sans-serif", color: BK }}>
+      <PageHead title="Vorbemessung – Statik" subtitle="Iso-Bar ECO · statischer Nachweis (Vorbemessung)" />
+
+      {/* Kopf */}
+      <div data-pdf-page="statik" style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 14, fontSize: 11 }}>
+        {[["Bauvorhaben", d.bauvorhaben || "–"], ["Ort / PLZ", d.ort_plz || "–"], ["Datum", d.datum || ""],
+          ["Bearbeiter", d.bearbeiter || "–"], ["Dokument-Nr.", d.dokNr || "–"], ["System", sysLabel]].map(([k, v]) => (
+          <div key={k} style={{ flex: "1 1 30%", minWidth: 180, border: `1px solid ${BD}`, borderRadius: 5, padding: "5px 8px" }}>
+            <div style={{ fontSize: 9, color: GY, fontWeight: 600 }}>{k}</div>
+            <div style={{ fontSize: 11.5, fontWeight: 700 }}>{v}</div>
+          </div>
+        ))}
+      </div>
+
+      {err && <div style={{ padding: "10px 12px", background: "#FFEBEE", border: `1px solid ${R}40`, borderRadius: 6, color: R, fontSize: 12 }}>
+        Berechnung nicht möglich: {err}
+      </div>}
+
+      {res && <>
+        {/* 1 – Eingangswerte */}
+        <Block title="1 · Eingangswerte">
+          <Table>
+            <Row l="Gebäudehöhe" f="z / h" v={fm(pf(inp.gebaeudehoehe))} u="m" />
+            <Row l="Gebäudelänge" f="L / d" v={fm(pf(inp.gebaeudelaenge))} u="m" />
+            <Row l="Gebäudebreite" f="B / b" v={fm(pf(inp.gebaeudebreite))} u="m" />
+            <Row l="Lastklasse Gewächs" v={inp.lastklasse} u="LK" src="FLL Tab. 15" />
+            {isMW
+              ? <Row l="Steinart (Untergrund)" v={STEINE[inp.steinart]?.label || inp.steinart} src="Z-21.8-2083 Tab. 14" />
+              : <Row l="Betonklasse / Temperatur" v={`${BETON_KLASSEN[inp.betonklasse]?.label || inp.betonklasse} · ${inp.temperatur === "hoch" ? "≤80 °C" : "≤40 °C"}`} src="Z-21.8-2083 Tab. 12" />}
+            <Row l="Dämmdicke / Putzdicke / t_tol" v={`${fm(pf(inp.daemmdicke))} / ${fm(pf(inp.putzdicke))} / ${fm(pf(inp.ttol))}`} u="mm" />
+            {isAT
+              ? <Row l="Standort (ÖNORM)" v={`${atStadt?.name || "–"} · GK ${d.vm_at_gk || "III"}`} src="ÖNORM B 1991-1-4" />
+              : <Row l="Windzone / Geländekategorie" v={`WZ ${inp.windzone} · GK ${inp.gelaendekategorie}`} src="DIN EN 1991-1-4/NA" />}
+            {isLin && <Row l="Seillänge (vertikal)" v={fm(res.linear.seillaenge)} u="m" />}
+          </Table>
+        </Block>
+
+        {/* 2 – Windlast */}
+        <Block title="2 · Windlastermittlung" note={isAT ? "ÖNORM B 1991-1-4 – qp = qb · ce(z); cpe als ungünstigster Sog beider Windrichtungen." : "DIN EN 1991-1-4/NA – Böengeschwindigkeitsdruck q(z) nach Windzone & Geländekategorie."}>
+          <Table>
+            {isAT && atWind && <>
+              <Row l="Basiswindgeschwindigkeit" f="vb,0" v={fm(atStadt.vb0)} u="m/s" src="Städte_AUT" />
+              <Row l="Basisgeschwindigkeitsdruck" f="qb = ρ/2·vb,0²" v={fm(atWind.qb)} u="kN/m²" />
+              <Row l="Geländefaktor" f="ce(z) = a·(z/10)^b" v={fm(atWind.ce)} u="–" />
+              <Row l="Spitzengeschwindigkeitsdruck" f="qp = qb·ce(z)" v={fm(atWind.qp)} u="kN/m²" strong />
+              <Row l="Außendruckbeiwert (Sog)" f="cpe,A (min beide Richt.)" v={fm(atWind.cpeA)} u="–" />
+            </>}
+            {!isAT && <>
+              <Row l="Referenz-Geschwindigkeitsdruck" f={`qref (WZ ${inp.windzone})`} v={fm(res.wind.qref)} u="kN/m²" />
+              <Row l="Böengeschwindigkeitsdruck" f="q(z)" v={fm(res.wind.qz)} u="kN/m²" strong />
+              <Row l="Außendruckbeiwert (Sog)" f="cpe,A" v={fm(res.wind.cpeA)} u="–" />
+            </>}
+            <Row l="Windsogkraft" f="ws = qp·cpe·(−1)" v={fm(res.lasten.ws)} u="kN/m²" strong />
+            <Row l="Winddruckkraft" f="N_Ek = qp (cpe,D=1)" v={fm(res.lasten.nek)} u="kN/m²" strong />
+          </Table>
+        </Block>
+
+        {/* 3 – Geometrie */}
+        <Block title="3 · Geometrie & Hebelarme">
+          <Table>
+            <Row l="Dicke WDVS" f="t_WDVS = Dämm + Putz" v={fm(pf(inp.daemmdicke) + pf(inp.putzdicke))} u="mm" />
+            <Row l="Ausladung" f="e = t_WDVS + t_tol" v={fm(g.e)} u="mm" strong />
+            <Row l="Hebelarm" f="l₁ = e + a + 0,5·d₂ + La" v={fm(g.l1)} u="mm" />
+            <Row l="Hebelarm am Putz" f="l₂ = l₁ − La − 15" v={fm(g.l2)} u="mm" />
+          </Table>
+        </Block>
+
+        {/* 4 – Tragfähigkeit */}
+        <Block title="4 · Tragfähigkeit des Verankerungsgrundes" note="Quelle: Zulassung Z-21.8-2083 · DIN EN 1992-4 (Beton) bzw. Tab. 14/15 (Mauerwerk).">
+          <Table>
+            {isMW ? <>
+              <Row l="Char. Zugtragfähigkeit Stein" f="N_Rk" v={fm(t.nrk)} u="kN" src="Tab. 14" />
+              <Row l="Beiwert aj · Teilsicherheit γM,m" v={`0,75 · ${fm(t.gammaMm)}`} />
+              <Row l="Zugwiderstand" f="N_Rd = N_Rk·aj/γM,m" v={fm(t.NRd)} u="kN" strong />
+              <Row l="Druckbeiwert α_Druck" f="N_Rd,d = α·N_Rd" v={`${fm(t.alphaDruck)} → ${fm(t.NRdd)} kN`} />
+              <Row l="Querwiderstand" f="V_Rd = V_Rk·aj/γM,m" v={fm(t.VRd)} u="kN" strong />
+            </> : <>
+              <Row l="Char. Tragfähigkeit" f="F_Rk" v={fm(t.frk)} u="kN" src="Tab. 12" />
+              {t.asus != null && <Row l="Dauerlastfaktor" f="ψ_sus (asus=" v={`${fm(t.asus)}) → ${fm(t.psisus)}`} />}
+              <Row l="Bemessungswert Tragfähigkeit" f="F_Rd = F_Rk·ψ_sus/γM" v={fm(t.FRd)} u="kN" strong />
+            </>}
+            <Row l="Knicklast (Euler)" f="N_cr = π²·(E/γM,E)·I/(e+a)²" v={fm(t.Ncr)} u="kN" src="DIN EN 1993-1-1" />
+            <Row l="Querlast für 10 mm / 5 mm Verformung" f="V(10) / V(5)" v={`${fm(t.V10)} / ${fm(t.V5)}`} u="kN" />
+          </Table>
+        </Block>
+
+        {/* 5 – Lasten */}
+        <Block title="5 · Lasten aus Bewuchs (FLL-Richtlinie)">
+          <Table>
+            <Row l={`Gewicht ${isLin ? "linear" : "schmal"} (LK ${inp.lastklasse})`} f="g₀" v={fm(res.lasten.g0)} u={isLin ? "kN/m" : "kN/m²"} src="FLL Tab. 15" />
+            <Row l="Bemessungslast inkl. Vereisung" f="g = g₀·0,75·1,8·1,35" v={fm(res.lasten.g)} u={isLin ? "kN/m" : "kN/m²"} strong />
+            <Row l="Durchströmungsfaktor" f="ψ" v={fm(res.lasten.psi)} u="–" />
+          </Table>
+        </Block>
+
+        {/* 6 – Bemessung (min. Befestiger → Raster / Seil) */}
+        <Block title={`6 · Bemessung – ${isLin ? "Seilbelegung" : "Raster"}`}
+          note="Maßgebend ist der größte erforderliche Wert (min. Befestiger); daraus folgt der zulässige Abstand.">
+          {mb && <Table>
+            {Object.entries({
+              zug: "Zug", druck: "Druck", druckKnicken: "Druck (Knicken)", druckBeton: "Druck (Beton)",
+              quer: "Querbeanspruchung", zugQuer: "Zug + Quer", druckQuer: "Druck + Quer",
+              verformL1: "Verformung l₁", verformL2: "Verformung l₂",
+            }).filter(([k]) => mb[k] != null).map(([k, lbl]) => (
+              <Row key={k} l={lbl} v={fm(mb[k])} u={isLin ? "1/m" : "1/m²"} />
+            ))}
+          </Table>}
+          <div style={{ marginTop: 8 }}>
+            <Table>
+              <Row l={`min. Befestiger pro ${isLin ? "m" : "m²"}`} v={fm(isLin ? res.linear.minBefProM : res.raster.minBefProM2)} u={isLin ? "1/m" : "Stk/m²"} strong />
+              {isLin ? <>
+                <Row l="max. Abstand" f={isMW ? "1/min" : "√(1/min)"} v={fm(res.linear.maxAbstand)} u="m" />
+                <Row l="Anzahl Iso-Bar je Seil" v={res.linear.anzahl} u="Stk" strong />
+                <Row l="Vertikaler Abstand" f="LV = L/(n−1)" v={fm(res.linear.LV)} u="m" strong />
+              </> : <>
+                <Row l="Max. Rasterabstand" f="LH = LV = √(1/min)" v={`${fm(res.raster.LH)} × ${fm(res.raster.LV)}`} u="m" strong />
+                <Row l="Iso-Bar ECO pro m²" v={fm(res.raster.stk_m2)} u="Stk/m²" />
+              </>}
+            </Table>
+          </div>
+        </Block>
+
+        {/* 7 – Schnittgrößen */}
+        <Block title="7 · Schnittgrößen je Verbindungselement">
+          <Table>
+            {isMW ? <>
+              <Row l="Zugkraft (Windsog)" f="N_Ed,z = LV·ws·ψ·1,5" v={fm(sg.NEdz)} u="kN" />
+              <Row l="Druckkraft (Winddruck)" f="N_Ed,d = LV·N_Ek·ψ·1,5" v={fm(sg.NEdd)} u="kN" />
+              <Row l="Querkraft (Eigenlast)" f="V_Ed = LV·g·1,35" v={fm(sg.VEd)} u="kN" />
+            </> : <>
+              <Row l="Querkraft (Eigenlast)" f="V_d = LV·g·1,35" v={fm(sg.Vd)} u="kN" />
+              <Row l="Zugkraft (Windsog)" f="N_d = LV·ws·ψ·1,5" v={fm(sg.Nd)} u="kN" />
+              <Row l="Druckkraft (Winddruck)" f="N_Ed = LV·N_Ek·ψ·1,5" v={fm(sg.NEd)} u="kN" />
+            </>}
+          </Table>
+        </Block>
+
+        {/* 8 – Nachweise */}
+        <Block title="8 · Nachweise (Ausnutzung ≤ 1,0)">
+          <Table>
+            {isMW ? <>
+              <NwRow l="Zug" f="N_Ed,z / N_Rd" nw={nw.zug} />
+              <NwRow l="Druck" f="N_Ed,d / N_Rd,d" nw={nw.druck} />
+              <NwRow l="Querbeanspruchung" f="V_Ed / V_Rd" nw={nw.quer} />
+              <NwRow l="Kombiniert Zug+Quer" f="N_Ed,z/N_Rd + V_Ed/V_Rd" nw={nw.kombiZugQuer} />
+              <NwRow l="Kombiniert Druck+Quer" f="N_Ed,d/N_Rd,d + V_Ed/V_Rd" nw={nw.kombiDruckQuer} />
+              <NwRow l="Knicken (Stahl)" f="N_Ed,d / (N_cr/γM,E)" nw={nw.knicken} />
+              <NwRow l="Stahldruck" f="N_Ed,d / F_d" nw={nw.stahlDruck} />
+            </> : <>
+              <NwRow l="Zug" f="N_d / F_Rd" nw={nw.quer} />
+              <NwRow l="Querkraft" f="V_d / F_Rd" nw={nw.zug} />
+              <NwRow l="Kombiniert Zug/Quer" f="√(V_d²+N_d²) / F_Rd" nw={nw.zugQuerKombi} />
+              <NwRow l="Druck (Knicken)" f="N_Ed / (N_cr/γM,E)" nw={nw.druckKnicken} />
+              <NwRow l="Druck (max. Beton)" f="N_Ed / F_d" nw={nw.druckBeton} />
+            </>}
+            <NwRow l="Verformung kurz l₁ (×1,5)" f="w(l₁)·1,5 ≤ 10 mm" nw={nw.verformungL1} />
+            <NwRow l="Verformung kurz l₂ (×1,5)" f="w(l₂)·1,5 ≤ 5 mm" nw={nw.verformungL2} />
+          </Table>
+          {(() => {
+            const allOk = Object.values(nw).every(n => n.ok);
+            return <div style={{ marginTop: 8, padding: "8px 12px", borderRadius: 6, fontWeight: 800, fontSize: 12.5,
+              background: allOk ? "#E8F5E9" : "#FFEBEE", color: allOk ? GN : R, border: `1px solid ${allOk ? GN : R}40` }}>
+              {allOk ? "✓ Alle Nachweise erfüllt – Vorbemessung statisch ausreichend." : "✗ Nachweis überschritten – Parameter (Raster/Produkt/Untergrund) anpassen."}
+            </div>;
+          })()}
+        </Block>
+
+        {/* 9 – Produkt */}
+        <Block title="9 · Produkt- / Längenwahl">
+          <Table>
+            <Row l="Mindestlänge" f="L_min = e + h_ef" v={fm(g.Lmin ?? (g.e + (isMW ? (STEINE[inp.steinart]?.hef || 80) : 40)))} u="mm" />
+            <Row l="Gewählte Länge" v={res.produkt.laenge ? `ECO ${res.produkt.laenge}` : "keine passende Länge"} strong />
+            <Row l="Bestellbezeichnung" v={res.produkt.bezeichnung} />
+          </Table>
+        </Block>
+
+        <div style={{ fontSize: 8.5, color: GL, marginTop: 10, lineHeight: 1.5, borderTop: `1px solid ${BD}`, paddingTop: 8 }}>
+          Quelle: {isAT ? "ÖNORM B 1991-1-4" : "DIN EN 1991-1-4/NA"} (Wind) · Zulassung Z-21.8-2083 (Befestiger) ·
+          FLL-Fassadenbegrünungsrichtlinie (Bewuchslasten). Diese Vorbemessung erfolgt auf Grundlage der gültigen
+          Wind- und Schneelastnormen und der vom Kunden mitgeteilten Daten. Sie ersetzt nicht den prüffähigen
+          statischen Nachweis. Abstände/Raster erfüllen nur die statischen Anforderungen; pflanzenseitige
+          Anforderungen (FLL Tab. 15) sind gesondert durch Fachpersonal zu berücksichtigen.
+        </div>
+      </>}
+    </div>
+  );
+}
+
 export default function App(){
   const[step,setStep]=useState("upload");
   const[d,setD]=useState({});
@@ -1568,6 +1819,8 @@ export default function App(){
   const previewRef=useRef(null);
   const anlagenRef=useRef(null);
   const materialRef=useRef(null);
+  const statikRef=useRef(null);
+  const projectInRef=useRef(null);
   const[exporting,setExporting]=useState(null);
   const[showExportMenu,setShowExportMenu]=useState(false);
 
@@ -1635,7 +1888,7 @@ export default function App(){
   const exportAll=useCallback(async()=>{
     setExporting("all");setShowExportMenu(false);
     try{
-      const sections=[{ref:previewRef,name:"Vorbemessung"},{ref:anlagenRef,name:"Anlagen"},{ref:materialRef,name:"Material"}];
+      const sections=[{ref:previewRef,name:"Vorbemessung"},{ref:statikRef,name:"Statik"},{ref:anlagenRef,name:"Anlagen"},{ref:materialRef,name:"Material"}];
       for(const sec of sections){
         if(!sec.ref.current)continue;
         await exportPdf(sec.name,sec.ref,`EJOT_IsoBar_${sec.name}_${d.dokNr||"Report"}.pdf`);
@@ -1646,10 +1899,48 @@ export default function App(){
 
   const handleExport=(which)=>{
     setShowExportMenu(false);
-    const map={preview:{ref:previewRef,name:"Vorbemessung"},anlagen:{ref:anlagenRef,name:"Anlagen"},material:{ref:materialRef,name:"Material"}};
+    const map={preview:{ref:previewRef,name:"Vorbemessung"},statik:{ref:statikRef,name:"Statik"},anlagen:{ref:anlagenRef,name:"Anlagen"},material:{ref:materialRef,name:"Material"}};
     const sec=map[which];
     if(sec)exportPdf(which,sec.ref,`EJOT_IsoBar_${sec.name}_${d.dokNr||"Report"}.pdf`);
   };
+
+  // ─── PROJEKT SPEICHERN / LADEN (.ejot.json) ──────────────
+  // Serialisiert das komplette document `d` (inkl. Fassaden, Plan-Bilder als
+  // Data-URLs und Annotationen) in eine Datei, die später wieder geladen werden
+  // kann, um das Projekt im Tool weiterzubearbeiten.
+  const saveProject=useCallback(()=>{
+    setShowExportMenu(false);
+    const payload={
+      _typ:"ejot-isobar-projekt", _version:1,
+      gespeichert:new Date().toISOString(),
+      pdfN, d,
+    };
+    const json=JSON.stringify(payload,null,2);
+    const blob=new Blob([json],{type:"application/json"});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement("a");
+    const safe=(d.bauvorhaben||d.dokNr||"Projekt").replace(/[^\w\-äöüÄÖÜß ]+/g,"").trim()||"Projekt";
+    a.href=url; a.download=`EJOT_IsoBar_${safe}.ejot.json`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(url),1000);
+  },[d,pdfN]);
+
+  const loadProject=useCallback(async(file)=>{
+    if(!file) return;
+    try{
+      const text=await file.text();
+      const obj=JSON.parse(text);
+      const doc=obj&&obj._typ==="ejot-isobar-projekt"?obj.d:(obj&&obj.d?obj.d:obj);
+      if(!doc||typeof doc!=="object"||Array.isArray(doc)) throw new Error("Keine gültige Projektdatei.");
+      setD(doc);
+      setPdfN(obj?.pdfN||"");
+      setParseInfo(null); setParseErr("");
+      setStep("edit");
+    }catch(err){
+      setParseErr("Projektdatei konnte nicht geladen werden: "+(err.message||String(err)));
+    }
+  },[]);
+  const handleProjectFile=useCallback(e=>{const f=e.target.files?.[0];if(f)loadProject(f);if(e.target)e.target.value="";},[loadProject]);
 
   // CSV export of the material list — for direct hand-off to Einkauf.
   // German Excel-friendly: ';' separator, BOM, comma decimal, dot thousands.
@@ -1768,10 +2059,17 @@ export default function App(){
         {parseErr&&<div style={{marginTop:12,padding:"10px 14px",background:"#FFEBEE",border:`1px solid ${R}40`,borderRadius:8,fontSize:12,color:R}}>
           <strong>Fehler beim Lesen:</strong> {parseErr}
         </div>}
-        <button onClick={()=>{const{document:doc}=buildDocument("");setD({...doc,vm_modus:"rechnen"});setStep("edit");}}
-          style={{marginTop:18,padding:"8px 18px",fontSize:11,color:R,background:WH,border:`1px solid ${R}`,borderRadius:6,cursor:"pointer",fontWeight:700}}>
-          🧮 Ohne PDF – Vorbemessung im Tool berechnen →
-        </button>
+        <div style={{marginTop:18,display:"flex",gap:10,justifyContent:"center",flexWrap:"wrap"}}>
+          <button onClick={()=>{const{document:doc}=buildDocument("");setD({...doc,vm_modus:"rechnen"});setStep("edit");}}
+            style={{padding:"8px 18px",fontSize:11,color:R,background:WH,border:`1px solid ${R}`,borderRadius:6,cursor:"pointer",fontWeight:700}}>
+            🧮 Ohne PDF – Vorbemessung im Tool berechnen →
+          </button>
+          <button onClick={()=>projectInRef.current?.click()}
+            style={{padding:"8px 18px",fontSize:11,color:DK,background:WH,border:`1px solid ${BD}`,borderRadius:6,cursor:"pointer",fontWeight:600}}>
+            📂 Gespeichertes Projekt laden
+          </button>
+        </div>
+        <input ref={projectInRef} type="file" accept=".json,.ejot.json,application/json" onChange={handleProjectFile} style={{display:"none"}}/>
         <div style={{marginTop:24,display:"flex",justifyContent:"center",gap:18,fontSize:10,color:GL}}>
           <span>● Z-21.8-2083</span><span>● FLL Tab. 15</span><span>● DIN 1991-1-4</span>
         </div>
@@ -1780,6 +2078,7 @@ export default function App(){
   const tabs=[
     {id:"edit",l:"Bearbeiten",icon:"✎"},
     {id:"preview",l:"Vorschau",icon:"◐"},
+    {id:"statik",l:"Statik",icon:"∑"},
     {id:"anlagen",l:"Anlagen",icon:"☰"},
     {id:"material",l:"Material",icon:"⚙"},
   ];
@@ -1833,7 +2132,7 @@ export default function App(){
             {showExportMenu&&!exporting&&<div style={{position:"absolute",right:0,top:"100%",marginTop:6,background:WH,border:`1px solid ${BD}`,borderRadius:8,
               boxShadow:"0 8px 24px rgba(0,0,0,.14)",zIndex:200,minWidth:240,padding:5,fontSize:11}} onClick={e=>e.stopPropagation()}>
               <div style={{padding:"7px 11px",fontWeight:700,fontSize:9.5,color:GL,textTransform:"uppercase",letterSpacing:.5}}>Einzeln exportieren</div>
-              {[["preview","Vorbemessung (Seite 1+2)"],["anlagen","Anlagen (FLL, Pflanzen, System)"],["material","Materialbedarfsermittlung"]].map(([id,label])=>
+              {[["preview","Vorbemessung (Seite 1+2)"],["statik","Statik – Detailberechnung"],["anlagen","Anlagen (FLL, Pflanzen, System)"],["material","Materialbedarfsermittlung"]].map(([id,label])=>
                 <button key={id} onClick={()=>handleExport(id)} style={{display:"block",width:"100%",padding:"8px 11px",background:"none",border:"none",
                   textAlign:"left",cursor:"pointer",borderRadius:5,fontSize:11.5,color:DK}}
                   onMouseEnter={e=>e.currentTarget.style.background=BG}
@@ -1842,7 +2141,23 @@ export default function App(){
               <button onClick={exportAll} style={{display:"block",width:"100%",padding:"8px 11px",background:"none",border:"none",
                 textAlign:"left",cursor:"pointer",borderRadius:5,fontSize:11.5,fontWeight:700,color:R}}
                 onMouseEnter={e=>e.currentTarget.style.background=RL}
-                onMouseLeave={e=>e.currentTarget.style.background="none"}>⬇ Alle 3 PDFs exportieren</button>
+                onMouseLeave={e=>e.currentTarget.style.background="none"}>⬇ Alle PDFs exportieren</button>
+              <div style={{borderTop:`1px solid ${BD}`,margin:"4px 0"}}/>
+              <div style={{padding:"7px 11px",fontWeight:700,fontSize:9.5,color:GL,textTransform:"uppercase",letterSpacing:.5}}>Projekt</div>
+              <button onClick={saveProject} style={{width:"100%",padding:"8px 11px",background:"none",border:"none",
+                textAlign:"left",cursor:"pointer",borderRadius:5,fontSize:11.5,fontWeight:700,color:DK,display:"flex",alignItems:"center",gap:8}}
+                onMouseEnter={e=>e.currentTarget.style.background=BG}
+                onMouseLeave={e=>e.currentTarget.style.background="none"}>
+                <span>💾</span>
+                <span>Projekt speichern (.ejot.json)<br/><span style={{fontSize:9.5,color:GL,fontWeight:500}}>Zum späteren Weiterbearbeiten laden</span></span>
+              </button>
+              <button onClick={()=>{setShowExportMenu(false);projectInRef.current?.click();}} style={{width:"100%",padding:"8px 11px",background:"none",border:"none",
+                textAlign:"left",cursor:"pointer",borderRadius:5,fontSize:11.5,fontWeight:600,color:DK,display:"flex",alignItems:"center",gap:8}}
+                onMouseEnter={e=>e.currentTarget.style.background=BG}
+                onMouseLeave={e=>e.currentTarget.style.background="none"}>
+                <span>📂</span>
+                <span>Projekt laden …</span>
+              </button>
               <div style={{borderTop:`1px solid ${BD}`,margin:"4px 0"}}/>
               <div style={{padding:"7px 11px",fontWeight:700,fontSize:9.5,color:GL,textTransform:"uppercase",letterSpacing:.5}}>Daten</div>
               <button onClick={exportCsv} style={{width:"100%",padding:"8px 11px",background:"none",border:"none",
@@ -1853,6 +2168,7 @@ export default function App(){
                 <span>Materialliste als CSV<br/><span style={{fontSize:9.5,color:GL,fontWeight:500}}>Excel-kompatibel (DE) · für Einkauf</span></span>
               </button>
             </div>}
+            <input ref={projectInRef} type="file" accept=".json,.ejot.json,application/json" onChange={handleProjectFile} style={{display:"none"}}/>
           </div>
         </div>
       </div>
@@ -2069,6 +2385,11 @@ export default function App(){
   <PreviewSection d={d} maxNw={maxNw} mat={mat}/>
 </div>}
 
+{/* ═══ STATIK ═══ */}
+{step==="statik"&&<div style={{borderRadius:8,boxShadow:"0 2px 12px rgba(0,0,0,.08)",overflow:"hidden"}}>
+  <StatikSection d={d}/>
+</div>}
+
 {/* ═══ ANLAGEN ═══ */}
 {step==="anlagen"&&<div style={{borderRadius:8,boxShadow:"0 2px 12px rgba(0,0,0,.08)",overflow:"hidden"}}>
   <AnlagenSection d={d} usable={usable}/>
@@ -2084,6 +2405,9 @@ export default function App(){
 <div data-pdf-offscreen="true" style={{position:"absolute",left:"-9999px",top:0,overflow:"visible",pointerEvents:"none"}}>
   <div style={{width:880,background:WH,fontFamily:"'Segoe UI',system-ui,sans-serif"}}>
     <div ref={previewRef} style={{background:WH,width:880,padding:0}}><PreviewSection d={d} maxNw={maxNw} mat={mat}/></div>
+  </div>
+  <div style={{width:880,background:WH,fontFamily:"'Segoe UI',system-ui,sans-serif"}}>
+    <div ref={statikRef} style={{background:WH,width:880,padding:0}}><StatikSection d={d}/></div>
   </div>
   <div style={{width:880,background:WH,fontFamily:"'Segoe UI',system-ui,sans-serif"}}>
     <div ref={anlagenRef} style={{background:WH,width:880,padding:0}}><AnlagenSection d={d} usable={usable}/></div>
