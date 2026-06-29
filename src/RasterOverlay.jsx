@@ -92,6 +92,10 @@ export default function RasterOverlay({
 
   const hasSK = seilkreuztyp && seilkreuztyp !== "ohne";
 
+  // Uniform px-per-meter (cellW = lh·pxM holds in plan and procedural modes).
+  const pxM  = lh > 0 ? cellW / lh : 0;   // horizontal
+  const pxMy = lv > 0 ? cellH / lv : 0;   // vertical
+
   // ── Geometry from the SHARED helper.  In plan mode, one independent grid
   //     PER greening rectangle (matches calcFacadeStats exactly).  In
   //     procedural mode, the single facadeBox is the only rectangle, so the
@@ -148,6 +152,10 @@ export default function RasterOverlay({
         <pattern id="ro-hatch" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">
           <line x1="0" y1="0" x2="0" y2="6" stroke="#222" strokeWidth="0.8" opacity="0.25" />
         </pattern>
+        <marker id={`${maskId}-arr`} markerWidth="8" markerHeight="8" refX="4.5" refY="4"
+          orient="auto" markerUnits="userSpaceOnUse">
+          <path d="M1,1 L7,4 L1,7" fill="none" stroke={BK} strokeWidth="1.1" />
+        </marker>
       </defs>
 
       {backdrop}
@@ -234,6 +242,95 @@ export default function RasterOverlay({
           </text>
         </g>
       )}
+
+      {/* Plan mode, multiple greening areas: a proper CAD Maßkette around the
+          bounding box (extension lines + perpendicular ticks + arrowed overall
+          line) plus a W×H label per area.  Fills the gap left by the
+          single-grid dimension block above, which only fires for one area. */}
+      {havePlan && greeningRects.length > 1 && pxM > 0 && pxMy > 0 && (() => {
+        const arr = `url(#${maskId}-arr)`;
+        const fx = facadeBox.x, fy = facadeBox.y, fw = facadeBox.w, fh = facadeBox.h;
+        const gap = dimFs * 1.8;
+        const mkY = fy + fh + gap;          // horizontal chain (below)
+        const mkX = fx - gap;               // vertical chain (left)
+        const tick = dimFs * 0.4;
+        const lab = Math.max(7.5, dimFs * 0.78);
+        const m  = (px) => (px / pxM).toFixed(2).replace(".", ",");
+        const my = (px) => (px / pxMy).toFixed(2).replace(".", ",");
+        // Unique sorted boundaries → chain segments.
+        const xb = Array.from(new Set(greeningRects.flatMap(r => [r.x, r.x + r.w]))).sort((a, b) => a - b);
+        const yb = Array.from(new Set(greeningRects.flatMap(r => [r.y, r.y + r.h]))).sort((a, b) => a - b);
+        return (
+          <g fontFamily="Segoe UI, system-ui, sans-serif" fill={BK} pointerEvents="none">
+            {/* Per-area W×H labels */}
+            {greeningRects.map((r, i) => {
+              const txt = `${m(r.w)} × ${my(r.h)} m`;
+              const tw = txt.length * lab * 0.54 + 8;
+              const cx = r.x + r.w / 2, cy = r.y + r.h / 2;
+              if (r.w < tw + 4 || r.h < lab * 1.8) return null;
+              return (
+                <g key={`pl${i}`}>
+                  <rect x={cx - tw / 2} y={cy - lab * 0.85} width={tw} height={lab * 1.5}
+                    fill="#FFFFFFCC" rx="2" />
+                  <text x={cx} y={cy + lab * 0.3} fontSize={lab} fontWeight="700"
+                    fill={COL_FACADE_OUTLINE} textAnchor="middle">{txt}</text>
+                </g>
+              );
+            })}
+
+            {/* Horizontal chain (overall width) */}
+            <g fontSize={lab} stroke={BK}>
+              {xb.map((x, i) => (
+                <line key={`xe${i}`} x1={x} y1={fy + fh} x2={x} y2={mkY + tick}
+                  strokeWidth="0.5" opacity="0.5" />
+              ))}
+              <line x1={fx} y1={mkY} x2={fx + fw} y2={mkY} strokeWidth="0.7"
+                markerStart={arr} markerEnd={arr} />
+              {xb.map((x, i) => (
+                <line key={`xt${i}`} x1={x} y1={mkY - tick} x2={x} y2={mkY + tick}
+                  strokeWidth="0.7" />
+              ))}
+              {xb.slice(0, -1).map((x0, i) => {
+                const x1 = xb[i + 1], seg = x1 - x0;
+                if (seg < lab * 3) return null;
+                return (
+                  <text key={`xs${i}`} x={(x0 + x1) / 2} y={mkY - tick - 2} textAnchor="middle"
+                    fontSize={lab * 0.9} stroke="none" fill={GY}>{m(seg)}</text>
+                );
+              })}
+              <text x={fx + fw / 2} y={mkY + tick + lab + 2} textAnchor="middle"
+                fontWeight="700" stroke="none" fill={BK}>{m(fw)} m</text>
+            </g>
+
+            {/* Vertical chain (overall height) */}
+            <g fontSize={lab} stroke={BK}>
+              {yb.map((y, i) => (
+                <line key={`ye${i}`} x1={fx} y1={y} x2={mkX - tick} y2={y}
+                  strokeWidth="0.5" opacity="0.5" />
+              ))}
+              <line x1={mkX} y1={fy} x2={mkX} y2={fy + fh} strokeWidth="0.7"
+                markerStart={arr} markerEnd={arr} />
+              {yb.map((y, i) => (
+                <line key={`yt${i}`} x1={mkX - tick} y1={y} x2={mkX + tick} y2={y}
+                  strokeWidth="0.7" />
+              ))}
+              {yb.slice(0, -1).map((y0, i) => {
+                const y1 = yb[i + 1], seg = y1 - y0;
+                if (seg < lab * 3) return null;
+                const cy = (y0 + y1) / 2;
+                return (
+                  <text key={`ys${i}`} x={mkX - tick - 2} y={cy} textAnchor="middle"
+                    fontSize={lab * 0.9} stroke="none" fill={GY}
+                    transform={`rotate(-90 ${mkX - tick - 2} ${cy})`}>{my(seg)}</text>
+                );
+              })}
+              <text x={mkX + tick + lab + 2} y={fy + fh / 2} textAnchor="middle"
+                fontWeight="700" stroke="none" fill={BK}
+                transform={`rotate(-90 ${mkX + tick + lab + 2} ${fy + fh / 2})`}>{my(fh)} m</text>
+            </g>
+          </g>
+        );
+      })()}
 
       <g fontFamily="Segoe UI, system-ui, sans-serif" fontSize={Math.max(8, dimFs * 0.8)} fill={GY}>
         <text x={vbW - 6} y={vbH - 4} textAnchor="end">

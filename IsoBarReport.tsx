@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useMemo } from "react";
 
 // ─── Colors (kept for SVG/charts where Tailwind can't reach) ─────────
-const R="#C8102E",RL="#C8102E10",RM="#C8102E28",BK="#1A1A1A",DK="#333",GY="#666",GL="#999",BG="#F7F6F4",BD="#D8D6D4",WH="#FFF",GN="#2E7D32",AM="#E68A00";
+const R="#C8102E",RL="#C8102E10",RM="#C8102E28",BK="#1A1A1A",DK="#333",GY="#666",GL="#999",BG="#F7F6F4",BD="#D8D6D4",WH="#FFF",GN="#2E7D32",GN2="#66BB6A",GN3="#AED581",AM="#E68A00";
 
 // ─── Complete FLL Tabelle 15 (52 plants) ────────────────────────
 const FLL_PLANTS=[
@@ -159,7 +159,7 @@ function RasterSVG({LH,LV,fW,fH,rasterType,size=300}: {LH:string;LV:string;fW:st
 
 function NwBar({label,value}: {label:string;value:string}){
   const v=pf(value)||0;const pct=Math.min(v,1.1)*100;
-  const col=v<.5?GN:v<.8?AM:R;
+  const col=v<.5?GN:v<.7?GN2:v<.95?GN3:v<=1?AM:R;
   return(<div style={{display:"flex",alignItems:"center",gap:8,marginBottom:5}}>
     <div style={{width:140,fontSize:12,color:DK}}><Sub>{label}</Sub></div>
     <div style={{flex:1,height:18,background:"#ECECEC",borderRadius:3,position:"relative",border:`1px solid ${BD}`}}>

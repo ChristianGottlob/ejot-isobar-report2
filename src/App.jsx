@@ -8,9 +8,13 @@ import DetailCrop from "./DetailCrop";
 import PlanAnnotator from "./PlanAnnotator";
 import { normalizeAnnotations, unionBBox, pointInRect, pointInAny, greeningAreaPx, lineInsideLengthPx, pxPerMeter, rectIntersectionArea } from "./planUtils";
 import { loadDocument, saveDocument, clearDocument } from "./idbStore";
+import { computeVorbemessungDE, BETON_KLASSEN, BETON_TEMPERATUR } from "./vorbemessung/de.js";
+import { computeVorbemessungMW, STEINE } from "./vorbemessung/de_mauerwerk.js";
+import { computeLinearBeton, computeLinearMauerwerk } from "./vorbemessung/de_linear.js";
+import { windAUT, findStadt, STAEDTE_AUT, GK_AUT } from "./vorbemessung/de_at_wind.js";
 
 // ─── Colors ─────────────────────────────────────────────
-const R="#C8102E",RL="#C8102E10",RM="#C8102E28",BK="#1A1A1A",DK="#333",GY="#666",GL="#999",BG="#F7F6F4",BD="#D8D6D4",WH="#FFF",GN="#2E7D32",AM="#E68A00";
+const R="#C8102E",RL="#C8102E10",RM="#C8102E28",BK="#1A1A1A",DK="#333",GY="#666",GL="#999",BG="#F7F6F4",BD="#D8D6D4",WH="#FFF",GN="#2E7D32",GN2="#66BB6A",GN3="#AED581",AM="#E68A00";
 
 // ─── Complete FLL Tabelle 15 (52 plants) ────────────────
 const FLL_PLANTS=[
@@ -118,6 +122,24 @@ const GELAENDEKATEGORIEN=[
   {v:"III",l:"GK III – Vorstadt, Wald, dichte Bebauung"},
   {v:"IV", l:"GK IV – Stadtgebiete mit ≥15 % bebauter Fläche"},
   {v:"BV", l:"Bin/Vorland-Mischprofil (BVII)"},
+];
+// Geländekategorie-Profile für die DE-Vorbemessung (q(z) nach DIN EN 1991-1-4/NA),
+// inkl. der Misch-/Sonderprofile aus dem EJOT-Excel.  Werte = Schlüssel der
+// GK_PROFILE-Tabelle in src/vorbemessung/de.js.
+const VM_GK_PROFILE=[
+  {v:"I",            l:"GK I – offene See / Seen"},
+  {v:"II",           l:"GK II – offenes Gelände"},
+  {v:"III",          l:"GK III – Vorstadt / Wald / dichte Bebauung"},
+  {v:"IV",           l:"GK IV – Stadtgebiete"},
+  {v:"binnenland",   l:"Binnenland (Mischprofil)"},
+  {v:"kueste_ostsee",l:"Küste + Ostseeinseln"},
+  {v:"nordsee",      l:"Nordseeinseln"},
+];
+const VM_WINDZONEN=[
+  {v:"1",l:"WZ 1 (qref 0,32 kN/m²)"},
+  {v:"2",l:"WZ 2 (qref 0,39 kN/m²)"},
+  {v:"3",l:"WZ 3 (qref 0,47 kN/m²)"},
+  {v:"4",l:"WZ 4 (qref 0,56 kN/m²)"},
 ];
 const VERSIONEN=[
   {v:"V1.0",l:"V1.0 – Erstausgabe"},
@@ -446,7 +468,7 @@ function Sub({children:s}){
 
 function NwBar({label,value}){
   const v=pf(value)||0;const pct=Math.min(v,1.1)*100;
-  const col=v<.5?GN:v<.8?AM:R;
+  const col=v<.5?GN:v<.7?GN2:v<.95?GN3:v<=1?AM:R;
   return(<div style={{display:"flex",alignItems:"center",gap:10,marginBottom:6}}>
     <div style={{width:160,fontSize:12,color:DK}}><Sub>{label}</Sub></div>
     <div style={{flex:1,height:18,background:"#ECECEC",borderRadius:9,position:"relative",overflow:"hidden",border:`1px solid ${BD}`}}>
@@ -1157,6 +1179,302 @@ function fmtAgo(ts){
   return `Gespeichert vor ${Math.floor(s/3600)} h`;
 }
 
+// ─────────────────────────────────────────────────────────────────
+// Vorbemessung im Tool berechnen (Deutschland · Iso-Bar ECO Raster · Beton).
+// Liest die Projektparameter aus `d`, rechnet mit der validierten Engine
+// (src/vorbemessung/de.js) und schreibt die Ergebnisse in dieselben
+// document-Felder, die sonst aus der PDF extrahiert werden — Report,
+// RasterOverlay & DetailCrop laufen dadurch unverändert weiter.
+// ─────────────────────────────────────────────────────────────────
+function VorbemessungDE({ d, setD, hasPdf }){
+  const set = k => v => setD(x => ({ ...x, [k]: v }));
+  const modus = d.vm_modus || (hasPdf ? "pdf" : "rechnen");
+  const setModus = m => setD(x => ({ ...x, vm_modus: m }));
+  const untergrund = d.vm_untergrund || "beton";   // "beton" | "mauerwerk"
+  const system = d.vm_system || "raster";          // "raster" | "linear"
+  const land = d.vm_land || "DE";                  // "DE" | "AT"
+  const isMW = untergrund === "mauerwerk";
+  const isLin = system === "linear";
+  const isAT = land === "AT";
+
+  // GK-Default aus evtl. schon gesetzter Geländekategorie ableiten.
+  const gkDefault = (() => {
+    const g = String(d.gelaendekategorie || "");
+    if (["I","II","III","IV"].includes(g)) return g;
+    if (g === "BV") return "binnenland";
+    return "II";
+  })();
+
+  const inp = {
+    gebaeudehoehe:     d.gebaeudehoehe || "10",
+    gebaeudelaenge:    d.vm_geb_laenge || "10",
+    gebaeudebreite:    d.vm_geb_breite || "10",
+    windzone:          d.windlastzone || "2",
+    gelaendekategorie: d.vm_gk || gkDefault,
+    lastklasse:        d.lastklasse || "3",
+    daemmdicke:        d.vm_daemm || d.wdvs_dicke || "180",
+    putzdicke:         d.vm_putz || "10",
+    ttol:              d.dicke_klebschicht || "10",
+    betonklasse:       d.vm_betonklasse || "c2025",
+    temperatur:        d.vm_temperatur || "normal",
+    steinart:          d.vm_steinart || "ks_vollstein",
+    seillaenge:        d.vm_seillaenge || "10",
+  };
+
+  // ── Österreich: ÖNORM-Windmodul (qp, cpe) → ws/Nek-Override für die Engine ──
+  const atStadt = isAT ? findStadt(d.vm_at_stadt || "Wien, alle übrige B.") : null;
+  const atWind = useMemo(() => {
+    if (!isAT || !atStadt) return null;
+    try {
+      return windAUT({
+        vb0: atStadt.vb0, seehoeheStadt: atStadt.seehoehe,
+        seehoehe: pf(d.vm_at_seehoehe) || atStadt.seehoehe,
+        gelaendekategorie: d.vm_at_gk || "III",
+        gebaeudehoehe: pf(inp.gebaeudehoehe), gebaeudelaenge: pf(inp.gebaeudelaenge), gebaeudebreite: pf(inp.gebaeudebreite),
+      });
+    } catch { return null; }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAT, atStadt, d.vm_at_seehoehe, d.vm_at_gk, inp.gebaeudehoehe, inp.gebaeudelaenge, inp.gebaeudebreite]);
+
+  const calc = useMemo(() => {
+    try {
+      const fn = isLin
+        ? (isMW ? computeLinearMauerwerk : computeLinearBeton)
+        : (isMW ? computeVorbemessungMW : computeVorbemessungDE);
+      const engineInp = atWind
+        ? { ...inp, wind: { ws: atWind.ws, nek: atWind.nek, qz: atWind.nek, cpeA: atWind.cpeA } }
+        : inp;
+      return { res: fn(engineInp), err: null };
+    } catch (e) { return { res: null, err: e.message || String(e) }; }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [untergrund, system, atWind, inp.gebaeudehoehe, inp.gebaeudelaenge, inp.gebaeudebreite, inp.windzone,
+      inp.gelaendekategorie, inp.lastklasse, inp.daemmdicke, inp.putzdicke,
+      inp.ttol, inp.betonklasse, inp.temperatur, inp.steinart, inp.seillaenge]);
+  const { res, err } = calc;
+
+  // ── Normalisierte Ergebnis-Ansicht (vereinheitlicht Beton/Mauerwerk · Raster/Linear) ──
+  const view = useMemo(() => {
+    if (!res) return null;
+    const nw = res.nachweise, sg = res.schnittgroessen, t = res.tragfaehigkeit;
+    let widerstand, bars, sgPatch, nwPatch;
+    if (isMW) {
+      widerstand = { label: `N_Rd (NRk ${fm(t.nrk)} kN)`, value: t.NRd, unit: "kN" };
+      bars = [
+        { label: "Zug: N_Ed,z / N_Rd", value: nw.zug.wert },
+        { label: "Druck: N_Ed,d / N_Rd,d", value: nw.druck.wert },
+        { label: "Quer: V_Ed / V_Rd", value: nw.quer.wert },
+        { label: "Zug+Quer: N_Ed,z/N_Rd + V_Ed/V_Rd", value: nw.kombiZugQuer.wert },
+      ];
+      sgPatch = { ved: sg.VEd, ned_z: sg.NEdz, ned_d: sg.NEdd, vrd: t.NRd };
+      nwPatch = { nw_zug: nw.zug.wert, nw_quer: nw.quer.wert, nw_druck: nw.druck.wert, nw_kombi: nw.kombiZugQuer.wert };
+    } else {
+      const druck = Math.max(nw.druckKnicken.wert, nw.druckBeton.wert);
+      widerstand = { label: `F_Rd (FRk ${fm(t.frk)} kN)`, value: t.FRd, unit: "kN" };
+      bars = [
+        { label: "Zug: N_d / F_Rd", value: nw.quer.wert },
+        { label: "Druck (Knicken/Beton)", value: druck },
+        { label: "Quer: V_d / F_Rd", value: nw.zug.wert },
+        { label: "Quer/Zug: √(V_d²+N_d²) / F_Rd", value: nw.zugQuerKombi.wert },
+      ];
+      sgPatch = { ved: sg.Vd, ned_z: sg.Nd, ned_d: sg.NEd, vrd: t.FRd };
+      nwPatch = { nw_zug: nw.quer.wert, nw_quer: nw.zug.wert, nw_druck: druck, nw_kombi: nw.zugQuerKombi.wert };
+    }
+    const metrics = isLin
+      ? [{ label: "Vert. Abstand LV", value: fm(res.linear.LV), unit: "m" },
+         { label: "Anzahl je Seil", value: String(res.linear.anzahl), unit: "Stk" }]
+      : [{ label: "Raster LH = LV", value: fm(res.raster.LH), unit: "m" },
+         { label: "Iso-Bar ECO pro m²", value: fm(res.raster.stk_m2), unit: "Stk" }];
+    const geomPatch = isLin
+      ? { LV: res.linear.LV }
+      : { LH: res.raster.LH, LV: res.raster.LV, stk_m2: res.raster.stk_m2 };
+    const quelleSub = isMW ? "Z-21.8-2083 Tab. 14/15/16 (Mauerwerk)" : "Zulassung Z-21.8-2083 (Anker/Beton)";
+    const windNorm = isAT ? "ÖNORM B 1991-1-4 (Wind)" : "DIN EN 1991-1-4/NA (Wind)";
+    return {
+      widerstand, bars, metrics,
+      patch: { ...sgPatch, ...nwPatch, ...geomPatch },
+      quelle: `${windNorm} · ${quelleSub} · FLL-Richtlinie (Bewuchslasten).`,
+    };
+  }, [res, isMW, isLin, isAT]);
+
+  const f3 = n => Number(n).toFixed(3);
+  const f2 = n => Number(n).toFixed(2);
+  const resultPatch = (r, v) => {
+    const setMatch = SETS.find(s => s.len === r.produkt.laenge);
+    const p = {
+      ws: f3(r.lasten.ws), nek: f3(r.lasten.nek), psi: f2(r.lasten.psi),
+      ved: f3(v.patch.ved), ned_z: f3(v.patch.ned_z), ned_d: f3(v.patch.ned_d), vrd: f3(v.patch.vrd),
+      LV: f3(v.patch.LV),
+      nw_zug: f3(v.patch.nw_zug), nw_quer: f3(v.patch.nw_quer),
+      nw_druck: f3(v.patch.nw_druck), nw_kombi: f3(v.patch.nw_kombi),
+      windlastzone: String(inp.windzone),
+      ...(["I","II","III","IV"].includes(inp.gelaendekategorie) ? { gelaendekategorie: inp.gelaendekategorie } : {}),
+      ...(setMatch ? { produkt: setMatch.id } : {}),
+    };
+    if (v.patch.LH != null) p.LH = f3(v.patch.LH);
+    if (v.patch.stk_m2 != null) p.stk_m2 = f2(v.patch.stk_m2);
+    return p;
+  };
+
+  // Auto-Übernahme im Rechen-Modus.  Die übernommenen Felder sind KEINE
+  // Engine-Inputs → keine Rückkopplung; setD nur bei echter Änderung.
+  const sig = res && view ? JSON.stringify(resultPatch(res, view)) : "";
+  useEffect(() => {
+    if (modus !== "rechnen" || !sig) return;
+    const patch = JSON.parse(sig);
+    setD(x => {
+      let changed = false;
+      for (const k in patch) if (String(x[k] ?? "") !== String(patch[k])) { changed = true; break; }
+      return changed ? { ...x, ...patch } : x;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sig, modus]);
+
+  const betonOpts = Object.entries(BETON_KLASSEN).map(([k, v]) => ({ v: k, l: v.label }));
+  const tempOpts = Object.entries(BETON_TEMPERATUR).map(([k, l]) => ({ v: k, l }));
+  const steinOpts = Object.entries(STEINE).map(([k, v]) => ({ v: k, l: v.label }));
+  const stadtOpts = STAEDTE_AUT.map((s) => ({ v: s.name, l: `${s.name} (vb,0 ${s.vb0} m/s)` }));
+  const atGkOpts = Object.entries(GK_AUT).map(([k, v]) => ({ v: k, l: v.label }));
+
+  const Out = ({ label, value, unit }) => (
+    <div style={{ flex: "1 1 30%", minWidth: 120, background: WH, border: `1px solid ${BD}`, borderRadius: 6, padding: "8px 10px" }}>
+      <div style={{ fontSize: 9.5, color: GY, fontWeight: 600 }}>{label}</div>
+      <div style={{ fontSize: 15, fontWeight: 800, color: BK, marginTop: 1 }}>{value}<span style={{ fontSize: 10, color: GL, fontWeight: 600, marginLeft: 3 }}>{unit}</span></div>
+    </div>
+  );
+
+  return (
+    <Sec title={`Vorbemessung berechnen (${isAT ? "Österreich" : "Deutschland"})`} icon="🧮" accent
+      subtitle="Windlast & Nachweise direkt im Tool – Iso-Bar ECO · Raster/Linear · Beton/Mauerwerk · DE & AT">
+      {/* Quellen-Umschalter */}
+      <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
+        {[["rechnen", "🧮 Im Tool berechnen"], ["pdf", "📄 Aus PDF / manuell"]].map(([m, lbl]) => (
+          <button key={m} onClick={() => setModus(m)}
+            style={{ padding: "7px 13px", fontSize: 11.5, fontWeight: modus === m ? 700 : 600,
+              border: `1.5px solid ${modus === m ? R : BD}`, borderRadius: 7, cursor: "pointer",
+              background: modus === m ? `${R}10` : WH, color: modus === m ? R : DK }}>{lbl}</button>
+        ))}
+      </div>
+
+      {modus === "pdf" ? (
+        <div style={{ fontSize: 11.5, color: GY, padding: "10px 12px", background: BG, borderRadius: 6 }}>
+          Schnittgrößen & Nachweise kommen aus der hochgeladenen PDF bzw. manueller Eingabe in den
+          Abschnitten unten. Auf <strong>„Im Tool berechnen"</strong> umschalten, um die Vorbemessung
+          hier direkt zu rechnen.
+        </div>
+      ) : (
+        <>
+          {/* Untergrund- & System-Umschalter */}
+          <div style={{ display: "flex", gap: 16, marginBottom: 12, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 10.5, color: GY, fontWeight: 600, alignSelf: "center" }}>Untergrund:</span>
+              {[["beton", "Beton"], ["mauerwerk", "Mauerwerk"]].map(([u, lbl]) => (
+                <button key={u} onClick={() => setD(x => ({ ...x, vm_untergrund: u }))}
+                  style={{ padding: "6px 14px", fontSize: 11.5, fontWeight: untergrund === u ? 700 : 600,
+                    border: `1.5px solid ${untergrund === u ? R : BD}`, borderRadius: 7, cursor: "pointer",
+                    background: untergrund === u ? `${R}10` : WH, color: untergrund === u ? R : DK }}>{lbl}</button>
+              ))}
+            </div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 10.5, color: GY, fontWeight: 600, alignSelf: "center" }}>System:</span>
+              {[["raster", "Raster"], ["linear", "Linear"]].map(([s, lbl]) => (
+                <button key={s} onClick={() => setD(x => ({ ...x, vm_system: s }))}
+                  style={{ padding: "6px 14px", fontSize: 11.5, fontWeight: system === s ? 700 : 600,
+                    border: `1.5px solid ${system === s ? R : BD}`, borderRadius: 7, cursor: "pointer",
+                    background: system === s ? `${R}10` : WH, color: system === s ? R : DK }}>{lbl}</button>
+              ))}
+            </div>
+          </div>
+
+          {/* Eingaben */}
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <Field label="Land (Windlastnorm)" value={land} onChange={set("vm_land")} sel
+              opts={[{ v: "DE", l: "Deutschland (DIN EN 1991-1-4/NA)" }, { v: "AT", l: "Österreich (ÖNORM B 1991-1-4)" }, { v: "CH", l: "Schweiz (folgt)" }]}
+              half hint={isAT ? "Windermittlung nach ÖNORM aus Stadt + Seehöhe." : "Windzone + Geländekategorie nach DIN."}/>
+            {untergrund === "mauerwerk" ? (
+              <Field label="Steinart (gem. Z-21.8-2083 Tab. 14)" value={inp.steinart} onChange={set("vm_steinart")} sel opts={steinOpts} half/>
+            ) : (
+              <Field label="Betonklasse" value={inp.betonklasse} onChange={set("vm_betonklasse")} sel opts={betonOpts} half
+                hint="FRk ist klassenunabhängig (Z-21.8-2083 Tab. 12) – nur zur Dokumentation."/>
+            )}
+            {untergrund === "beton" && (
+              <Field label="Bauteiltemperatur (FRk)" value={inp.temperatur} onChange={set("vm_temperatur")} sel opts={tempOpts} half/>
+            )}
+            <Field label="Gebäudehöhe z / h" value={inp.gebaeudehoehe} onChange={set("gebaeudehoehe")} unit="m" half/>
+            {isAT ? (
+              <>
+                <Field label="Standort (Stadt/Region)" value={d.vm_at_stadt || "Wien, alle übrige B."} onChange={set("vm_at_stadt")} sel opts={stadtOpts} full/>
+                <Field label="Seehöhe Standort" value={d.vm_at_seehoehe || (atStadt ? String(atStadt.seehoehe) : "")} onChange={set("vm_at_seehoehe")} unit="müM" half
+                  hint={atStadt ? `Ref-Seehöhe der Region: ${atStadt.seehoehe} müM` : ""}/>
+                <Field label="Geländekategorie (ÖNORM)" value={d.vm_at_gk || "III"} onChange={set("vm_at_gk")} sel opts={atGkOpts} half/>
+              </>
+            ) : (
+              <Field label="Windzone" value={inp.windzone} onChange={set("windlastzone")} sel opts={VM_WINDZONEN} half/>
+            )}
+            <Field label="Gebäudelänge L / d" value={inp.gebaeudelaenge} onChange={set("vm_geb_laenge")} unit="m" half hint="für cpe"/>
+            <Field label="Gebäudebreite B / b" value={inp.gebaeudebreite} onChange={set("vm_geb_breite")} unit="m" half hint="für cpe"/>
+            {!isAT && (
+              <Field label="Geländekategorie" value={inp.gelaendekategorie} onChange={set("vm_gk")} sel opts={VM_GK_PROFILE} full/>
+            )}
+            <Field label="Dämmdicke" value={inp.daemmdicke} onChange={set("vm_daemm")} unit="mm" half/>
+            <Field label="Putzdicke" value={inp.putzdicke} onChange={set("vm_putz")} unit="mm" half/>
+            <Field label="Dicke Kleber + Altputz t_tol" value={inp.ttol} onChange={set("dicke_klebschicht")} unit="mm" half/>
+            <Field label="Lastklasse (aus Pflanze, überschreibbar)" value={String(inp.lastklasse)} onChange={set("lastklasse")} sel opts={LASTKLASSEN} half/>
+            {isLin && (
+              <Field label="Seillänge (vertikal)" value={inp.seillaenge} onChange={set("vm_seillaenge")} unit="m" half
+                hint="Länge der vertikalen Seillinie – bestimmt Anzahl Iso-Bar je Seil."/>
+            )}
+          </div>
+
+          {err && (
+            <div style={{ marginTop: 12, padding: "10px 12px", background: "#FFF8E1", border: "1px solid #E68A0040", borderRadius: 6, fontSize: 11.5, color: "#7A4A00" }}>
+              ⚠ {err}
+            </div>
+          )}
+
+          {/* Ergebnisse */}
+          {res && view && (
+            <div style={{ marginTop: 14 }}>
+              <div style={{ fontWeight: 700, fontSize: 10.5, textTransform: "uppercase", letterSpacing: .5, marginBottom: 8, color: BK }}>Ergebnis</div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+                {isAT && atWind && <Out label="q_b Basisdruck" value={fm(atWind.qb)} unit="kN/m²"/>}
+                {isAT && atWind && <Out label="c_e(z) Geländefaktor" value={fm(atWind.ce)} unit=""/>}
+                <Out label={isAT ? "q_p Spitzendruck" : "q(z) Böendruck"} value={fm(res.wind.qz)} unit="kN/m²"/>
+                <Out label="w_s Windsog" value={fm(res.lasten.ws)} unit="kN/m²"/>
+                <Out label="N_Ek Winddruck" value={fm(res.lasten.nek)} unit="kN/m²"/>
+                <Out label="cpe,A (Sog)" value={fm(res.wind.cpeA)} unit=""/>
+                <Out label={view.widerstand.label} value={fm(view.widerstand.value)} unit={view.widerstand.unit}/>
+                <Out label="ψ Durchströmung" value={fm(res.lasten.psi)} unit=""/>
+                {view.metrics.map((m, i) => <Out key={i} label={m.label} value={m.value} unit={m.unit}/>)}
+                <Out label="Produkt" value={res.produkt.laenge ? `ECO ${res.produkt.laenge}` : "–"} unit=""/>
+              </div>
+
+              <div style={{ border: `1px solid ${BD}`, borderRadius: 6, padding: 14, background: BG }}>
+                <div style={{ fontWeight: 700, fontSize: 10.5, textTransform: "uppercase", letterSpacing: .5, marginBottom: 10, color: BK }}>Ausnutzungsgrade (≤ 1,0)</div>
+                {view.bars.map((b, i) => <NwBar key={i} label={b.label} value={b.value}/>)}
+                <div style={{ marginTop: 10, display: "flex", gap: 14, flexWrap: "wrap", fontSize: 11, color: DK }}>
+                  <span>Verformung w(l₁)·1,5 = <strong style={{ color: res.nachweise.verformungL1.ok ? GN : R }}>{fm(res.nachweise.verformungL1.wert)} mm</strong> (≤ 10)</span>
+                  <span>Verformung w(l₂)·1,5 = <strong style={{ color: res.nachweise.verformungL2.ok ? GN : R }}>{fm(res.nachweise.verformungL2.wert)} mm</strong> (≤ 5)</span>
+                </div>
+                {(() => {
+                  const allOk = Object.values(res.nachweise).every(n => n.ok);
+                  return (
+                    <div style={{ marginTop: 8, fontSize: 11.5, fontWeight: 700, color: allOk ? GN : R }}>
+                      {allOk ? "✓ Alle Nachweise erfüllt – Werte automatisch in den Report übernommen" : "✗ Nachweis überschritten – Parameter prüfen"}
+                    </div>
+                  );
+                })()}
+              </div>
+              <div style={{ fontSize: 10, color: GL, marginTop: 8 }}>
+                Quelle: {view.quelle} Nur statische Vorbemessung – ersetzt nicht den prüffähigen Standsicherheitsnachweis.
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </Sec>
+  );
+}
+
 export default function App(){
   const[step,setStep]=useState("upload");
   const[d,setD]=useState({});
@@ -1450,9 +1768,9 @@ export default function App(){
         {parseErr&&<div style={{marginTop:12,padding:"10px 14px",background:"#FFEBEE",border:`1px solid ${R}40`,borderRadius:8,fontSize:12,color:R}}>
           <strong>Fehler beim Lesen:</strong> {parseErr}
         </div>}
-        <button onClick={()=>{const{document:doc}=buildDocument("");setD(doc);setStep("edit");}}
-          style={{marginTop:18,padding:"8px 18px",fontSize:11,color:GY,background:WH,border:`1px solid ${BD}`,borderRadius:6,cursor:"pointer",fontWeight:600}}>
-          Ohne Datei starten →
+        <button onClick={()=>{const{document:doc}=buildDocument("");setD({...doc,vm_modus:"rechnen"});setStep("edit");}}
+          style={{marginTop:18,padding:"8px 18px",fontSize:11,color:R,background:WH,border:`1px solid ${R}`,borderRadius:6,cursor:"pointer",fontWeight:700}}>
+          🧮 Ohne PDF – Vorbemessung im Tool berechnen →
         </button>
         <div style={{marginTop:24,display:"flex",justifyContent:"center",gap:18,fontSize:10,color:GL}}>
           <span>● Z-21.8-2083</span><span>● FLL Tab. 15</span><span>● DIN 1991-1-4</span>
@@ -1564,6 +1882,8 @@ export default function App(){
 
 {/* ═══ EDIT ═══ */}
 {step==="edit"&&<>
+  <VorbemessungDE d={d} setD={setD} hasPdf={!!parseInfo}/>
+
   <Sec title="Dokument" icon="📋"><div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
     <Field label="Dokument Nr." value={d.dokNr} onChange={setter("dokNr")} half/>
     <Field label="Version" value={d.version} onChange={setter("version")} sel opts={VERSIONEN} half/>

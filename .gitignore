@@ -2,3 +2,15 @@ node_modules
 dist
 .DS_Store
 *.local
+.vercel
+
+# Vertrauliche Quell-/Referenzdateien — NICHT committen (Repo ist öffentlich,
+# enthält EJOT-Interna und Kunden-PII).  Die App braucht sie zur Laufzeit nicht;
+# alle Berechnungsdaten sind in src/vorbemessung/*.js eingebaut.
+/files.zip
+/public/Vorbemessung_Deutschland/
+/public/Vorbemessung_Oesterreich/
+/public/*.pdf
+/public/*.xlsx
+/public/*.xlsm
+/public/*.docx
