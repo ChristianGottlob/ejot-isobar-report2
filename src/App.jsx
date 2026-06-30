@@ -92,10 +92,15 @@ const SEILKREUZE=[
 ];
 
 // ─── Multifix USF Injektionsmörtel (chemische Verankerung) ──────────
-// Mörtelmenge je Iso-Bar ECO nach Verankerungsgrund — ABZ Z-21.8-2083, Tab. 8.
-//   Beton 15 ml (ohne Siebhülse) · Vollstein-MW 30 ml (ohne Siebhülse) ·
-//   Lochstein-MW 45 ml (mit Siebhülse SH 25).  +5 ml je 10 mm tieferes Bohrloch.
-const MULTIFIX_ML={beton:15,vollstein:30,lochstein:45};
+// Mörtelmenge je Iso-Bar ECO nach Verankerungsgrund — ABZ Z-21.8-2083, Tab. 8:
+//   Beton 15 ml · Vollstein-MW 30 ml · Lochstein-MW 45 ml (mit Siebhülse).
+// HIER MIT 100 % AUFSCHLAG kalkuliert (×2: 30/60/90 ml) für Verschnitt, Anmisch-
+// verlust und Bohrlochtoleranzen.  (ABZ-Normwerte = Hälfte davon.)
+const MULTIFIX_ML_NORM={beton:15,vollstein:30,lochstein:45};
+const MULTIFIX_AUFSCHLAG=2;                       // 100 % Aufschlag
+const MULTIFIX_ML={beton:MULTIFIX_ML_NORM.beton*MULTIFIX_AUFSCHLAG,
+                   vollstein:MULTIFIX_ML_NORM.vollstein*MULTIFIX_AUFSCHLAG,
+                   lochstein:MULTIFIX_ML_NORM.lochstein*MULTIFIX_AUFSCHLAG};
 const MULTIFIX_LABEL={beton:"Beton",vollstein:"Vollstein-Mauerwerk",lochstein:"Lochstein-Mauerwerk"};
 const MULTIFIX={
   sommer:   {id:"9571000280",l:"Mörtelkartusche Multifix USF 280 ml",ml:280},
@@ -125,13 +130,23 @@ function mortarCategory(d){
 // Mörtelbedarf + Kartuschenanzahl (Sommer 280/420 ml, Winter 300 ml).
 function calcMultifix(d,totalAnker){
   const cat=mortarCategory(d);
-  const mlPer=MULTIFIX_ML[cat];
+  const mlPer=MULTIFIX_ML[cat];                 // inkl. 100 % Aufschlag
+  const mlNorm=MULTIFIX_ML_NORM[cat];           // ABZ-Normwert
   const totalMl=totalAnker*mlPer;
   const cart=(vol)=>totalMl>0?Math.ceil(totalMl/vol):0;
-  return {cat,label:MULTIFIX_LABEL[cat],mlPer,totalMl,
+  return {cat,label:MULTIFIX_LABEL[cat],mlPer,mlNorm,totalMl,
     siebhuelse:cat==="lochstein",siebAnzahl:cat==="lochstein"?totalAnker:0,
     sommer280:cart(MULTIFIX.sommer.ml),sommer420:cart(MULTIFIX.sommer420.ml),winter300:cart(MULTIFIX.winter.ml)};
 }
+
+// Iso-Bar Bohrer – wählbare Varianten (EJOT-Artikelnummern, Preisliste).
+//   2-S Ø26 → Lochstein (Siebhülse) · 4-S Ø24 → Beton/Vollstein.
+const BOHRER=[
+  {nr:"8779424250",l:"Iso-Bar Bohrer 4-S Ø24/310-250",info:"Beton/Vollstein · kurz (bis ~250 mm)"},
+  {nr:"8779424400",l:"Iso-Bar Bohrer 4-S Ø24/450-400",info:"Beton/Vollstein · lang (bis ~400 mm)"},
+  {nr:"8779226200",l:"Iso-Bar Bohrer 2-S Ø26/250-200",info:"Lochstein (Siebhülse) · kurz"},
+  {nr:"8779226400",l:"Iso-Bar Bohrer 2-S Ø26/450-400",info:"Lochstein (Siebhülse) · lang"},
+];
 
 // ─── Iso-Bar ECO – Beschaffung & Zubehör (EJOT-Artikelnummern, Preisliste) ──
 // Produktbild-Thumbnails liegen unter public/zubehoer/<img>.png.
@@ -156,15 +171,16 @@ const ADAPTER={
   "150":{nr:"8779150700",l:"Iso-Bar ECO Adapter 150 mm",img:"adapter"},
 };
 const ZUB_SIEBHUELSE={nr:"8779100025",l:"Iso-Bar Siebhülse 25 × 100 Stahl",img:"siebhuelse"};
-// Optionales Zubehör/Werkzeug (Checkliste).  werkzeug=true → 1× je Baustelle.
+// Optionales Zubehör/Werkzeug (Checkliste).  Menge je Position manuell eingebbar.
+// defMenge: Vorschlagswert (ctx = {endkappen}).  bohrer:true → Längenvariante wählbar.
 const ZUBEHOER=[
-  {key:"schrumpfschlauch",nr:"8779888007",l:"Iso-Bar ECO Seilabdeck-Schrumpfschlauch",img:"",            hint:"bei Bedarf, je Seilende"},
-  {key:"klettersprosse",  nr:"8779888004",l:"Iso-Bar ECO Klettersprosse",            img:"klettersprosse", hint:"bei Bedarf"},
-  {key:"drahtseilschere", nr:"8779888991",l:"Drahtseilschere",                       img:"drahtseilschere",werkzeug:true,hint:"Werkzeug · 1× je Baustelle"},
-  {key:"reinigungsbuerste",nr:"9150300014",l:"EJOT Reinigungsbürste 14",             img:"reinigungsbuerste",werkzeug:true,hint:"Bohrlochreinigung"},
-  {key:"ausblaspumpe",    nr:"9150300000",l:"EJOT Ausblaspumpe",                      img:"ausblaspumpe",  werkzeug:true,hint:"Bohrlochreinigung"},
-  {key:"auspresspistole", nr:"9570010345",l:"Auspresspistole 345 ml",               img:"auspresspistole",werkzeug:true,hint:"für Mörtelkartusche"},
-  {key:"bohrer",          nr:"8779226200",l:"Iso-Bar Bohrer 2-S Ø26/250-200",       img:"bohrer",        werkzeug:true,hint:"Hammerbohrer (Lochstein)"},
+  {key:"schrumpfschlauch",nr:"8779888007",l:"Iso-Bar ECO Seilabdeck-Schrumpfschlauch",img:"",            hint:"je Seilende",      defMenge:c=>c.endkappen},
+  {key:"klettersprosse",  nr:"8779888004",l:"Iso-Bar ECO Klettersprosse",            img:"klettersprosse", hint:"bei Bedarf",        defMenge:()=>1},
+  {key:"drahtseilschere", nr:"8779888991",l:"Drahtseilschere",                       img:"drahtseilschere",werkzeug:true,hint:"Werkzeug · 1× je Baustelle",defMenge:()=>1},
+  {key:"reinigungsbuerste",nr:"9150300014",l:"EJOT Reinigungsbürste 14",             img:"reinigungsbuerste",werkzeug:true,hint:"Bohrlochreinigung",defMenge:()=>1},
+  {key:"ausblaspumpe",    nr:"9150300000",l:"EJOT Ausblaspumpe",                      img:"ausblaspumpe",  werkzeug:true,hint:"Bohrlochreinigung",defMenge:()=>1},
+  {key:"auspresspistole", nr:"9570010345",l:"Auspresspistole 345 ml",               img:"auspresspistole",werkzeug:true,hint:"für Mörtelkartusche",defMenge:()=>1},
+  {key:"bohrer",          bohrer:true,    l:"Iso-Bar Bohrer (Länge wählbar)",        img:"bohrer",        werkzeug:true,hint:"Hammerbohrer",defMenge:()=>1},
 ];
 
 // ─── Verankerungsgründe (gem. Z-21.8-2083) ──────────────
@@ -1095,6 +1111,7 @@ function MaterialSection({d,mat,setD}){
   const effBeschaffung=(beschaffung==="set"&&setVerfuegbar)?"set":"einzel";
   const adapterKey=d.mat_adapter||"95";
   const bilder=!!d.mat_bilder;
+  const moertel=d.mat_moertel||"sommer";          // "sommer" | "winter"
   const eco=isoBarEcoArticle(L,effBeschaffung);
   const lochstein=mfx.cat==="lochstein";
   const skImg={sk90k:"seilkreuz-90",skverst:"seilkreuz-verstellbar",sk90a4:"seilkreuz-90-a4"}[matSK];
@@ -1113,18 +1130,23 @@ function MaterialSection({d,mat,setD}){
   if(anyD) push("Iso-Bar ECO Rundlitzenseil Ø4 mm – diagonal",fmtDec(totalSeilD,1),"m","8779888001","2× pro Feld","");
   push("Rundlitzenseil gesamt (alle Richtungen)",fmtDec(totalSeilGes,1),"m","8779888001","inkl. Verschnitt ca. +10 %","seil");
   if(totalSK>0&&skInfo) push(skInfo.l,fmtInt(totalSK),"Stk",skInfo.art||"","alle Fassaden",skImg);
-  push("Endkappen / Seilhülsen",fmtInt(totalEndkappen),"Stk","","je Seilende (Anfang + Ende jedes Seils)","");
 
-  // ── Optionales Zubehör/Werkzeug (Checkliste) ──
+  // ── Optionales Zubehör/Werkzeug (Checkliste) ── Menge je Position manuell.
   const zub=d.mat_zubehoer||{};
+  const zubMenge=d.mat_zub_menge||{};
+  const ctx={endkappen:totalEndkappen};
+  const bohrerVariant=BOHRER.find(b=>b.nr===d.mat_bohrer_variant)||BOHRER[lochstein?2:0];
   const zubItems=ZUBEHOER.filter(z=>zub[z.key]).map(z=>{
-    let menge="1";
-    if(!z.werkzeug){ menge=z.key==="schrumpfschlauch"?fmtInt(totalEndkappen):"n. B."; }
-    return {...z,menge};
+    const def=z.defMenge?z.defMenge(ctx):1;
+    const menge=zubMenge[z.key]!==undefined&&zubMenge[z.key]!==""?zubMenge[z.key]:def;
+    return z.bohrer
+      ? {...z,menge,l:bohrerVariant.l,nr:bohrerVariant.nr,hint:bohrerVariant.info}
+      : {...z,menge};
   });
 
   const setKey=k=>v=>setD&&setD(x=>({...x,[k]:v}));
   const toggleZub=k=>()=>setD&&setD(x=>({...x,mat_zubehoer:{...(x.mat_zubehoer||{}),[k]:!(x.mat_zubehoer||{})[k]}}));
+  const setZubMenge=k=>v=>setD&&setD(x=>({...x,mat_zub_menge:{...(x.mat_zub_menge||{}),[k]:v}}));
 
   const showBreakdown=fassaden.length>1||anyFromPlan||facadeStats.some(f=>f.rects&&f.rects.length>1);
   return(<div style={{background:WH}}>
@@ -1146,6 +1168,11 @@ function MaterialSection({d,mat,setD}){
         {["95","150"].map(a=>{const active=adapterKey===a;return <button key={a} onClick={()=>setKey("mat_adapter")(a)}
           style={{padding:"5px 11px",fontSize:11,fontWeight:active?700:600,border:`1.5px solid ${active?R:BD}`,borderRadius:6,cursor:"pointer",background:active?`${R}10`:WH,color:active?R:DK}}>{a} mm</button>;})}
       </div>}
+      <div style={{display:"flex",gap:6,alignItems:"center"}}>
+        <span style={{fontSize:10.5,color:GY,fontWeight:600}}>Mörtel:</span>
+        {[["sommer","Sommer"],["winter","Winter"]].map(([v,l])=>{const active=moertel===v;return <button key={v} onClick={()=>setKey("mat_moertel")(v)}
+          style={{padding:"5px 11px",fontSize:11,fontWeight:active?700:600,border:`1.5px solid ${active?R:BD}`,borderRadius:6,cursor:"pointer",background:active?`${R}10`:WH,color:active?R:DK}}>{l}</button>;})}
+      </div>
       <label style={{display:"flex",gap:6,alignItems:"center",fontSize:11,color:DK,fontWeight:600,cursor:"pointer"}}>
         <input type="checkbox" checked={bilder} onChange={e=>setKey("mat_bilder")(e.target.checked)}/> Produktbilder
       </label>
@@ -1288,19 +1315,20 @@ function MaterialSection({d,mat,setD}){
       {/* ── Injektionsmörtel Multifix USF ── */}
       <div data-pdf-page="stueckliste" style={{border:`1px solid ${RM}`,borderRadius:4,padding:12,marginBottom:14}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:8,flexWrap:"wrap",gap:6}}>
-          <div style={{fontWeight:700,fontSize:10.5,textTransform:"uppercase",letterSpacing:.5,color:R}}>Injektionsmörtel Multifix USF (chemische Verankerung)</div>
-          <span style={{fontSize:9.5,color:GY}}>Verankerungsgrund: <strong style={{color:BK}}>{mfx.label}</strong> · {mfx.mlPer} ml je Iso-Bar ECO (ABZ Z-21.8-2083, Tab. 8)</span>
+          <div style={{fontWeight:700,fontSize:10.5,textTransform:"uppercase",letterSpacing:.5,color:R}}>Injektionsmörtel Multifix USF · {moertel==="winter"?"Winter":"Sommer"}</div>
+          <span style={{fontSize:9.5,color:GY}}>Verankerungsgrund: <strong style={{color:BK}}>{mfx.label}</strong> · <strong style={{color:R}}>{mfx.mlPer} ml</strong> je Iso-Bar ECO (inkl. 100 % Aufschlag; ABZ-Norm {mfx.mlNorm} ml)</span>
         </div>
         <table style={{width:"100%",borderCollapse:"collapse",fontSize:11.5}}>
           <thead><tr>{["Pos.","Bezeichnung","Menge","Einheit","Artikel-Nr.","Hinweis"].map(h=>
             <th key={h} style={{background:BG,fontWeight:700,padding:"5px 8px",textAlign:"left",borderBottom:`1px solid ${BD}`,fontSize:10.5}}>{h}</th>)}</tr></thead>
           <tbody>
             {[
-              ["Erf. Mörtelmenge gesamt",fmtInt(mfx.totalMl),"ml","",`${fmtInt(totalAnker)} Anker × ${mfx.mlPer} ml`],
-              [`${MULTIFIX.sommer.l} – Sommer`,fmtInt(mfx.sommer280),"Kartuschen",MULTIFIX.sommer.id,"Standard · alternativ 420 ml"],
-              [`${MULTIFIX.sommer420.l} – Sommer (Alternative)`,fmtInt(mfx.sommer420),"Kartuschen",MULTIFIX.sommer420.id,"Großgebinde"],
-              [`${MULTIFIX.winter.l} – Winter`,fmtInt(mfx.winter300),"Kartuschen",MULTIFIX.winter.id,"für niedrige Temperaturen"],
-              [MULTIFIX.mischduese.l,fmtInt(Math.max(mfx.sommer280,mfx.winter300)),"Stk",MULTIFIX.mischduese.id,"je Kartusche, im Lieferumfang"],
+              ["Erf. Mörtelmenge gesamt (inkl. 100 % Aufschlag)",fmtInt(mfx.totalMl),"ml","",`${fmtInt(totalAnker)} Anker × ${mfx.mlPer} ml`],
+              ...(moertel==="winter"
+                ? [[`${MULTIFIX.winter.l}`,fmtInt(mfx.winter300),"Kartuschen",MULTIFIX.winter.id,"Kartusche bis −20 °C / Kaltwetter"]]
+                : [[`${MULTIFIX.sommer.l}`,fmtInt(mfx.sommer280),"Kartuschen",MULTIFIX.sommer.id,"Standard"],
+                   [`${MULTIFIX.sommer420.l} (Alternative)`,fmtInt(mfx.sommer420),"Kartuschen",MULTIFIX.sommer420.id,"Großgebinde"]]),
+              [MULTIFIX.mischduese.l,fmtInt(moertel==="winter"?mfx.winter300:mfx.sommer280),"Stk",MULTIFIX.mischduese.id,"je Kartusche, im Lieferumfang"],
               ...(mfx.siebhuelse?[[MULTIFIX.siebhuelse.l,fmtInt(mfx.siebAnzahl),"Stk",MULTIFIX.siebhuelse.id||"auf Anfrage","je Anker bei Lochstein"]]:[]),
             ].map(([b,m,e,a,h],idx)=><tr key={idx} style={{background:idx===0?"#FFF8E1":"transparent"}}>
               <td style={{padding:"4px 8px",borderBottom:`1px solid ${BD}`,fontWeight:700,color:R,width:30}}>{idx===0?"–":idx}</td>
@@ -1314,17 +1342,30 @@ function MaterialSection({d,mat,setD}){
           <strong style={{color:R}}>Sommer- oder Winter-Variante?</strong> Maßgebend ist die <strong>Kartuschentemperatur</strong> bei der Verarbeitung:
           <span style={{display:"block",marginTop:2}}>• <strong>Multifix USF (Sommer)</strong>: Umgebungstemperatur −10 … +40 °C, jedoch <strong>min. Kartuschentemperatur +15 °C</strong> → für normale/warme Bedingungen.</span>
           <span style={{display:"block"}}>• <strong>Multifix USF Winter</strong>: Umgebungstemperatur −20 … +10 °C, <strong>Kartuschentemperatur bis −20 °C</strong> → wenn die Kartusche nicht auf +15 °C gehalten werden kann (Kaltwetter, i. d. R. unter ca. +5 °C).</span>
-          <span style={{display:"block",marginTop:2,color:GL}}>Mengen netto nach ABZ Tab. 8; Anmischverlust je Kartusche zusätzlich berücksichtigen. Bei Bohrlöchern tiefer als h_ef: +5 ml je 10 mm.</span>
+          <span style={{display:"block",marginTop:2,color:GL}}>Mörtelmenge mit <strong>100 % Aufschlag</strong> auf die ABZ-Normwerte (15/30/45 ml → 30/60/90 ml) für Anmischverlust, Verschnitt und Bohrlochtoleranzen.</span>
         </div>
       </div>
 
       {/* ── Optionales Zubehör / Werkzeug (bei Bedarf) ── */}
       <div data-pdf-page="stueckliste" style={{border:`1px solid ${BD}`,borderRadius:4,padding:12,marginBottom:14}}>
         <div style={{fontWeight:700,fontSize:10.5,textTransform:"uppercase",letterSpacing:.5,color:R,marginBottom:8}}>Optionales Zubehör / Werkzeug (bei Bedarf)</div>
-        {setD&&<div style={{display:"flex",flexWrap:"wrap",gap:"4px 14px",marginBottom:zubItems.length?10:0,paddingBottom:zubItems.length?10:0,borderBottom:zubItems.length?`1px solid ${BD}`:"none"}}>
-          {ZUBEHOER.map(z=><label key={z.key} style={{display:"flex",gap:5,alignItems:"center",fontSize:10.5,color:DK,cursor:"pointer"}}>
-            <input type="checkbox" checked={!!zub[z.key]} onChange={toggleZub(z.key)}/> {z.l}
-          </label>)}
+        {setD&&<div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:zubItems.length?10:0,paddingBottom:zubItems.length?10:0,borderBottom:zubItems.length?`1px solid ${BD}`:"none"}}>
+          {ZUBEHOER.map(z=>{
+            const checked=!!zub[z.key];
+            const def=z.defMenge?z.defMenge(ctx):1;
+            return <div key={z.key} style={{display:"flex",alignItems:"center",gap:6,border:`1px solid ${checked?R:BD}`,borderRadius:6,padding:"3px 8px",background:checked?`${R}08`:WH}}>
+              <label style={{display:"flex",gap:5,alignItems:"center",fontSize:10.5,color:DK,cursor:"pointer",fontWeight:checked?700:500}}>
+                <input type="checkbox" checked={checked} onChange={toggleZub(z.key)}/> {z.bohrer?"Iso-Bar Bohrer":z.l}
+              </label>
+              {checked&&<><span style={{fontSize:9.5,color:GY}}>Menge</span>
+                <input type="number" min="0" value={zubMenge[z.key]??""} placeholder={String(def)} onChange={e=>setZubMenge(z.key)(e.target.value)}
+                  style={{width:50,padding:"2px 5px",fontSize:10.5,border:`1px solid ${BD}`,borderRadius:4,fontFamily:"inherit"}}/></>}
+              {checked&&z.bohrer&&<select value={d.mat_bohrer_variant||bohrerVariant.nr} onChange={e=>setKey("mat_bohrer_variant")(e.target.value)}
+                style={{fontSize:10,padding:"2px 4px",border:`1px solid ${BD}`,borderRadius:4,maxWidth:210,fontFamily:"inherit",background:WH}}>
+                {BOHRER.map(b=><option key={b.nr} value={b.nr}>{b.l}</option>)}
+              </select>}
+            </div>;
+          })}
         </div>}
         {zubItems.length>0?<table style={{width:"100%",borderCollapse:"collapse",fontSize:11.5}}>
           <thead><tr>{["Pos.",...(bilder?[""]:[]),"Bezeichnung","Menge","Einheit","Artikel-Nr.","Hinweis"].map((h,i)=>
@@ -1704,8 +1745,8 @@ function StatikSection({ d }){
   // Eine Zeile: Bezeichnung · (Formel/Wert) · Wert · Einheit · Quelle
   const Row = ({ l, f, v, u, src, strong }) => (
     <tr style={{ borderBottom: `1px solid ${BD}` }}>
-      <td style={{ padding: "3px 6px", fontSize: 10.5, color: DK, fontWeight: strong ? 700 : 500 }}>{l}</td>
-      <td style={{ padding: "3px 6px", fontSize: 9.5, color: GY, fontFamily: "ui-monospace, Consolas, monospace" }}>{f || ""}</td>
+      <td style={{ padding: "3px 6px", fontSize: 10.5, color: DK, fontWeight: strong ? 700 : 500 }}><Sub>{l}</Sub></td>
+      <td style={{ padding: "3px 6px", fontSize: 9.5, color: GY, fontFamily: "ui-monospace, Consolas, monospace" }}><Sub>{f || ""}</Sub></td>
       <td style={{ padding: "3px 6px", fontSize: 10.5, color: BK, fontWeight: 700, textAlign: "right", whiteSpace: "nowrap" }}>{v}</td>
       <td style={{ padding: "3px 6px", fontSize: 9.5, color: GL }}>{u || ""}</td>
       <td style={{ padding: "3px 6px", fontSize: 8.5, color: GL }}>{src || ""}</td>
@@ -1719,8 +1760,8 @@ function StatikSection({ d }){
     const ok = nw.ok, col = ok ? GN : R;
     return (
       <tr style={{ borderBottom: `1px solid ${BD}` }}>
-        <td style={{ padding: "3px 6px", fontSize: 10.5, color: DK, fontWeight: 600 }}>{l}</td>
-        <td style={{ padding: "3px 6px", fontSize: 9.5, color: GY, fontFamily: "ui-monospace, Consolas, monospace" }}>{f}</td>
+        <td style={{ padding: "3px 6px", fontSize: 10.5, color: DK, fontWeight: 600 }}><Sub>{l}</Sub></td>
+        <td style={{ padding: "3px 6px", fontSize: 9.5, color: GY, fontFamily: "ui-monospace, Consolas, monospace" }}><Sub>{f}</Sub></td>
         <td style={{ padding: "3px 6px", fontSize: 11, color: col, fontWeight: 800, textAlign: "right" }}>{fm(nw.wert)}{nw.einheit ? " " + nw.einheit : ""}</td>
         <td style={{ padding: "3px 6px", fontSize: 9.5, color: GY }}>≤ {nw.grenze}{nw.einheit ? " " + nw.einheit : ""}</td>
         <td style={{ padding: "3px 6px", fontSize: 10, color: col, fontWeight: 800, textAlign: "center" }}>{ok ? "✓" : "✗ n.i.O."}</td>
@@ -1759,7 +1800,7 @@ function StatikSection({ d }){
             <Row l="Gebäudehöhe" f="z / h" v={fm(pf(inp.gebaeudehoehe))} u="m" />
             <Row l="Gebäudelänge" f="L / d" v={fm(pf(inp.gebaeudelaenge))} u="m" />
             <Row l="Gebäudebreite" f="B / b" v={fm(pf(inp.gebaeudebreite))} u="m" />
-            <Row l="Lastklasse Gewächs" v={inp.lastklasse} u="LK" src="FLL Tab. 15" />
+            <Row l="Lastklasse Bepflanzung" v={inp.lastklasse} u="LK" src="FLL Tab. 15" />
             {isMW
               ? <Row l="Steinart (Untergrund)" v={STEINE[inp.steinart]?.label || inp.steinart} src="Z-21.8-2083 Tab. 14" />
               : <Row l="Betonklasse / Temperatur" v={`${BETON_KLASSEN[inp.betonklasse]?.label || inp.betonklasse} · ${inp.temperatur === "hoch" ? "≤80 °C" : "≤40 °C"}`} src="Z-21.8-2083 Tab. 12" />}
@@ -2182,27 +2223,36 @@ export default function App(){
     if(tot.sD>0) rows.push([p++,"Iso-Bar ECO Rundlitzenseil Ø4 mm – diagonal",fmtDec(tot.sD,1),"m","8779888001",""]);
     rows.push([p++,"Rundlitzenseil gesamt (alle Richtungen)",fmtDec(totalSeilGes,1),"m","8779888001","inkl. ca. +10 % Verschnitt"]);
     if(tot.sk>0&&skInfo) rows.push([p++,skInfo.l,fmtInt(tot.sk),"Stk",skInfo.art||"",""]);
-    rows.push([p++,"Endkappen / Seilhülsen",fmtInt(tot.endkappen),"Stk","","je Seilende (Anfang + Ende jedes Seils)"]);
     rows.push([]);
 
-    // Injektionsmörtel Multifix USF
-    rows.push(["Injektionsmörtel Multifix USF","",`Verankerungsgrund: ${mfx.label}`,`${mfx.mlPer} ml/Anker`,"ABZ Z-21.8-2083 Tab. 8",""]);
-    rows.push([p++,"Erforderliche Mörtelmenge gesamt",fmtInt(mfx.totalMl),"ml","",`${fmtInt(tot.anker)} Anker × ${mfx.mlPer} ml`]);
-    rows.push([p++,MULTIFIX.sommer.l+" – Sommer",fmtInt(mfx.sommer280),"Kartuschen",MULTIFIX.sommer.id,"Kartusche min. +15 °C"]);
-    rows.push([p++,MULTIFIX.sommer420.l+" – Sommer (Alternative)",fmtInt(mfx.sommer420),"Kartuschen",MULTIFIX.sommer420.id,"Großgebinde"]);
-    rows.push([p++,MULTIFIX.winter.l+" – Winter",fmtInt(mfx.winter300),"Kartuschen",MULTIFIX.winter.id,"Kartusche bis −20 °C / Kaltwetter"]);
-    rows.push([p++,MULTIFIX.mischduese.l,fmtInt(Math.max(mfx.sommer280,mfx.winter300)),"Stk",MULTIFIX.mischduese.id,"je Kartusche"]);
+    // Injektionsmörtel Multifix USF (gewählte Variante, inkl. 100 % Aufschlag)
+    const moertel=d.mat_moertel||"sommer";
+    rows.push([`Injektionsmörtel Multifix USF · ${moertel==="winter"?"Winter":"Sommer"}`,"",`Verankerungsgrund: ${mfx.label}`,`${mfx.mlPer} ml/Anker (inkl. 100 % Aufschlag, Norm ${mfx.mlNorm})`,"ABZ Z-21.8-2083 Tab. 8",""]);
+    rows.push([p++,"Erforderliche Mörtelmenge gesamt (inkl. 100 % Aufschlag)",fmtInt(mfx.totalMl),"ml","",`${fmtInt(tot.anker)} Anker × ${mfx.mlPer} ml`]);
+    if(moertel==="winter"){
+      rows.push([p++,MULTIFIX.winter.l,fmtInt(mfx.winter300),"Kartuschen",MULTIFIX.winter.id,"Kartusche bis −20 °C / Kaltwetter"]);
+      rows.push([p++,MULTIFIX.mischduese.l,fmtInt(mfx.winter300),"Stk",MULTIFIX.mischduese.id,"je Kartusche"]);
+    }else{
+      rows.push([p++,MULTIFIX.sommer.l,fmtInt(mfx.sommer280),"Kartuschen",MULTIFIX.sommer.id,"Standard · Kartusche min. +15 °C"]);
+      rows.push([p++,MULTIFIX.sommer420.l+" (Alternative)",fmtInt(mfx.sommer420),"Kartuschen",MULTIFIX.sommer420.id,"Großgebinde"]);
+      rows.push([p++,MULTIFIX.mischduese.l,fmtInt(mfx.sommer280),"Stk",MULTIFIX.mischduese.id,"je Kartusche"]);
+    }
     if(mfx.siebhuelse) rows.push([p++,MULTIFIX.siebhuelse.l,fmtInt(mfx.siebAnzahl),"Stk",MULTIFIX.siebhuelse.id||"auf Anfrage","je Anker bei Lochstein"]);
     rows.push([]);
 
-    // Optionales Zubehör / Werkzeug (angehakte Positionen)
+    // Optionales Zubehör / Werkzeug (angehakte Positionen, manuelle Menge)
     const zub=d.mat_zubehoer||{};
+    const zubMenge=d.mat_zub_menge||{};
+    const bohrerVar=BOHRER.find(b=>b.nr===d.mat_bohrer_variant)||BOHRER[mfx.cat==="lochstein"?2:0];
     const zubSel=ZUBEHOER.filter(z=>zub[z.key]);
     if(zubSel.length){
       rows.push(["Optionales Zubehör / Werkzeug (bei Bedarf)"]);
       zubSel.forEach(z=>{
-        const menge=z.werkzeug?"1":(z.key==="schrumpfschlauch"?fmtInt(tot.endkappen):"n. B.");
-        rows.push([p++,z.l,menge,"Stk",z.nr,z.werkzeug?"Werkzeug · "+z.hint:z.hint]);
+        const def=z.defMenge?z.defMenge({endkappen:tot.endkappen}):1;
+        const menge=(zubMenge[z.key]!==undefined&&zubMenge[z.key]!=="")?zubMenge[z.key]:def;
+        const bez=z.bohrer?bohrerVar.l:z.l, nr=z.bohrer?bohrerVar.nr:z.nr, hint=z.bohrer?bohrerVar.info:z.hint;
+        const mengeOut=Number.isFinite(Number(menge))?fmtInt(Number(menge)):String(menge);
+        rows.push([p++,bez,mengeOut,"Stk",nr,(z.werkzeug?"Werkzeug · ":"")+hint]);
       });
       rows.push([]);
     }
