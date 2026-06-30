@@ -174,7 +174,7 @@ const ZUB_SIEBHUELSE={nr:"8779100025",l:"Iso-Bar Siebhülse 25 × 100 Stahl",img
 // Optionales Zubehör/Werkzeug (Checkliste).  Menge je Position manuell eingebbar.
 // defMenge: Vorschlagswert (ctx = {endkappen}).  bohrer:true → Längenvariante wählbar.
 const ZUBEHOER=[
-  {key:"schrumpfschlauch",nr:"8779888007",l:"Iso-Bar ECO Seilabdeck-Schrumpfschlauch",img:"",            hint:"je Seilende",      defMenge:c=>c.endkappen},
+  {key:"schrumpfschlauch",nr:"8779888007",l:"Iso-Bar ECO Seilabdeck-Schrumpfschlauch",img:"schrumpfschlauch",hint:"je Seilende",   defMenge:c=>c.endkappen},
   {key:"klettersprosse",  nr:"8779888004",l:"Iso-Bar ECO Klettersprosse",            img:"klettersprosse", hint:"bei Bedarf",        defMenge:()=>1},
   {key:"drahtseilschere", nr:"8779888991",l:"Drahtseilschere",                       img:"drahtseilschere",werkzeug:true,hint:"Werkzeug · 1× je Baustelle",defMenge:()=>1},
   {key:"reinigungsbuerste",nr:"9150300014",l:"EJOT Reinigungsbürste 14",             img:"reinigungsbuerste",werkzeug:true,hint:"Bohrlochreinigung",defMenge:()=>1},
@@ -1735,7 +1735,7 @@ function StatikSection({ d }){
   const { res, err, inp, atWind, atStadt, isMW, isLin, isAT, land, untergrund, system } = runVorbemessung(d);
 
   const Block = ({ title, children, note }) => (
-    <div data-pdf-page="statik" style={{ marginBottom: 16, breakInside: "avoid" }}>
+    <div style={{ marginBottom: 16, breakInside: "avoid" }}>
       <div style={{ fontSize: 11, fontWeight: 800, color: R, textTransform: "uppercase", letterSpacing: .5,
         borderBottom: `2px solid ${R}`, paddingBottom: 3, marginBottom: 8 }}>{title}</div>
       {children}
@@ -1779,7 +1779,7 @@ function StatikSection({ d }){
       <PageHead title="Vorbemessung – Statik" subtitle="Iso-Bar ECO · statischer Nachweis (Vorbemessung)" />
 
       {/* Kopf */}
-      <div data-pdf-page="statik" style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 14, fontSize: 11 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 14, fontSize: 11 }}>
         {[["Bauvorhaben", d.bauvorhaben || "–"], ["Ort / PLZ", d.ort_plz || "–"], ["Datum", d.datum || ""],
           ["Bearbeiter", d.bearbeiter || "–"], ["Dokument-Nr.", d.dokNr || "–"], ["System", sysLabel]].map(([k, v]) => (
           <div key={k} style={{ flex: "1 1 30%", minWidth: 180, border: `1px solid ${BD}`, borderRadius: 5, padding: "5px 8px" }}>
@@ -2094,25 +2094,38 @@ export default function App(){
       const pdf=new jsPDF({orientation:"portrait",unit:"mm",format:"a4",compress:true});
       let firstPage=true;
 
+      // scale 2 statt 3: ~44 % des Speichers, für Text/Linien immer noch scharf.
+      // removeContainer:true verhindert, dass sich html2canvas-Klone im DOM stapeln.
+      const SCALE=2;
       for(const el of captureTargets){
-        const canvas=await html2canvas(el,{scale:3,useCORS:true,backgroundColor:"#FFFFFF",logging:false,windowWidth:920,imageTimeout:0,removeContainer:false,scrollX:0,scrollY:0});
+        const canvas=await html2canvas(el,{scale:SCALE,useCORS:true,backgroundColor:"#FFFFFF",logging:false,windowWidth:920,imageTimeout:0,removeContainer:true,scrollX:0,scrollY:0});
         const imgW=canvas.width,imgH=canvas.height;
         const ratio=contentW/imgW;
         const contentH=imgH*ratio;
-        const totalPages=Math.ceil(contentH/pageContentH);
-        for(let page=0;page<totalPages;page++){
+        const totalPages=Math.max(1,Math.ceil(contentH/pageContentH-0.02));
+        if(totalPages===1){
+          // Passt auf eine Seite → Canvas direkt einbetten (kein zweiter Riesen-Canvas).
           if(!firstPage) pdf.addPage();
           firstPage=false;
-          const srcY=page*pageContentH/ratio;
-          const srcH=Math.min(pageContentH/ratio,imgH-srcY);
-          const destH=srcH*ratio;
-          const tmpCanvas=document.createElement("canvas");
-          tmpCanvas.width=imgW;tmpCanvas.height=Math.round(srcH);
-          const ctx=tmpCanvas.getContext("2d");
-          ctx.drawImage(canvas,0,Math.round(srcY),imgW,Math.round(srcH),0,0,imgW,Math.round(srcH));
-          const sliceData=tmpCanvas.toDataURL("image/png",0.92);
-          pdf.addImage(sliceData,"PNG",margin,margin,contentW,destH,"","FAST");
+          pdf.addImage(canvas,"PNG",margin,margin,contentW,contentH,"","FAST");
+        }else{
+          for(let page=0;page<totalPages;page++){
+            if(!firstPage) pdf.addPage();
+            firstPage=false;
+            const srcY=page*pageContentH/ratio;
+            const srcH=Math.min(pageContentH/ratio,imgH-srcY);
+            const destH=srcH*ratio;
+            const tmpCanvas=document.createElement("canvas");
+            tmpCanvas.width=imgW;tmpCanvas.height=Math.round(srcH);
+            const ctx=tmpCanvas.getContext("2d");
+            ctx.fillStyle="#FFFFFF";ctx.fillRect(0,0,tmpCanvas.width,tmpCanvas.height);
+            ctx.drawImage(canvas,0,Math.round(srcY),imgW,Math.round(srcH),0,0,imgW,Math.round(srcH));
+            pdf.addImage(tmpCanvas,"JPEG",margin,margin,contentW,destH,"","FAST");
+            tmpCanvas.width=tmpCanvas.height=0;   // Speicher der Slice-Leinwand freigeben
+          }
         }
+        canvas.width=canvas.height=0;             // Speicher der Capture-Leinwand freigeben
+        await new Promise(r=>setTimeout(r,0));     // Event-Loop atmen lassen → GC kann greifen
       }
 
       if(outerWrapper) outerWrapper.style.cssText=origOuterStyle;
@@ -2612,8 +2625,8 @@ export default function App(){
             {fSK!=="ohne"&&<div style={{padding:"6px 10px",background:"#E3F2FD",borderRadius:5,border:"1px solid #90CAF940",fontSize:10.5,color:"#1565C0"}}>
               ⓘ Seilkreuze sitzen in der Zellmitte zwischen vier Ankern.</div>}
             <div style={{display:"flex",gap:10}}>
-              <Field label="LH" value={f.lh||d.LH||"0.9"} onChange={v=>updateF("lh",v)} unit="m" half/>
-              <Field label="LV" value={f.lv||d.LV||"0.9"} onChange={v=>updateF("lv",v)} unit="m" half/>
+              <Field label="LH" value={f.lh ?? d.LH ?? "0.9"} onChange={v=>updateF("lh",v)} unit="m" half/>
+              <Field label="LV" value={f.lv ?? d.LV ?? "0.9"} onChange={v=>updateF("lv",v)} unit="m" half/>
             </div>
             <Field label="Höhe 1. Lage (Startversatz unten)" value={f.lage1??d.Lage1??"0"} onChange={v=>updateF("lage1",v)} sel
               opts={LAGE1_HOEHEN} hint="Unterste Ankerreihe sitzt auf dieser Höhe; das Raster läuft im LV-Abstand nach oben."/>
