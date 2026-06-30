@@ -1125,9 +1125,9 @@ function MaterialSection({d,mat,setD}){
     push(ad.l,fmtInt(totalAnker),"Stk",ad.nr,"Adapter je Iso-Bar (Einzelbestellung)",ad.img);
     if(lochstein) push(ZUB_SIEBHUELSE.l,fmtInt(totalAnker),"Stk",ZUB_SIEBHUELSE.nr,"je Anker bei Lochstein",ZUB_SIEBHUELSE.img);
   }
-  if(anyV) push("Iso-Bar ECO Rundlitzenseil Ø4 mm – vertikal",fmtDec(totalSeilV,1),"m","8779888001",fassaden.length>1?"alle Fassaden kumuliert":"vertikal","");
-  if(anyH) push("Iso-Bar ECO Rundlitzenseil Ø4 mm – horizontal",fmtDec(totalSeilH,1),"m","8779888001","horizontal","");
-  if(anyD) push("Iso-Bar ECO Rundlitzenseil Ø4 mm – diagonal",fmtDec(totalSeilD,1),"m","8779888001","2× pro Feld","");
+  if(anyV) push("Iso-Bar ECO Rundlitzenseil Ø4 mm – vertikal",fmtDec(totalSeilV,1),"m","8779888001",fassaden.length>1?"alle Fassaden kumuliert":"vertikal","seil");
+  if(anyH) push("Iso-Bar ECO Rundlitzenseil Ø4 mm – horizontal",fmtDec(totalSeilH,1),"m","8779888001","horizontal","seil");
+  if(anyD) push("Iso-Bar ECO Rundlitzenseil Ø4 mm – diagonal",fmtDec(totalSeilD,1),"m","8779888001","2× pro Feld","seil");
   push("Rundlitzenseil gesamt (alle Richtungen)",fmtDec(totalSeilGes,1),"m","8779888001","inkl. Verschnitt ca. +10 %","seil");
   if(totalSK>0&&skInfo) push(skInfo.l,fmtInt(totalSK),"Stk",skInfo.art||"","alle Fassaden",skImg);
 
@@ -1318,26 +1318,28 @@ function MaterialSection({d,mat,setD}){
           <div style={{fontWeight:700,fontSize:10.5,textTransform:"uppercase",letterSpacing:.5,color:R}}>Injektionsmörtel Multifix USF · {moertel==="winter"?"Winter":"Sommer"}</div>
           <span style={{fontSize:9.5,color:GY}}>Verankerungsgrund: <strong style={{color:BK}}>{mfx.label}</strong> · <strong style={{color:R}}>{mfx.mlPer} ml</strong> je Iso-Bar ECO (inkl. 100 % Aufschlag; ABZ-Norm {mfx.mlNorm} ml)</span>
         </div>
+        {(()=>{const mfImg=moertel==="winter"?"multifix-winter":"multifix-sommer";return(
         <table style={{width:"100%",borderCollapse:"collapse",fontSize:11.5}}>
-          <thead><tr>{["Pos.","Bezeichnung","Menge","Einheit","Artikel-Nr.","Hinweis"].map(h=>
-            <th key={h} style={{background:BG,fontWeight:700,padding:"5px 8px",textAlign:"left",borderBottom:`1px solid ${BD}`,fontSize:10.5}}>{h}</th>)}</tr></thead>
+          <thead><tr>{["Pos.",...(bilder?[""]:[]),"Bezeichnung","Menge","Einheit","Artikel-Nr.","Hinweis"].map((h,i)=>
+            <th key={i} style={{background:BG,fontWeight:700,padding:"5px 8px",textAlign:"left",borderBottom:`1px solid ${BD}`,fontSize:10.5}}>{h}</th>)}</tr></thead>
           <tbody>
             {[
-              ["Erf. Mörtelmenge gesamt (inkl. 100 % Aufschlag)",fmtInt(mfx.totalMl),"ml","",`${fmtInt(totalAnker)} Anker × ${mfx.mlPer} ml`],
+              ["Erf. Mörtelmenge gesamt (inkl. 100 % Aufschlag)",fmtInt(mfx.totalMl),"ml","",`${fmtInt(totalAnker)} Anker × ${mfx.mlPer} ml`,""],
               ...(moertel==="winter"
-                ? [[`${MULTIFIX.winter.l}`,fmtInt(mfx.winter300),"Kartuschen",MULTIFIX.winter.id,"Kartusche bis −20 °C / Kaltwetter"]]
-                : [[`${MULTIFIX.sommer.l}`,fmtInt(mfx.sommer280),"Kartuschen",MULTIFIX.sommer.id,"Standard"],
-                   [`${MULTIFIX.sommer420.l} (Alternative)`,fmtInt(mfx.sommer420),"Kartuschen",MULTIFIX.sommer420.id,"Großgebinde"]]),
-              [MULTIFIX.mischduese.l,fmtInt(moertel==="winter"?mfx.winter300:mfx.sommer280),"Stk",MULTIFIX.mischduese.id,"je Kartusche, im Lieferumfang"],
-              ...(mfx.siebhuelse?[[MULTIFIX.siebhuelse.l,fmtInt(mfx.siebAnzahl),"Stk",MULTIFIX.siebhuelse.id||"auf Anfrage","je Anker bei Lochstein"]]:[]),
-            ].map(([b,m,e,a,h],idx)=><tr key={idx} style={{background:idx===0?"#FFF8E1":"transparent"}}>
+                ? [[`${MULTIFIX.winter.l}`,fmtInt(mfx.winter300),"Kartuschen",MULTIFIX.winter.id,"Kartusche bis −20 °C / Kaltwetter",mfImg]]
+                : [[`${MULTIFIX.sommer.l}`,fmtInt(mfx.sommer280),"Kartuschen",MULTIFIX.sommer.id,"Standard",mfImg],
+                   [`${MULTIFIX.sommer420.l} (Alternative)`,fmtInt(mfx.sommer420),"Kartuschen",MULTIFIX.sommer420.id,"Großgebinde",mfImg]]),
+              [MULTIFIX.mischduese.l,fmtInt(moertel==="winter"?mfx.winter300:mfx.sommer280),"Stk",MULTIFIX.mischduese.id,"je Kartusche, im Lieferumfang",""],
+              ...(mfx.siebhuelse?[[MULTIFIX.siebhuelse.l,fmtInt(mfx.siebAnzahl),"Stk",MULTIFIX.siebhuelse.id||"auf Anfrage","je Anker bei Lochstein","siebhuelse"]]:[]),
+            ].map(([b,m,e,a,h,img],idx)=><tr key={idx} style={{background:idx===0?"#FFF8E1":"transparent"}}>
               <td style={{padding:"4px 8px",borderBottom:`1px solid ${BD}`,fontWeight:700,color:R,width:30}}>{idx===0?"–":idx}</td>
+              {bilder&&<td style={{padding:"2px 8px",borderBottom:`1px solid ${BD}`,width:46}}>{img?<img src={`/zubehoer/${img}.png`} alt="" style={{maxWidth:40,maxHeight:32,objectFit:"contain",display:"block"}}/>:null}</td>}
               <td style={{padding:"4px 8px",borderBottom:`1px solid ${BD}`,fontWeight:idx===0?700:400}}>{b}</td>
               <td style={{padding:"4px 8px",borderBottom:`1px solid ${BD}`,fontWeight:700,textAlign:"right"}}>{m}</td>
               <td style={{padding:"4px 8px",borderBottom:`1px solid ${BD}`}}>{e}</td>
               <td style={{padding:"4px 8px",borderBottom:`1px solid ${BD}`,fontSize:10,fontFamily:"ui-monospace,Consolas,monospace"}}>{a}</td>
               <td style={{padding:"4px 8px",borderBottom:`1px solid ${BD}`,fontSize:10,color:GL}}>{h}</td></tr>)}
-          </tbody></table>
+          </tbody></table>);})()}
         <div style={{marginTop:8,fontSize:9.5,color:DK,lineHeight:1.5}}>
           <strong style={{color:R}}>Sommer- oder Winter-Variante?</strong> Maßgebend ist die <strong>Kartuschentemperatur</strong> bei der Verarbeitung:
           <span style={{display:"block",marginTop:2}}>• <strong>Multifix USF (Sommer)</strong>: Umgebungstemperatur −10 … +40 °C, jedoch <strong>min. Kartuschentemperatur +15 °C</strong> → für normale/warme Bedingungen.</span>
