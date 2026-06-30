@@ -91,6 +91,48 @@ const SEILKREUZE=[
   {id:"sk90k",l:"Seilkreuz 90° - Kunststoff",art:"8779888002"},
 ];
 
+// ─── Multifix USF Injektionsmörtel (chemische Verankerung) ──────────
+// Mörtelmenge je Iso-Bar ECO nach Verankerungsgrund — ABZ Z-21.8-2083, Tab. 8.
+//   Beton 15 ml (ohne Siebhülse) · Vollstein-MW 30 ml (ohne Siebhülse) ·
+//   Lochstein-MW 45 ml (mit Siebhülse SH 25).  +5 ml je 10 mm tieferes Bohrloch.
+const MULTIFIX_ML={beton:15,vollstein:30,lochstein:45};
+const MULTIFIX_LABEL={beton:"Beton",vollstein:"Vollstein-Mauerwerk",lochstein:"Lochstein-Mauerwerk"};
+const MULTIFIX={
+  sommer:   {id:"9571000280",l:"Mörtelkartusche Multifix USF 280 ml",ml:280},
+  sommer420:{id:"9571001420",l:"Mörtelkartusche Multifix USF 420 ml",ml:420},
+  winter:   {id:"9571000300",l:"Mörtelkartusche Multifix USF Winter 300 ml",ml:300},
+  mischduese:{id:"9570040141",l:"Mischdüse USF"},
+  siebhuelse:{id:"",l:"Siebhülse SH 25 (für Lochstein)"},
+};
+// Loch-/Hohlsteine → Siebhülse SH 25 + 45 ml; übrige Steine = Vollstein (30 ml).
+const STEIN_LOCH={hbl:true,ksl:true,hlz1:true,hlz2:true,vollziegel:false,ks_vollstein:false,lbv:false,pp:false};
+
+// Mörtel-Kategorie aus den VM-Eingaben (vm_untergrund/vm_steinart) bzw. dem
+// Legacy-Feld verankerungsgrund ableiten.
+function mortarCategory(d){
+  // Im Tool gerechnet → VM-Untergrundwahl (gleiche Defaults wie die Engine:
+  // Beton bzw. Stein ks_vollstein).  Sonst Legacy-Feld verankerungsgrund (PDF).
+  if(d.vm_modus==="rechnen"||d.vm_untergrund){
+    const ug=d.vm_untergrund||"beton";
+    if(ug==="mauerwerk") return STEIN_LOCH[d.vm_steinart||"ks_vollstein"]?"lochstein":"vollstein";
+    return "beton";
+  }
+  const vg=String(d.verankerungsgrund||"");
+  if(STEIN_LOCH[vg]) return "lochstein";
+  if(["vollziegel","ks_vollstein","lbv","pp"].includes(vg)) return "vollstein";
+  return "beton";
+}
+// Mörtelbedarf + Kartuschenanzahl (Sommer 280/420 ml, Winter 300 ml).
+function calcMultifix(d,totalAnker){
+  const cat=mortarCategory(d);
+  const mlPer=MULTIFIX_ML[cat];
+  const totalMl=totalAnker*mlPer;
+  const cart=(vol)=>totalMl>0?Math.ceil(totalMl/vol):0;
+  return {cat,label:MULTIFIX_LABEL[cat],mlPer,totalMl,
+    siebhuelse:cat==="lochstein",siebAnzahl:cat==="lochstein"?totalAnker:0,
+    sommer280:cart(MULTIFIX.sommer.ml),sommer420:cart(MULTIFIX.sommer420.ml),winter300:cart(MULTIFIX.winter.ml)};
+}
+
 // ─── Verankerungsgründe (gem. Z-21.8-2083) ──────────────
 const UNTERGRUENDE=[
   {id:"beton_c2025",l:"Beton C20/25",typ:"beton",druckf:"20",rohd:"2.4",nrk:"5.0",vrk:"3.0",gamma:"1.8"},
@@ -1010,6 +1052,7 @@ function MaterialSection({d,mat}){
   const totalSeilGes = (totalSeilV + totalSeilH + totalSeilD) * 1.1;
   const setInfo=SETS.find(s=>s.id===d.produkt);
   const skInfo=SEILKREUZE.find(s=>s.id===matSK);
+  const mfx=calcMultifix(d,totalAnker);   // Injektionsmörtel-Bedarf
   const items=[];
   items.push([setInfo?setInfo.l:"EJOT Iso-Bar ECO (Ankerpunkt)",fmtInt(totalAnker),"Stk",setInfo?`Art. ${setInfo.art}`:""]);
   if(anyV) items.push([`Seil Edelstahl V4A ø4mm – vertikal`,fmtDec(totalSeilV,1),"m",`${fassaden.length>1?"alle Fassaden kumuliert":"vertikal"}`]);
@@ -1146,6 +1189,39 @@ function MaterialSection({d,mat}){
               <td style={{padding:"4px 8px",borderBottom:`1px solid ${BD}`}}>{e}</td>
               <td style={{padding:"4px 8px",borderBottom:`1px solid ${BD}`,fontSize:10,color:GL}}>{h}</td></tr>)}
           </tbody></table></div>
+      {/* ── Injektionsmörtel Multifix USF ── */}
+      <div data-pdf-page="stueckliste" style={{border:`1px solid ${RM}`,borderRadius:4,padding:12,marginBottom:14}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:8,flexWrap:"wrap",gap:6}}>
+          <div style={{fontWeight:700,fontSize:10.5,textTransform:"uppercase",letterSpacing:.5,color:R}}>Injektionsmörtel Multifix USF (chemische Verankerung)</div>
+          <span style={{fontSize:9.5,color:GY}}>Verankerungsgrund: <strong style={{color:BK}}>{mfx.label}</strong> · {mfx.mlPer} ml je Iso-Bar ECO (ABZ Z-21.8-2083, Tab. 8)</span>
+        </div>
+        <table style={{width:"100%",borderCollapse:"collapse",fontSize:11.5}}>
+          <thead><tr>{["Pos.","Bezeichnung","Menge","Einheit","Artikel-Nr.","Hinweis"].map(h=>
+            <th key={h} style={{background:BG,fontWeight:700,padding:"5px 8px",textAlign:"left",borderBottom:`1px solid ${BD}`,fontSize:10.5}}>{h}</th>)}</tr></thead>
+          <tbody>
+            {[
+              ["Erf. Mörtelmenge gesamt",fmtInt(mfx.totalMl),"ml","",`${fmtInt(totalAnker)} Anker × ${mfx.mlPer} ml`],
+              [`${MULTIFIX.sommer.l} – Sommer`,fmtInt(mfx.sommer280),"Kartuschen",MULTIFIX.sommer.id,"Standard · alternativ 420 ml"],
+              [`${MULTIFIX.sommer420.l} – Sommer (Alternative)`,fmtInt(mfx.sommer420),"Kartuschen",MULTIFIX.sommer420.id,"Großgebinde"],
+              [`${MULTIFIX.winter.l} – Winter`,fmtInt(mfx.winter300),"Kartuschen",MULTIFIX.winter.id,"für niedrige Temperaturen"],
+              [MULTIFIX.mischduese.l,fmtInt(Math.max(mfx.sommer280,mfx.winter300)),"Stk",MULTIFIX.mischduese.id,"je Kartusche, im Lieferumfang"],
+              ...(mfx.siebhuelse?[[MULTIFIX.siebhuelse.l,fmtInt(mfx.siebAnzahl),"Stk",MULTIFIX.siebhuelse.id||"auf Anfrage","je Anker bei Lochstein"]]:[]),
+            ].map(([b,m,e,a,h],idx)=><tr key={idx} style={{background:idx===0?"#FFF8E1":"transparent"}}>
+              <td style={{padding:"4px 8px",borderBottom:`1px solid ${BD}`,fontWeight:700,color:R,width:30}}>{idx===0?"–":idx}</td>
+              <td style={{padding:"4px 8px",borderBottom:`1px solid ${BD}`,fontWeight:idx===0?700:400}}>{b}</td>
+              <td style={{padding:"4px 8px",borderBottom:`1px solid ${BD}`,fontWeight:700,textAlign:"right"}}>{m}</td>
+              <td style={{padding:"4px 8px",borderBottom:`1px solid ${BD}`}}>{e}</td>
+              <td style={{padding:"4px 8px",borderBottom:`1px solid ${BD}`,fontSize:10,fontFamily:"ui-monospace,Consolas,monospace"}}>{a}</td>
+              <td style={{padding:"4px 8px",borderBottom:`1px solid ${BD}`,fontSize:10,color:GL}}>{h}</td></tr>)}
+          </tbody></table>
+        <div style={{marginTop:8,fontSize:9.5,color:DK,lineHeight:1.5}}>
+          <strong style={{color:R}}>Sommer- oder Winter-Variante?</strong> Maßgebend ist die <strong>Kartuschentemperatur</strong> bei der Verarbeitung:
+          <span style={{display:"block",marginTop:2}}>• <strong>Multifix USF (Sommer)</strong>: Umgebungstemperatur −10 … +40 °C, jedoch <strong>min. Kartuschentemperatur +15 °C</strong> → für normale/warme Bedingungen.</span>
+          <span style={{display:"block"}}>• <strong>Multifix USF Winter</strong>: Umgebungstemperatur −20 … +10 °C, <strong>Kartuschentemperatur bis −20 °C</strong> → wenn die Kartusche nicht auf +15 °C gehalten werden kann (Kaltwetter, i. d. R. unter ca. +5 °C).</span>
+          <span style={{display:"block",marginTop:2,color:GL}}>Mengen netto nach ABZ Tab. 8; Anmischverlust je Kartusche zusätzlich berücksichtigen. Bei Bohrlöchern tiefer als h_ef: +5 ml je 10 mm.</span>
+        </div>
+      </div>
+
       <div style={{padding:10,background:"#FFF8E1",borderRadius:4,border:`1px solid ${AM}40`,fontSize:9.5,color:DK}}>
         <strong style={{color:AM}}>⚠ Hinweis:</strong> Die Stückzahlen sind überschlägig. Für die Ausführung ist eine planbasierte Materialermittlung unter Berücksichtigung
         von Rand-/Eckbereichen, Fenster-/Türöffnungen und Systemdetails erforderlich.</div>
@@ -1977,6 +2053,17 @@ export default function App(){
     rows.push([p++,"Seil gesamt (alle Richtungen)",fmtDec(totalSeilGes,1),"m","","inkl. ca. +10 % Verschnitt"]);
     if(tot.sk>0&&skInfo) rows.push([p++,skInfo.l,fmtInt(tot.sk),"Stk",skInfo.art||"",""]);
     rows.push([p++,"Endkappen / Seilhülsen",fmtInt(tot.endkappen),"Stk","","je Seilende (Anfang + Ende jedes Seils)"]);
+    rows.push([]);
+
+    // Injektionsmörtel Multifix USF
+    const mfx=calcMultifix(d,tot.anker);
+    rows.push(["Injektionsmörtel Multifix USF","",`Verankerungsgrund: ${mfx.label}`,`${mfx.mlPer} ml/Anker`,"ABZ Z-21.8-2083 Tab. 8",""]);
+    rows.push([p++,"Erforderliche Mörtelmenge gesamt",fmtInt(mfx.totalMl),"ml","",`${fmtInt(tot.anker)} Anker × ${mfx.mlPer} ml`]);
+    rows.push([p++,MULTIFIX.sommer.l+" – Sommer",fmtInt(mfx.sommer280),"Kartuschen",MULTIFIX.sommer.id,"Kartusche min. +15 °C"]);
+    rows.push([p++,MULTIFIX.sommer420.l+" – Sommer (Alternative)",fmtInt(mfx.sommer420),"Kartuschen",MULTIFIX.sommer420.id,"Großgebinde"]);
+    rows.push([p++,MULTIFIX.winter.l+" – Winter",fmtInt(mfx.winter300),"Kartuschen",MULTIFIX.winter.id,"Kartusche bis −20 °C / Kaltwetter"]);
+    rows.push([p++,MULTIFIX.mischduese.l,fmtInt(Math.max(mfx.sommer280,mfx.winter300)),"Stk",MULTIFIX.mischduese.id,"je Kartusche"]);
+    if(mfx.siebhuelse) rows.push([p++,MULTIFIX.siebhuelse.l,fmtInt(mfx.siebAnzahl),"Stk",MULTIFIX.siebhuelse.id||"auf Anfrage","je Anker bei Lochstein"]);
     rows.push([]);
 
     // Per-facade / per-greening-rect breakdown
