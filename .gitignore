@@ -11,6 +11,7 @@ dist
 /public/Vorbemessung_Deutschland/
 /public/Vorbemessung_Oesterreich/
 /public/Multifix USF/
+/public/Zusatzartikel/
 /public/*.pdf
 /public/*.xlsx
 /public/*.xlsm

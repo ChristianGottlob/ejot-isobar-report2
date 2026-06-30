@@ -102,7 +102,7 @@ const MULTIFIX={
   sommer420:{id:"9571001420",l:"Mörtelkartusche Multifix USF 420 ml",ml:420},
   winter:   {id:"9571000300",l:"Mörtelkartusche Multifix USF Winter 300 ml",ml:300},
   mischduese:{id:"9570040141",l:"Mischdüse USF"},
-  siebhuelse:{id:"",l:"Siebhülse SH 25 (für Lochstein)"},
+  siebhuelse:{id:"8779100025",l:"Iso-Bar Siebhülse 25 × 100 Stahl (Lochstein)"},
 };
 // Loch-/Hohlsteine → Siebhülse SH 25 + 45 ml; übrige Steine = Vollstein (30 ml).
 const STEIN_LOCH={hbl:true,ksl:true,hlz1:true,hlz2:true,vollziegel:false,ks_vollstein:false,lbv:false,pp:false};
@@ -132,6 +132,40 @@ function calcMultifix(d,totalAnker){
     siebhuelse:cat==="lochstein",siebAnzahl:cat==="lochstein"?totalAnker:0,
     sommer280:cart(MULTIFIX.sommer.ml),sommer420:cart(MULTIFIX.sommer420.ml),winter300:cart(MULTIFIX.winter.ml)};
 }
+
+// ─── Iso-Bar ECO – Beschaffung & Zubehör (EJOT-Artikelnummern, Preisliste) ──
+// Produktbild-Thumbnails liegen unter public/zubehoer/<img>.png.
+const ECO_SET_LEN=[200,260,320,380];     // als Komplett-Set verfügbare Längen
+// Länge [mm] aus d.produkt (z. B. "eco260") oder aus dem SET-Katalog ableiten.
+function ecoLaenge(d){
+  const m=String(d.produkt||"").match(/(\d{3})/);
+  if(m) return parseInt(m[1],10);
+  const s=SETS.find(x=>x.id===d.produkt); return s?s.len:260;
+}
+// Hauptartikel des Iso-Bar ECO je Beschaffungsart.
+function isoBarEcoArticle(L,beschaffung){
+  const code=String(L).padStart(3,"0");
+  if(beschaffung==="set"&&ECO_SET_LEN.includes(L))
+    return {nr:`8779${code}110`,l:`SET EJOT Iso-Bar ECO ${L}`,img:"iso-bar-eco-set",
+      lieferumfang:"GFK-Stab M12 · Setzhilfe · U-Scheibe Ø60 · Mischdüsenverl. 200 mm · Siebhülse 25×100"};
+  return {nr:`8779${code}120`,l:`Iso-Bar ECO ${L} (Einzelstab)`,img:"iso-bar-eco-stab",
+    lieferumfang:`GFK-Stab M12 · Setzhilfe · U-Scheibe Ø60 · Mischdüsenverl. ${L>=390?"500":"200"} mm`};
+}
+const ADAPTER={
+  "95": {nr:"8779095700",l:"Iso-Bar ECO Adapter 95 mm", img:"adapter"},
+  "150":{nr:"8779150700",l:"Iso-Bar ECO Adapter 150 mm",img:"adapter"},
+};
+const ZUB_SIEBHUELSE={nr:"8779100025",l:"Iso-Bar Siebhülse 25 × 100 Stahl",img:"siebhuelse"};
+// Optionales Zubehör/Werkzeug (Checkliste).  werkzeug=true → 1× je Baustelle.
+const ZUBEHOER=[
+  {key:"schrumpfschlauch",nr:"8779888007",l:"Iso-Bar ECO Seilabdeck-Schrumpfschlauch",img:"",            hint:"bei Bedarf, je Seilende"},
+  {key:"klettersprosse",  nr:"8779888004",l:"Iso-Bar ECO Klettersprosse",            img:"klettersprosse", hint:"bei Bedarf"},
+  {key:"drahtseilschere", nr:"8779888991",l:"Drahtseilschere",                       img:"drahtseilschere",werkzeug:true,hint:"Werkzeug · 1× je Baustelle"},
+  {key:"reinigungsbuerste",nr:"9150300014",l:"EJOT Reinigungsbürste 14",             img:"reinigungsbuerste",werkzeug:true,hint:"Bohrlochreinigung"},
+  {key:"ausblaspumpe",    nr:"9150300000",l:"EJOT Ausblaspumpe",                      img:"ausblaspumpe",  werkzeug:true,hint:"Bohrlochreinigung"},
+  {key:"auspresspistole", nr:"9570010345",l:"Auspresspistole 345 ml",               img:"auspresspistole",werkzeug:true,hint:"für Mörtelkartusche"},
+  {key:"bohrer",          nr:"8779226200",l:"Iso-Bar Bohrer 2-S Ø26/250-200",       img:"bohrer",        werkzeug:true,hint:"Hammerbohrer (Lochstein)"},
+];
 
 // ─── Verankerungsgründe (gem. Z-21.8-2083) ──────────────
 const UNTERGRUENDE=[
@@ -1027,7 +1061,7 @@ function AnlagenSection({d,usable}){
   </div>);
 }
 
-function MaterialSection({d,mat}){
+function MaterialSection({d,mat,setD}){
   const fassaden=d.fassaden||[{name:"Fassade 1",breite:d.fassadenlaenge||"10",hoehe:d.fassadenhoehe||"6"}];
   const glh=pf(d.LH)||.9,glv=pf(d.LV)||.9;
   const f0=fassaden[0]||{};
@@ -1053,17 +1087,71 @@ function MaterialSection({d,mat}){
   const setInfo=SETS.find(s=>s.id===d.produkt);
   const skInfo=SEILKREUZE.find(s=>s.id===matSK);
   const mfx=calcMultifix(d,totalAnker);   // Injektionsmörtel-Bedarf
+
+  // ── Beschaffung & Optionen ──
+  const beschaffung=d.mat_beschaffung||"set";   // "set" | "einzel"
+  const L=ecoLaenge(d);
+  const setVerfuegbar=ECO_SET_LEN.includes(L);
+  const effBeschaffung=(beschaffung==="set"&&setVerfuegbar)?"set":"einzel";
+  const adapterKey=d.mat_adapter||"95";
+  const bilder=!!d.mat_bilder;
+  const eco=isoBarEcoArticle(L,effBeschaffung);
+  const lochstein=mfx.cat==="lochstein";
+  const skImg={sk90k:"seilkreuz-90",skverst:"seilkreuz-verstellbar",sk90a4:"seilkreuz-90-a4"}[matSK];
+
+  // Stückliste-Positionen: {bez,menge,einheit,art,hint,img}
   const items=[];
-  items.push([setInfo?setInfo.l:"EJOT Iso-Bar ECO (Ankerpunkt)",fmtInt(totalAnker),"Stk",setInfo?`Art. ${setInfo.art}`:""]);
-  if(anyV) items.push([`Seil Edelstahl V4A ø4mm – vertikal`,fmtDec(totalSeilV,1),"m",`${fassaden.length>1?"alle Fassaden kumuliert":"vertikal"}`]);
-  if(anyH) items.push([`Seil Edelstahl V4A ø4mm – horizontal`,fmtDec(totalSeilH,1),"m",`${fassaden.length>1?"alle Fassaden kumuliert":"horizontal"}`]);
-  if(anyD) items.push(["Seil Edelstahl V4A ø4mm – diagonal",fmtDec(totalSeilD,1),"m","2× pro Feld"]);
-  items.push(["Seil gesamt (alle Richtungen)",fmtDec(totalSeilGes,1),"m","inkl. Verschnitt ca. +10 %"]);
-  if(totalSK>0&&skInfo) items.push([`${skInfo.l}`,fmtInt(totalSK),"Stk",skInfo.art?`Art. ${skInfo.art}`:"alle Fassaden"]);
-  items.push(["Endkappen / Seilhülsen",fmtInt(totalEndkappen),"Stk","je Seilende (Anfang + Ende jedes Seils)"]);
+  const push=(bez,menge,einheit,art,hint,img)=>items.push({bez,menge,einheit,art,hint,img:bilder?img:""});
+  push(eco.l,fmtInt(totalAnker),"Stk",eco.nr,eco.lieferumfang,eco.img);
+  if(effBeschaffung==="einzel"){
+    const ad=ADAPTER[adapterKey];
+    push(ad.l,fmtInt(totalAnker),"Stk",ad.nr,"Adapter je Iso-Bar (Einzelbestellung)",ad.img);
+    if(lochstein) push(ZUB_SIEBHUELSE.l,fmtInt(totalAnker),"Stk",ZUB_SIEBHUELSE.nr,"je Anker bei Lochstein",ZUB_SIEBHUELSE.img);
+  }
+  if(anyV) push("Iso-Bar ECO Rundlitzenseil Ø4 mm – vertikal",fmtDec(totalSeilV,1),"m","8779888001",fassaden.length>1?"alle Fassaden kumuliert":"vertikal","");
+  if(anyH) push("Iso-Bar ECO Rundlitzenseil Ø4 mm – horizontal",fmtDec(totalSeilH,1),"m","8779888001","horizontal","");
+  if(anyD) push("Iso-Bar ECO Rundlitzenseil Ø4 mm – diagonal",fmtDec(totalSeilD,1),"m","8779888001","2× pro Feld","");
+  push("Rundlitzenseil gesamt (alle Richtungen)",fmtDec(totalSeilGes,1),"m","8779888001","inkl. Verschnitt ca. +10 %","seil");
+  if(totalSK>0&&skInfo) push(skInfo.l,fmtInt(totalSK),"Stk",skInfo.art||"","alle Fassaden",skImg);
+  push("Endkappen / Seilhülsen",fmtInt(totalEndkappen),"Stk","","je Seilende (Anfang + Ende jedes Seils)","");
+
+  // ── Optionales Zubehör/Werkzeug (Checkliste) ──
+  const zub=d.mat_zubehoer||{};
+  const zubItems=ZUBEHOER.filter(z=>zub[z.key]).map(z=>{
+    let menge="1";
+    if(!z.werkzeug){ menge=z.key==="schrumpfschlauch"?fmtInt(totalEndkappen):"n. B."; }
+    return {...z,menge};
+  });
+
+  const setKey=k=>v=>setD&&setD(x=>({...x,[k]:v}));
+  const toggleZub=k=>()=>setD&&setD(x=>({...x,mat_zubehoer:{...(x.mat_zubehoer||{}),[k]:!(x.mat_zubehoer||{})[k]}}));
 
   const showBreakdown=fassaden.length>1||anyFromPlan||facadeStats.some(f=>f.rects&&f.rects.length>1);
   return(<div style={{background:WH}}>
+    {/* OPTIONEN-LEISTE (nur im Tab; nicht im PDF) */}
+    {setD&&<div style={{borderBottom:`1px solid ${BD}`,background:BG,padding:"10px 16px",display:"flex",gap:18,flexWrap:"wrap",alignItems:"center"}}>
+      <div style={{display:"flex",gap:6,alignItems:"center"}}>
+        <span style={{fontSize:10.5,color:GY,fontWeight:600}}>Beschaffung:</span>
+        {[["set","Komplett-Set"],["einzel","Einzelkomponenten"]].map(([v,l])=>{
+          const disabled=v==="set"&&!setVerfuegbar;
+          const active=effBeschaffung===v;
+          return <button key={v} disabled={disabled} onClick={()=>setKey("mat_beschaffung")(v)}
+            title={disabled?`Set für ECO ${L} nicht verfügbar – nur 200/260/320/380`:""}
+            style={{padding:"5px 11px",fontSize:11,fontWeight:active?700:600,border:`1.5px solid ${active?R:BD}`,borderRadius:6,
+              cursor:disabled?"not-allowed":"pointer",opacity:disabled?.45:1,background:active?`${R}10`:WH,color:active?R:DK}}>{l}</button>;
+        })}
+      </div>
+      {effBeschaffung==="einzel"&&<div style={{display:"flex",gap:6,alignItems:"center"}}>
+        <span style={{fontSize:10.5,color:GY,fontWeight:600}}>Adapter:</span>
+        {["95","150"].map(a=>{const active=adapterKey===a;return <button key={a} onClick={()=>setKey("mat_adapter")(a)}
+          style={{padding:"5px 11px",fontSize:11,fontWeight:active?700:600,border:`1.5px solid ${active?R:BD}`,borderRadius:6,cursor:"pointer",background:active?`${R}10`:WH,color:active?R:DK}}>{a} mm</button>;})}
+      </div>}
+      <label style={{display:"flex",gap:6,alignItems:"center",fontSize:11,color:DK,fontWeight:600,cursor:"pointer"}}>
+        <input type="checkbox" checked={bilder} onChange={e=>setKey("mat_bilder")(e.target.checked)}/> Produktbilder
+      </label>
+      {!setVerfuegbar&&<span style={{fontSize:10,color:AM}}>ⓘ ECO {L} nur als Einzelkomponenten verfügbar (Set: 200/260/320/380).</span>}
+    </div>}
+
     {/* COVER PAGE: title + headline summary + Eingangswerte */}
     <div data-pdf-page="header" style={{borderTop:`3px solid ${R}`,padding:"16px 24px"}}>
       <PageHead title="Materialbedarfsermittlung" subtitle="Überschlägige Mengenermittlung auf Basis der Vorbemessung"/>
@@ -1101,7 +1189,7 @@ function MaterialSection({d,mat}){
               </>
             : <KV l="Gesamtfläche" v={fmtArea(totalArea)} b/>}
           <KV l="Fassaden" v={`${fassaden.length} Stk.`}/>
-          {setInfo&&<KV l="SET Produkt" v={setInfo.l} b/>}
+          <KV l="Produkt" v={`${eco.l} · ${eco.nr}`} b/>
         </div>
       </div>
 
@@ -1177,18 +1265,26 @@ function MaterialSection({d,mat}){
     {/* STÜCKLISTE page (always last) */}
     <div data-pdf-page="stueckliste" style={{borderTop:`6px solid ${BG}`,padding:"16px 24px"}}>
       <div style={{border:`1px solid ${RM}`,borderRadius:4,padding:12,marginBottom:14}}>
-        <div style={{fontWeight:700,fontSize:10.5,textTransform:"uppercase",letterSpacing:.5,marginBottom:8,color:R}}>Stückliste (überschlägig)</div>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:8,flexWrap:"wrap",gap:6}}>
+          <div style={{fontWeight:700,fontSize:10.5,textTransform:"uppercase",letterSpacing:.5,color:R}}>Stückliste (überschlägig)</div>
+          <span style={{fontSize:9.5,color:GY}}>Iso-Bar ECO als <strong style={{color:BK}}>{effBeschaffung==="set"?"Komplett-Set":"Einzelkomponenten"}</strong> · EJOT-Artikelnummern</span>
+        </div>
         <table style={{width:"100%",borderCollapse:"collapse",fontSize:11.5}}>
-          <thead><tr>{["Pos.","Bezeichnung","Menge","Einheit","Hinweis"].map(h=>
-            <th key={h} style={{background:BG,fontWeight:700,padding:"5px 8px",textAlign:"left",borderBottom:`1px solid ${BD}`,fontSize:10.5}}>{h}</th>)}</tr></thead>
+          <thead><tr>{["Pos.",...(bilder?[""]:[]),"Bezeichnung","Menge","Einheit","Artikel-Nr.","Hinweis"].map((h,i)=>
+            <th key={i} style={{background:BG,fontWeight:700,padding:"5px 8px",textAlign:"left",borderBottom:`1px solid ${BD}`,fontSize:10.5}}>{h}</th>)}</tr></thead>
           <tbody>
-            {items.map(([b,m,e,h],idx)=><tr key={idx}>
+            {items.map((it,idx)=><tr key={idx}>
               <td style={{padding:"4px 8px",borderBottom:`1px solid ${BD}`,fontWeight:700,color:R,width:30}}>{idx+1}</td>
-              <td style={{padding:"4px 8px",borderBottom:`1px solid ${BD}`}}>{b}</td>
-              <td style={{padding:"4px 8px",borderBottom:`1px solid ${BD}`,fontWeight:700,textAlign:"right"}}>{m}</td>
-              <td style={{padding:"4px 8px",borderBottom:`1px solid ${BD}`}}>{e}</td>
-              <td style={{padding:"4px 8px",borderBottom:`1px solid ${BD}`,fontSize:10,color:GL}}>{h}</td></tr>)}
-          </tbody></table></div>
+              {bilder&&<td style={{padding:"2px 8px",borderBottom:`1px solid ${BD}`,width:46}}>
+                {it.img?<img src={`/zubehoer/${it.img}.png`} alt="" style={{maxWidth:40,maxHeight:32,objectFit:"contain",display:"block"}}/>:null}</td>}
+              <td style={{padding:"4px 8px",borderBottom:`1px solid ${BD}`}}>{it.bez}</td>
+              <td style={{padding:"4px 8px",borderBottom:`1px solid ${BD}`,fontWeight:700,textAlign:"right"}}>{it.menge}</td>
+              <td style={{padding:"4px 8px",borderBottom:`1px solid ${BD}`}}>{it.einheit}</td>
+              <td style={{padding:"4px 8px",borderBottom:`1px solid ${BD}`,fontSize:10,fontFamily:"ui-monospace,Consolas,monospace"}}>{it.art}</td>
+              <td style={{padding:"4px 8px",borderBottom:`1px solid ${BD}`,fontSize:10,color:GL}}>{it.hint}</td></tr>)}
+          </tbody></table>
+        <div style={{marginTop:6,fontSize:9.5,color:GL}}>Lieferumfang {effBeschaffung==="set"?"Set":"Einzel"}: {eco.lieferumfang}.</div>
+      </div>
       {/* ── Injektionsmörtel Multifix USF ── */}
       <div data-pdf-page="stueckliste" style={{border:`1px solid ${RM}`,borderRadius:4,padding:12,marginBottom:14}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:8,flexWrap:"wrap",gap:6}}>
@@ -1220,6 +1316,30 @@ function MaterialSection({d,mat}){
           <span style={{display:"block"}}>• <strong>Multifix USF Winter</strong>: Umgebungstemperatur −20 … +10 °C, <strong>Kartuschentemperatur bis −20 °C</strong> → wenn die Kartusche nicht auf +15 °C gehalten werden kann (Kaltwetter, i. d. R. unter ca. +5 °C).</span>
           <span style={{display:"block",marginTop:2,color:GL}}>Mengen netto nach ABZ Tab. 8; Anmischverlust je Kartusche zusätzlich berücksichtigen. Bei Bohrlöchern tiefer als h_ef: +5 ml je 10 mm.</span>
         </div>
+      </div>
+
+      {/* ── Optionales Zubehör / Werkzeug (bei Bedarf) ── */}
+      <div data-pdf-page="stueckliste" style={{border:`1px solid ${BD}`,borderRadius:4,padding:12,marginBottom:14}}>
+        <div style={{fontWeight:700,fontSize:10.5,textTransform:"uppercase",letterSpacing:.5,color:R,marginBottom:8}}>Optionales Zubehör / Werkzeug (bei Bedarf)</div>
+        {setD&&<div style={{display:"flex",flexWrap:"wrap",gap:"4px 14px",marginBottom:zubItems.length?10:0,paddingBottom:zubItems.length?10:0,borderBottom:zubItems.length?`1px solid ${BD}`:"none"}}>
+          {ZUBEHOER.map(z=><label key={z.key} style={{display:"flex",gap:5,alignItems:"center",fontSize:10.5,color:DK,cursor:"pointer"}}>
+            <input type="checkbox" checked={!!zub[z.key]} onChange={toggleZub(z.key)}/> {z.l}
+          </label>)}
+        </div>}
+        {zubItems.length>0?<table style={{width:"100%",borderCollapse:"collapse",fontSize:11.5}}>
+          <thead><tr>{["Pos.",...(bilder?[""]:[]),"Bezeichnung","Menge","Einheit","Artikel-Nr.","Hinweis"].map((h,i)=>
+            <th key={i} style={{background:BG,fontWeight:700,padding:"5px 8px",textAlign:"left",borderBottom:`1px solid ${BD}`,fontSize:10.5}}>{h}</th>)}</tr></thead>
+          <tbody>
+            {zubItems.map((z,idx)=><tr key={z.key}>
+              <td style={{padding:"4px 8px",borderBottom:`1px solid ${BD}`,fontWeight:700,color:R,width:30}}>{idx+1}</td>
+              {bilder&&<td style={{padding:"2px 8px",borderBottom:`1px solid ${BD}`,width:46}}>{z.img?<img src={`/zubehoer/${z.img}.png`} alt="" style={{maxWidth:40,maxHeight:32,objectFit:"contain",display:"block"}}/>:null}</td>}
+              <td style={{padding:"4px 8px",borderBottom:`1px solid ${BD}`}}>{z.l}{z.werkzeug&&<span style={{fontSize:8.5,color:GL,marginLeft:6,background:BG,padding:"0 4px",borderRadius:3}}>Werkzeug</span>}</td>
+              <td style={{padding:"4px 8px",borderBottom:`1px solid ${BD}`,fontWeight:700,textAlign:"right"}}>{z.menge}</td>
+              <td style={{padding:"4px 8px",borderBottom:`1px solid ${BD}`}}>Stk</td>
+              <td style={{padding:"4px 8px",borderBottom:`1px solid ${BD}`,fontSize:10,fontFamily:"ui-monospace,Consolas,monospace"}}>{z.nr}</td>
+              <td style={{padding:"4px 8px",borderBottom:`1px solid ${BD}`,fontSize:10,color:GL}}>{z.hint}</td></tr>)}
+          </tbody></table>
+          :<div style={{fontSize:10,color:GL}}>{setD?"Oben anhaken, was zusätzlich benötigt wird – Werkzeuge i. d. R. 1× je Baustelle.":"Kein optionales Zubehör ausgewählt."}</div>}
       </div>
 
       <div style={{padding:10,background:"#FFF8E1",borderRadius:4,border:`1px solid ${AM}40`,fontSize:9.5,color:DK}}>
@@ -2046,17 +2166,26 @@ export default function App(){
     // Headline summary
     rows.push(["Position","Bezeichnung","Menge","Einheit","Artikelnummer","Hinweis"]);
     let p=1;
-    rows.push([p++,setInfo?setInfo.l:"EJOT Iso-Bar ECO (Ankerpunkt)",fmtInt(tot.anker),"Stk",setInfo?.art||"",""]);
-    if(tot.sV>0) rows.push([p++,"Seil Edelstahl V4A ø4mm – vertikal",fmtDec(tot.sV,1),"m","",""]);
-    if(tot.sH>0) rows.push([p++,"Seil Edelstahl V4A ø4mm – horizontal",fmtDec(tot.sH,1),"m","",""]);
-    if(tot.sD>0) rows.push([p++,"Seil Edelstahl V4A ø4mm – diagonal",fmtDec(tot.sD,1),"m","",""]);
-    rows.push([p++,"Seil gesamt (alle Richtungen)",fmtDec(totalSeilGes,1),"m","","inkl. ca. +10 % Verschnitt"]);
+    // Iso-Bar ECO – Beschaffung (Set oder Einzelkomponenten)
+    const L=ecoLaenge(d);
+    const effBeschaffung=((d.mat_beschaffung||"set")==="set"&&ECO_SET_LEN.includes(L))?"set":"einzel";
+    const eco=isoBarEcoArticle(L,effBeschaffung);
+    const mfx=calcMultifix(d,tot.anker);
+    rows.push([p++,eco.l,fmtInt(tot.anker),"Stk",eco.nr,eco.lieferumfang]);
+    if(effBeschaffung==="einzel"){
+      const ad=ADAPTER[d.mat_adapter||"95"];
+      rows.push([p++,ad.l,fmtInt(tot.anker),"Stk",ad.nr,"Adapter je Iso-Bar (Einzelbestellung)"]);
+      if(mfx.cat==="lochstein") rows.push([p++,ZUB_SIEBHUELSE.l,fmtInt(tot.anker),"Stk",ZUB_SIEBHUELSE.nr,"je Anker bei Lochstein"]);
+    }
+    if(tot.sV>0) rows.push([p++,"Iso-Bar ECO Rundlitzenseil Ø4 mm – vertikal",fmtDec(tot.sV,1),"m","8779888001",""]);
+    if(tot.sH>0) rows.push([p++,"Iso-Bar ECO Rundlitzenseil Ø4 mm – horizontal",fmtDec(tot.sH,1),"m","8779888001",""]);
+    if(tot.sD>0) rows.push([p++,"Iso-Bar ECO Rundlitzenseil Ø4 mm – diagonal",fmtDec(tot.sD,1),"m","8779888001",""]);
+    rows.push([p++,"Rundlitzenseil gesamt (alle Richtungen)",fmtDec(totalSeilGes,1),"m","8779888001","inkl. ca. +10 % Verschnitt"]);
     if(tot.sk>0&&skInfo) rows.push([p++,skInfo.l,fmtInt(tot.sk),"Stk",skInfo.art||"",""]);
     rows.push([p++,"Endkappen / Seilhülsen",fmtInt(tot.endkappen),"Stk","","je Seilende (Anfang + Ende jedes Seils)"]);
     rows.push([]);
 
     // Injektionsmörtel Multifix USF
-    const mfx=calcMultifix(d,tot.anker);
     rows.push(["Injektionsmörtel Multifix USF","",`Verankerungsgrund: ${mfx.label}`,`${mfx.mlPer} ml/Anker`,"ABZ Z-21.8-2083 Tab. 8",""]);
     rows.push([p++,"Erforderliche Mörtelmenge gesamt",fmtInt(mfx.totalMl),"ml","",`${fmtInt(tot.anker)} Anker × ${mfx.mlPer} ml`]);
     rows.push([p++,MULTIFIX.sommer.l+" – Sommer",fmtInt(mfx.sommer280),"Kartuschen",MULTIFIX.sommer.id,"Kartusche min. +15 °C"]);
@@ -2065,6 +2194,18 @@ export default function App(){
     rows.push([p++,MULTIFIX.mischduese.l,fmtInt(Math.max(mfx.sommer280,mfx.winter300)),"Stk",MULTIFIX.mischduese.id,"je Kartusche"]);
     if(mfx.siebhuelse) rows.push([p++,MULTIFIX.siebhuelse.l,fmtInt(mfx.siebAnzahl),"Stk",MULTIFIX.siebhuelse.id||"auf Anfrage","je Anker bei Lochstein"]);
     rows.push([]);
+
+    // Optionales Zubehör / Werkzeug (angehakte Positionen)
+    const zub=d.mat_zubehoer||{};
+    const zubSel=ZUBEHOER.filter(z=>zub[z.key]);
+    if(zubSel.length){
+      rows.push(["Optionales Zubehör / Werkzeug (bei Bedarf)"]);
+      zubSel.forEach(z=>{
+        const menge=z.werkzeug?"1":(z.key==="schrumpfschlauch"?fmtInt(tot.endkappen):"n. B.");
+        rows.push([p++,z.l,menge,"Stk",z.nr,z.werkzeug?"Werkzeug · "+z.hint:z.hint]);
+      });
+      rows.push([]);
+    }
 
     // Per-facade / per-greening-rect breakdown
     rows.push(["Aufschlüsselung je Begrünungsfläche"]);
@@ -2484,7 +2625,7 @@ export default function App(){
 
 {/* ═══ MATERIAL ═══ */}
 {step==="material"&&<div style={{borderRadius:8,boxShadow:"0 2px 12px rgba(0,0,0,.08)",overflow:"hidden"}}>
-  <MaterialSection d={d} mat={mat}/>
+  <MaterialSection d={d} mat={mat} setD={setD}/>
 </div>}
       </div>
 
