@@ -10,6 +10,7 @@
     "test": "node --test src/**/*.test.js"
   },
   "dependencies": {
+    "@zumer/snapdom": "^2.12.9",
     "html2canvas": "^1.4.1",
     "jspdf": "^2.5.2",
     "pdfjs-dist": "^4.7.76",

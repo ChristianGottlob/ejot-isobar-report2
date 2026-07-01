@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useMemo, useEffect } from "react";
-import html2canvas from "html2canvas";
+import { snapdom } from "@zumer/snapdom";
 import { jsPDF } from "jspdf";
 import { extractPdfText, buildDocument, loadPlanImage, FIELD_LABELS } from "./pdfExtract";
 import RealisticFacade from "./RealisticFacade";
@@ -2076,16 +2076,17 @@ export default function App(){
   const exportPdf=useCallback(async(sectionId,ref,filename)=>{
     if(!ref.current)return;
     setExporting(sectionId);
+    const SCALE=2;   // scale 2 statt 3: ~44 % Speicher, für Text/Linien scharf genug
+    const root=ref.current;
+    const outerWrapper=root.closest('[data-pdf-offscreen]');
+    const origOuterStyle=outerWrapper?outerWrapper.style.cssText:"";
+    const origParentStyle=root.parentElement.style.cssText;
     try{
-      const root=ref.current;
-      const outerWrapper=root.closest('[data-pdf-offscreen]');
-      const origOuterStyle=outerWrapper?outerWrapper.style.cssText:"";
-      const origParentStyle=root.parentElement.style.cssText;
       if(outerWrapper) outerWrapper.style.cssText="position:absolute;left:0;top:0;width:880px;z-index:9999;overflow:visible;pointer-events:none;";
       root.parentElement.style.cssText="width:880px;background:#FFF;font-family:'Segoe UI',system-ui,sans-serif;";
       root.style.width="880px";
       root.style.background="#FFF";
-      await new Promise(r=>setTimeout(r,500));
+      await new Promise(r=>setTimeout(r,200));
 
       const pageEls=Array.from(root.querySelectorAll("[data-pdf-page]"));
       const captureTargets=pageEls.length>0?pageEls:[root];
@@ -2096,11 +2097,10 @@ export default function App(){
       const pdf=new jsPDF({orientation:"portrait",unit:"mm",format:"a4",compress:true});
       let firstPage=true;
 
-      // scale 2 statt 3: ~44 % des Speichers, für Text/Linien immer noch scharf.
-      // removeContainer:true verhindert, dass sich html2canvas-Klone im DOM stapeln.
-      const SCALE=2;
       for(const el of captureTargets){
-        const canvas=await html2canvas(el,{scale:SCALE,useCORS:true,backgroundColor:"#FFFFFF",logging:false,windowWidth:920,imageTimeout:0,removeContainer:true,scrollX:0,scrollY:0});
+        // snapdom rendert nativ über SVG-foreignObject → robust bei Formeln/
+        // Subscripts und Grafiken (html2canvas hing/stürzte hier ab) und schneller.
+        const canvas=await snapdom.toCanvas(el,{scale:SCALE,backgroundColor:"#FFFFFF"});
         const imgW=canvas.width,imgH=canvas.height;
         const ratio=contentW/imgW;
         const contentH=imgH*ratio;
@@ -2130,11 +2130,13 @@ export default function App(){
         await new Promise(r=>setTimeout(r,0));     // Event-Loop atmen lassen → GC kann greifen
       }
 
-      if(outerWrapper) outerWrapper.style.cssText=origOuterStyle;
-      root.parentElement.style.cssText=origParentStyle;
       pdf.save(filename);
     }catch(err){console.error("PDF export error:",err);alert("PDF-Export fehlgeschlagen: "+err.message);}
-    finally{setExporting(null);}
+    finally{
+      if(outerWrapper) outerWrapper.style.cssText=origOuterStyle;
+      root.parentElement.style.cssText=origParentStyle;   // Offscreen-Report wieder verstecken (auch im Fehlerfall)
+      setExporting(null);
+    }
   },[]);
 
   const exportAll=useCallback(async()=>{
