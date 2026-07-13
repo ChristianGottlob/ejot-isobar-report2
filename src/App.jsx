@@ -1737,7 +1737,7 @@ function StatikSection({ d }){
   const { res, err, inp, atWind, atStadt, isMW, isLin, isAT, land, untergrund, system } = runVorbemessung(d);
 
   const Block = ({ title, children, note }) => (
-    <div style={{ marginBottom: 16, breakInside: "avoid" }}>
+    <div style={{ marginBottom: 11, breakInside: "avoid" }}>
       <div style={{ fontSize: 11, fontWeight: 800, color: R, textTransform: "uppercase", letterSpacing: .5,
         borderBottom: `2px solid ${R}`, paddingBottom: 3, marginBottom: 8 }}>{title}</div>
       {children}
@@ -1747,11 +1747,11 @@ function StatikSection({ d }){
   // Eine Zeile: Bezeichnung · (Formel/Wert) · Wert · Einheit · Quelle
   const Row = ({ l, f, v, u, src, strong }) => (
     <tr style={{ borderBottom: `1px solid ${BD}` }}>
-      <td style={{ padding: "3px 6px", fontSize: 10.5, color: DK, fontWeight: strong ? 700 : 500 }}><Sub>{l}</Sub></td>
-      <td style={{ padding: "3px 6px", fontSize: 9.5, color: GY, fontFamily: "ui-monospace, Consolas, monospace" }}><Sub>{f || ""}</Sub></td>
-      <td style={{ padding: "3px 6px", fontSize: 10.5, color: BK, fontWeight: 700, textAlign: "right", whiteSpace: "nowrap" }}>{v}</td>
-      <td style={{ padding: "3px 6px", fontSize: 9.5, color: GL }}>{u || ""}</td>
-      <td style={{ padding: "3px 6px", fontSize: 8.5, color: GL }}>{src || ""}</td>
+      <td style={{ padding: "2px 6px", fontSize: 10.5, color: DK, fontWeight: strong ? 700 : 500 }}><Sub>{l}</Sub></td>
+      <td style={{ padding: "2px 6px", fontSize: 9.5, color: GY, fontFamily: "ui-monospace, Consolas, monospace" }}><Sub>{f || ""}</Sub></td>
+      <td style={{ padding: "2px 6px", fontSize: 10.5, color: BK, fontWeight: 700, textAlign: "right", whiteSpace: "nowrap" }}>{v}</td>
+      <td style={{ padding: "2px 6px", fontSize: 9.5, color: GL }}>{u || ""}</td>
+      <td style={{ padding: "2px 6px", fontSize: 8.5, color: GL }}>{src || ""}</td>
     </tr>
   );
   const Table = ({ children }) => (
@@ -1762,11 +1762,11 @@ function StatikSection({ d }){
     const ok = nw.ok, col = ok ? GN : R;
     return (
       <tr style={{ borderBottom: `1px solid ${BD}` }}>
-        <td style={{ padding: "3px 6px", fontSize: 10.5, color: DK, fontWeight: 600 }}><Sub>{l}</Sub></td>
-        <td style={{ padding: "3px 6px", fontSize: 9.5, color: GY, fontFamily: "ui-monospace, Consolas, monospace" }}><Sub>{f}</Sub></td>
-        <td style={{ padding: "3px 6px", fontSize: 11, color: col, fontWeight: 800, textAlign: "right" }}>{fm(nw.wert)}{nw.einheit ? " " + nw.einheit : ""}</td>
-        <td style={{ padding: "3px 6px", fontSize: 9.5, color: GY }}>≤ {nw.grenze}{nw.einheit ? " " + nw.einheit : ""}</td>
-        <td style={{ padding: "3px 6px", fontSize: 10, color: col, fontWeight: 800, textAlign: "center" }}>{ok ? "✓" : "✗ n.i.O."}</td>
+        <td style={{ padding: "2px 6px", fontSize: 10.5, color: DK, fontWeight: 600 }}><Sub>{l}</Sub></td>
+        <td style={{ padding: "2px 6px", fontSize: 9.5, color: GY, fontFamily: "ui-monospace, Consolas, monospace" }}><Sub>{f}</Sub></td>
+        <td style={{ padding: "2px 6px", fontSize: 11, color: col, fontWeight: 800, textAlign: "right" }}>{fm(nw.wert)}{nw.einheit ? " " + nw.einheit : ""}</td>
+        <td style={{ padding: "2px 6px", fontSize: 9.5, color: GY }}>≤ {nw.grenze}{nw.einheit ? " " + nw.einheit : ""}</td>
+        <td style={{ padding: "2px 6px", fontSize: 10, color: col, fontWeight: 800, textAlign: "center" }}>{ok ? "✓" : "✗ n.i.O."}</td>
       </tr>
     );
   };
@@ -1777,7 +1777,7 @@ function StatikSection({ d }){
   const sysLabel = `${isLin ? "Linear (Seil)" : "Raster (Gitter)"} · ${isMW ? "Mauerwerk" : "Beton"} · ${isAT ? "Österreich (ÖNORM)" : "Deutschland (DIN)"}`;
 
   return (
-    <div style={{ background: WH, padding: "26px 30px", fontFamily: "'Segoe UI',system-ui,sans-serif", color: BK }}>
+    <div style={{ background: WH, padding: "20px 26px", fontFamily: "'Segoe UI',system-ui,sans-serif", color: BK }}>
       <PageHead title="Vorbemessung – Statik" subtitle="Iso-Bar ECO · statischer Nachweis (Vorbemessung)" />
 
       {/* Kopf */}
@@ -1965,6 +1965,52 @@ function StatikSection({ d }){
   );
 }
 
+// ─── Seitenumbrüche für den PDF-Export ────────────────────────────────
+// Statt den gerenderten Canvas blind alle `pageHpx` Pixel zu zerschneiden
+// (das zerteilte Tabellenzeilen und ließ Überschriften allein am Seitenfuß),
+// werden hier Schnittpunkte an echten Elementgrenzen bestimmt:
+//   • "Atome" = größte Elemente, die noch auf eine Seite passen. Ein Block
+//     (Überschrift + zugehörige Tabelle) bleibt damit zusammen.
+//   • Ist ein Element höher als eine Seite, wird in seine Kinder abgestiegen
+//     (Tabellenzeilen), sodass höchstens zwischen Zeilen getrennt wird.
+// Gepackt wird gierig: jede Seite nimmt so viele Atome auf, wie hineinpassen —
+// es wird also nur umgebrochen, wenn der nächste Block nicht mehr passt.
+// (Bewusst KEINE erzwungenen Umbrüche an `data-pdf-page`: die ließen halbleere
+//  Seiten entstehen. Blöcke bleiben trotzdem immer am Stück.)
+function pdfPageCuts(root,pageHpx){
+  const rootTop=root.getBoundingClientRect().top;
+  const totalH=root.getBoundingClientRect().height;
+  const rel=el=>{const r=el.getBoundingClientRect();return{top:r.top-rootTop,bottom:r.bottom-rootTop};};
+
+  const atoms=[];
+  const visit=el=>{
+    const {top,bottom}=rel(el);
+    const h=bottom-top;
+    if(h<=0)return;                                    // unsichtbar → ignorieren
+    if(h<=pageHpx||!el.children.length){atoms.push({top,bottom});return;}
+    for(const c of el.children)visit(c);               // zu hoch → feiner auflösen
+  };
+  for(const c of root.children)visit(c);
+  atoms.sort((a,b)=>a.top-b.top||a.bottom-b.bottom);
+
+  const cuts=[0];
+  let start=0;
+  // liefert true, wenn wirklich ein Schnitt gesetzt wurde (garantiert Fortschritt)
+  const cut=y=>{
+    if(y<=start+0.5||y>=totalH-0.5)return false;
+    cuts.push(y);start=y;return true;
+  };
+  for(const a of atoms){
+    if(a.bottom-start>pageHpx){
+      if(a.top>start+0.5)cut(a.top);                   // Seite vor diesem Atom beenden
+      // Atom höher als eine Seite → hart trennen; bricht ab, sobald kein Schnitt mehr möglich
+      while(a.bottom-start>pageHpx){ if(!cut(start+pageHpx))break; }
+    }
+  }
+  cuts.push(totalH);
+  return [...new Set(cuts.map(v=>Math.max(0,Math.round(v))))].sort((x,y)=>x-y);
+}
+
 export default function App(){
   const[step,setStep]=useState("upload");
   const[d,setD]=useState({});
@@ -2088,47 +2134,41 @@ export default function App(){
       root.style.background="#FFF";
       await new Promise(r=>setTimeout(r,200));
 
-      const pageEls=Array.from(root.querySelectorAll("[data-pdf-page]"));
-      const captureTargets=pageEls.length>0?pageEls:[root];
-
-      const pdfW=210,margin=6,contentW=pdfW-2*margin;
+      const pdfW=210,margin=8,contentW=pdfW-2*margin;
       const pdfH=297;
       const pageContentH=pdfH-2*margin;
       const pdf=new jsPDF({orientation:"portrait",unit:"mm",format:"a4",compress:true});
-      let firstPage=true;
 
-      for(const el of captureTargets){
-        // snapdom rendert nativ über SVG-foreignObject → robust bei Formeln/
-        // Subscripts und Grafiken (html2canvas hing/stürzte hier ab) und schneller.
-        const canvas=await snapdom.toCanvas(el,{scale:SCALE,backgroundColor:"#FFFFFF"});
-        const imgW=canvas.width,imgH=canvas.height;
-        const ratio=contentW/imgW;
-        const contentH=imgH*ratio;
-        const totalPages=Math.max(1,Math.ceil(contentH/pageContentH-0.02));
-        if(totalPages===1){
-          // Passt auf eine Seite → Canvas direkt einbetten (kein zweiter Riesen-Canvas).
-          if(!firstPage) pdf.addPage();
-          firstPage=false;
-          pdf.addImage(canvas,"PNG",margin,margin,contentW,contentH,"","FAST");
-        }else{
-          for(let page=0;page<totalPages;page++){
-            if(!firstPage) pdf.addPage();
-            firstPage=false;
-            const srcY=page*pageContentH/ratio;
-            const srcH=Math.min(pageContentH/ratio,imgH-srcY);
-            const destH=srcH*ratio;
-            const tmpCanvas=document.createElement("canvas");
-            tmpCanvas.width=imgW;tmpCanvas.height=Math.round(srcH);
-            const ctx=tmpCanvas.getContext("2d");
-            ctx.fillStyle="#FFFFFF";ctx.fillRect(0,0,tmpCanvas.width,tmpCanvas.height);
-            ctx.drawImage(canvas,0,Math.round(srcY),imgW,Math.round(srcH),0,0,imgW,Math.round(srcH));
-            pdf.addImage(tmpCanvas,"JPEG",margin,margin,contentW,destH,"","FAST");
-            tmpCanvas.width=tmpCanvas.height=0;   // Speicher der Slice-Leinwand freigeben
-          }
-        }
-        canvas.width=canvas.height=0;             // Speicher der Capture-Leinwand freigeben
-        await new Promise(r=>setTimeout(r,0));     // Event-Loop atmen lassen → GC kann greifen
+      // Maßstab DOM-Pixel → mm und daraus die nutzbare Seitenhöhe in DOM-Pixeln.
+      const rootWpx=root.getBoundingClientRect().width||880;
+      const mmPerPx=contentW/rootWpx;
+      const pageHpx=pageContentH/mmPerPx;
+
+      // Schnittpunkte an Blockgrenzen (nie mitten durch Zeile/Überschrift/Grafik).
+      const cuts=pdfPageCuts(root,pageHpx);
+
+      // Einmal die komplette Sektion rendern, danach an den Schnittpunkten trennen.
+      const canvas=await snapdom.toCanvas(root,{scale:SCALE,backgroundColor:"#FFFFFF"});
+      const pxScale=canvas.width/rootWpx;         // Canvas-Pixel je DOM-Pixel (≈ SCALE)
+
+      for(let i=0;i<cuts.length-1;i++){
+        const y0=cuts[i],y1=cuts[i+1];
+        const hPx=y1-y0;
+        if(hPx<=1) continue;
+        if(i>0) pdf.addPage();
+        const sy=Math.round(y0*pxScale);
+        const sh=Math.min(Math.round(hPx*pxScale),canvas.height-sy);
+        if(sh<=0) continue;
+        const tmp=document.createElement("canvas");
+        tmp.width=canvas.width;tmp.height=sh;
+        const ctx=tmp.getContext("2d");
+        ctx.fillStyle="#FFFFFF";ctx.fillRect(0,0,tmp.width,tmp.height);
+        ctx.drawImage(canvas,0,sy,canvas.width,sh,0,0,canvas.width,sh);
+        pdf.addImage(tmp,"PNG",margin,margin,contentW,(sh/pxScale)*mmPerPx,"","FAST");
+        tmp.width=tmp.height=0;                   // Slice-Leinwand freigeben
+        await new Promise(r=>setTimeout(r,0));    // Event-Loop atmen lassen
       }
+      canvas.width=canvas.height=0;               // Capture-Leinwand freigeben
 
       pdf.save(filename);
     }catch(err){console.error("PDF export error:",err);alert("PDF-Export fehlgeschlagen: "+err.message);}
