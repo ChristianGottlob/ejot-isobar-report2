@@ -2130,6 +2130,9 @@ export default function App(){
   const[, forceTick]=useState(0);                 // re-render every 15s so fmtAgo stays fresh
   const fRef=useRef(null);
   const hydratedRef=useRef(false);                // skip auto-save until after initial hydrate
+  const docEpochRef=useRef(0);                    // zählt hoch bei Neu/Import → verwaiste Restores verwerfen
+  const saveSeqRef=useRef(0);                     // nur der jüngste Save darf den Status setzen
+  const idbVersionRef=useRef(0);                  // erwartete IDB-Version (optimistische Nebenläufigkeit)
   const setter=k=>v=>setD(x=>({...x,[k]:v}));
   const usable=useMemo(()=>FLL_PLANTS.filter(p=>p.lk!==null),[]);
   const maxNw=Math.max(...[d.nw_zug,d.nw_druck,d.nw_quer,d.nw_kombi].map(v=>pf(v)||0),0);
@@ -2140,6 +2143,8 @@ export default function App(){
 
   const ingestFile=useCallback(async(file)=>{
     if(!file)return;
+    docEpochRef.current+=1;
+    saveSeqRef.current+=1;
     setParsing(true); setParseErr(""); setParseInfo(null);
     try{
       setPdfN(file.name);
@@ -2160,17 +2165,27 @@ export default function App(){
   // ─── AUTO-SAVE / RESTORE (IndexedDB) ─────────────────────
   // On mount: try to restore the last document.  If found and non-empty,
   // jump straight to the edit step and show a small banner.
-  useEffect(()=>{(async()=>{
-    const saved=await loadDocument();
-    if(saved&&saved.d&&hasContent(saved.d)){
-      setD(saved.d);
-      setStep(saved.step==="upload"?"edit":(saved.step||"edit"));
-      if(saved.pdfN) setPdfN(saved.pdfN);
-      setLastSaved(saved.savedAt||Date.now());
-      setRestored(true);
-    }
-    hydratedRef.current=true;
-  })();},[]);
+  useEffect(()=>{
+    let active=true;
+    const restoreEpoch=docEpochRef.current;
+    (async()=>{
+      const savedRecord=await loadDocument();
+      if(!active) return;
+      idbVersionRef.current=savedRecord?.version??0;
+      const saved=savedRecord?.payload;
+      // Zwischenzeitlich "Neu"/Import? Dann den alten Stand nicht mehr einspielen.
+      if(restoreEpoch!==docEpochRef.current){hydratedRef.current=true;return;}
+      if(saved&&saved.d&&hasContent(saved.d)){
+        setD(saved.d);
+        setStep(saved.step==="upload"?"edit":(saved.step||"edit"));
+        if(saved.pdfN) setPdfN(saved.pdfN);
+        setLastSaved(saved.savedAt||Date.now());
+        setRestored(true);
+      }
+      hydratedRef.current=true;
+    })();
+    return()=>{active=false;};
+  },[]);
   // Debounced save: 1.2 s after the last change to {d, step, pdfN}.
   // The cleanup callback cancels the timer if another change comes in,
   // so we never write more often than once per debounce window.
@@ -2178,9 +2193,13 @@ export default function App(){
     if(!hydratedRef.current) return;
     if(step==="upload"||!hasContent(d)) return;
     setSaving(true);
+    const saveSeq=++saveSeqRef.current;
+    const expectedVersion=idbVersionRef.current;
     const handle=setTimeout(async()=>{
-      const ok=await saveDocument({d,step,pdfN,savedAt:Date.now()});
-      if(ok) setLastSaved(Date.now());
+      const res=await saveDocument({d,step,pdfN,savedAt:Date.now()},expectedVersion);
+      if(saveSeq!==saveSeqRef.current) return;          // ein neuerer Save war schneller
+      if(res?.version!==null&&res?.version!==undefined) idbVersionRef.current=res.version;
+      if(res?.ok) setLastSaved(Date.now());
       setSaving(false);
     },1200);
     return()=>clearTimeout(handle);
@@ -2194,7 +2213,11 @@ export default function App(){
       const ok=window.confirm("Aktuelles Projekt wird zurückgesetzt.\n\nWeiter?");
       if(!ok) return;
     }
-    await clearDocument();
+    docEpochRef.current+=1;
+    saveSeqRef.current+=1;
+    const cleared=await clearDocument();
+    if(cleared?.version!==null&&cleared?.version!==undefined) idbVersionRef.current=cleared.version;
+    setSaving(false);
     setD({});
     setPdfN("");
     setParseInfo(null);
@@ -2231,6 +2254,7 @@ export default function App(){
     const outerWrapper=root.closest('[data-pdf-offscreen]');
     const origOuterStyle=outerWrapper?outerWrapper.style.cssText:"";
     const origParentStyle=root.parentElement.style.cssText;
+    const origRootStyle=root.style.cssText;      // EJOT-Härtung: Root-Style ebenfalls sichern
     try{
       if(outerWrapper) outerWrapper.style.cssText="position:absolute;left:0;top:0;width:880px;z-index:9999;overflow:visible;pointer-events:none;";
       root.parentElement.style.cssText="width:880px;background:#FFF;font-family:'Segoe UI',system-ui,sans-serif;";
@@ -2278,7 +2302,8 @@ export default function App(){
     }catch(err){console.error("PDF export error:",err);alert("PDF-Export fehlgeschlagen: "+err.message);}
     finally{
       if(outerWrapper) outerWrapper.style.cssText=origOuterStyle;
-      root.parentElement.style.cssText=origParentStyle;   // Offscreen-Report wieder verstecken (auch im Fehlerfall)
+      if(root?.parentElement) root.parentElement.style.cssText=origParentStyle;  // Offscreen-Report wieder verstecken (auch im Fehlerfall)
+      root.style.cssText=origRootStyle;
       setExporting(null);
     }
   },[]);

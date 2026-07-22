@@ -31,35 +31,66 @@ function openDb() {
   });
 }
 
+function normalizeRecord(record) {
+  if (record && typeof record === "object" && "version" in record && "payload" in record) {
+    return record;
+  }
+  return { version: 0, payload: record || null };
+}
+
 export async function loadDocument() {
   try {
     const db = await openDb();
     return await new Promise((resolve, reject) => {
       const tx  = db.transaction(STORE, "readonly");
       const req = tx.objectStore(STORE).get(KEY);
-      req.onsuccess = () => resolve(req.result || null);
+      req.onsuccess = () => resolve(normalizeRecord(req.result));
       req.onerror   = () => reject(req.error);
     });
   } catch (e) {
     console.warn("idb load failed:", e);
-    return null;
+    return { version: 0, payload: null };
   }
 }
 
-export async function saveDocument(payload) {
+export async function saveDocument(payload, expectedVersion) {
   try {
     const db = await openDb();
     return await new Promise((resolve, reject) => {
       const tx = db.transaction(STORE, "readwrite");
-      tx.objectStore(STORE).put(payload, KEY);
-      tx.oncomplete = () => resolve(true);
-      tx.onerror    = () => reject(tx.error);
-      tx.onabort    = () => reject(tx.error || new Error("idb tx aborted"));
+      const store = tx.objectStore(STORE);
+      const readReq = store.get(KEY);
+      let nextVersion = 0;
+      let currentVersion = 0;
+      let conflict = false;
+      readReq.onsuccess = () => {
+        const current = normalizeRecord(readReq.result);
+        currentVersion = current.version;
+        if (expectedVersion !== undefined && expectedVersion !== null && current.version !== expectedVersion) {
+          conflict = true;
+          tx.abort();
+          return;
+        }
+        nextVersion = current.version + 1;
+        store.put({ version: nextVersion, payload }, KEY);
+      };
+      tx.oncomplete = () => resolve({ ok: true, version: nextVersion });
+      tx.onerror    = () => {
+        if (conflict) return;
+        reject(tx.error);
+      };
+      tx.onabort    = () => {
+        if (conflict) {
+          resolve({ ok: false, conflict: true, version: currentVersion });
+          return;
+        }
+        reject(tx.error || new Error("idb tx aborted"));
+      };
     });
   } catch (e) {
     // Quota errors and similar end up here; surface so the caller can warn the user.
     console.warn("idb save failed:", e);
-    return false;
+    return { ok: false, version: null };
   }
 }
 
@@ -68,12 +99,19 @@ export async function clearDocument() {
     const db = await openDb();
     return await new Promise((resolve, reject) => {
       const tx = db.transaction(STORE, "readwrite");
-      tx.objectStore(STORE).delete(KEY);
-      tx.oncomplete = () => resolve(true);
+      const store = tx.objectStore(STORE);
+      const readReq = store.get(KEY);
+      let nextVersion = 1;
+      readReq.onsuccess = () => {
+        const current = normalizeRecord(readReq.result);
+        nextVersion = current.version + 1;
+        store.put({ version: nextVersion, payload: null }, KEY);
+      };
+      tx.oncomplete = () => resolve({ ok: true, version: nextVersion });
       tx.onerror    = () => reject(tx.error);
     });
   } catch (e) {
     console.warn("idb clear failed:", e);
-    return false;
+    return { ok: false, version: null };
   }
 }
