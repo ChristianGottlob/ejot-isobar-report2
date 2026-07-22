@@ -123,11 +123,13 @@ export default function RasterOverlay({
     ? Math.max(2.5, scaleRef * 0.008)
     : Math.max(3, Math.min(5.5, Math.min(cellW, cellH) * 0.13));
   const cableW = havePlan ? Math.max(0.6, anchorR * 0.18) : 1;
-  const subCableW = cableW * 0.6;
+  // Zwischenseile sind vollwertige Seile (Kletterhilfe nach FLL Tab. 15) —
+  // nur leicht dünner als die Seile auf den Ankerachsen, nicht blass.
+  const subCableW = cableW * 0.8;
   const skSz = havePlan ? Math.max(2, anchorR * 0.75) : Math.max(2.5, anchorR * 0.85);
   const dimFs = Math.max(9, scaleRef * 0.022);
   const cableColor = havePlan ? "#1F2A33" : "#4A4A4A";
-  const subCableColor = havePlan ? "#4A5560" : "#B8B8B8";
+  const subCableColor = havePlan ? "#2B3742" : "#5E5E5E";
 
   const dimY = facadeBox.y + facadeBox.h + dimFs * 0.8;
   const dimX = facadeBox.x - dimFs * 0.8;
@@ -174,7 +176,7 @@ export default function RasterOverlay({
           <line key={i} x1={ln.x1} y1={ln.y1} x2={ln.x2} y2={ln.y2}
             stroke={ln.sub ? subCableColor : cableColor}
             strokeWidth={ln.sub ? subCableW : cableW}
-            opacity={ln.sub ? 0.65 : 0.85} />
+            opacity={ln.sub ? 0.85 : 0.95} />
         ))}
       </g>
 

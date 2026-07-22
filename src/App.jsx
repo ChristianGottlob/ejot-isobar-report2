@@ -297,30 +297,6 @@ function endcaps(hasV,hasH,hasD,colsCells,rowsCells){
 }
 
 // ─── Material calculator ────────────────────────────────
-function calcMaterial(d){
-  const f0=(d.fassaden||[])[0]||{};
-  const lh=pf(f0.lh||d.LH)||.9,lv=pf(f0.lv||d.LV)||.9;
-  const fw=pf(f0.breite||d.fassadenlaenge)||10,fh=pf(f0.hoehe||d.fassadenhoehe)||10;
-  const off=pf(f0.lage1||d.Lage1)||0;            // Startversatz der untersten Lage
-  const fhEff=Math.max(0,fh-off);                // begrünte/berankte Höhe oberhalb des Versatzes
-  const cols=Math.floor(fw/lh),rows=Math.floor(fhEff/lv);
-  const pts=(cols+1)*(rows+1);
-  const area=fw*fhEff;
-  const rt=f0.seilfuehrung||d.seilfuehrung||"gitter";
-  const hasV=rt==="gitter"||rt==="vertikal";
-  const hasH=rt==="gitter"||rt==="horizontal";
-  const hasD=rt==="diagonal";
-  const seilV=hasV?(cols+1)*fhEff:0;
-  const seilH=hasH?(rows+1)*fw:0;
-  const seilD=hasD?cols*rows*Math.sqrt(lh*lh+lv*lv)*2:0;
-  const seilGes=seilV+seilH+seilD;
-  const kreuze90=rt==="gitter"?(cols-1)*(rows-1):0;
-  return {pts,area,cols:cols+1,rows:rows+1,
-    seilV:seilV.toFixed(1),seilH:seilH.toFixed(1),seilD:seilD.toFixed(1),
-    seilGes:(seilGes*1.1).toFixed(1),kreuze90,hasV,hasH,hasD,
-    endkappen:endcaps(hasV,hasH,hasD,cols,rows),
-    stkM2:area>0?(pts/area).toFixed(2):"0.00"};
-}
 function pf(v){return parseFloat(String(v).replace(",","."));}
 function fm(v,d=2){return v?Number(v).toFixed(d).replace(".",","):"–";}
 
@@ -994,7 +970,7 @@ function FacadeRasterCard({d,facade,index,total}){
   </div>);
 }
 
-function PreviewSection({d,maxNw,mat,withRealistic=true}){
+function PreviewSection({d,maxNw,withRealistic=true}){
   const f0=(d.fassaden||[])[0]||{};
   const prvRaster=f0.seilfuehrung||d.seilfuehrung||"gitter";
   const prvSK=f0.seilkreuztyp||d.seilkreuztyp||"ohne";
@@ -1172,7 +1148,7 @@ function AnlagenSection({d,usable}){
   </div>);
 }
 
-function MaterialSection({d,mat,setD}){
+function MaterialSection({d,setD}){
   const fassaden=d.fassaden||[{name:"Fassade 1",breite:d.fassadenlaenge||"10",hoehe:d.fassadenhoehe||"6"}];
   const glh=pf(d.LH)||.9,glv=pf(d.LV)||.9;
   const f0=fassaden[0]||{};
@@ -2155,7 +2131,6 @@ export default function App(){
   const hydratedRef=useRef(false);                // skip auto-save until after initial hydrate
   const setter=k=>v=>setD(x=>({...x,[k]:v}));
   const usable=useMemo(()=>FLL_PLANTS.filter(p=>p.lk!==null),[]);
-  const mat=useMemo(()=>calcMaterial(d),[d.LH,d.LV,d.Lage1,d.fassadenlaenge,d.fassadenhoehe,d.seilfuehrung,d.fassaden]);
   const maxNw=Math.max(...[d.nw_zug,d.nw_druck,d.nw_quer,d.nw_kombi].map(v=>pf(v)||0),0);
 
   const selectPlant=bot=>{const p=FLL_PLANTS.find(x=>x.bot===bot);
@@ -2845,7 +2820,7 @@ export default function App(){
 
 {/* ═══ PREVIEW ═══ */}
 {step==="preview"&&<div style={{borderRadius:8,boxShadow:"0 2px 12px rgba(0,0,0,.08)",overflow:"hidden"}}>
-  <PreviewSection d={d} maxNw={maxNw} mat={mat}/>
+  <PreviewSection d={d} maxNw={maxNw}/>
 </div>}
 
 {/* ═══ STATIK ═══ */}
@@ -2860,14 +2835,14 @@ export default function App(){
 
 {/* ═══ MATERIAL ═══ */}
 {step==="material"&&<div style={{borderRadius:8,boxShadow:"0 2px 12px rgba(0,0,0,.08)",overflow:"hidden"}}>
-  <MaterialSection d={d} mat={mat} setD={setD}/>
+  <MaterialSection d={d} setD={setD}/>
 </div>}
       </div>
 
 {/* ═══ OFF-SCREEN PDF RENDER CONTAINERS ═══ */}
 <div data-pdf-offscreen="true" style={{position:"absolute",left:"-9999px",top:0,overflow:"visible",pointerEvents:"none"}}>
   <div style={{width:880,background:WH,fontFamily:"'Segoe UI',system-ui,sans-serif"}}>
-    <div ref={previewRef} style={{background:WH,width:880,padding:0}}><PreviewSection d={d} maxNw={maxNw} mat={mat}/></div>
+    <div ref={previewRef} style={{background:WH,width:880,padding:0}}><PreviewSection d={d} maxNw={maxNw}/></div>
   </div>
   <div style={{width:880,background:WH,fontFamily:"'Segoe UI',system-ui,sans-serif"}}>
     <div ref={statikRef} style={{background:WH,width:880,padding:0}}><StatikSection d={d}/></div>
@@ -2876,7 +2851,7 @@ export default function App(){
     <div ref={anlagenRef} style={{background:WH,width:880,padding:0}}><AnlagenSection d={d} usable={usable}/></div>
   </div>
   <div style={{width:880,background:WH,fontFamily:"'Segoe UI',system-ui,sans-serif"}}>
-    <div ref={materialRef} style={{background:WH,width:880,padding:0}}><MaterialSection d={d} mat={mat}/></div>
+    <div ref={materialRef} style={{background:WH,width:880,padding:0}}><MaterialSection d={d}/></div>
   </div>
 </div>
 
