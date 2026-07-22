@@ -954,7 +954,7 @@ function FacadeRasterCard({d,facade,index,total}){
         <span style={{fontWeight:500,color:GL,letterSpacing:0,textTransform:"none"}}>Vergrößerter Ausschnitt, maßgebliche Abstände bemaßt</span>
       </div>
       <div style={{display:"flex",justifyContent:"center"}}>
-        <DetailCrop LH={fLH} LV={fLV} rasterType={fRaster} seilkreuztyp={fSK} size={440}/>
+        <DetailCrop LH={fLH} LV={fLV} rasterType={fRaster} seilkreuztyp={fSK} nH={fStruk.nH} nV={fStruk.nV} size={440}/>
       </div>
     </div>
     {/* Per-facade material subtotal */}
@@ -986,6 +986,7 @@ function PreviewSection({d,maxNw,withRealistic=true}){
   const formCode=selectedPlant?selectedPlant.form:"S";
   const fassaden=d.fassaden||[];
   const gov=governingFacade(fassaden,d);
+  const govStruk=facadeStruktur(gov?.facade||{},d);   // Teilung der maßgeblichen Fläche
   const cov=pf(d.coverage)||65;
   const maturityVal=d.maturity||"mature";
   const unannotatedPlans=fassaden.filter(f=>f.plan&&!(f.annotations?.facades?.length>0));
@@ -1053,7 +1054,7 @@ function PreviewSection({d,maxNw,withRealistic=true}){
             : <>Vergrößerter Ausschnitt mit eindeutig bemaßten Maximalabständen.</>}
         </div>
         <DetailCrop LH={gov.spacing.lh} LV={gov.spacing.lv} rasterType={gov.spacing.raster}
-          seilkreuztyp={gov.spacing.sk} size={460}
+          seilkreuztyp={gov.spacing.sk} nH={govStruk.nH} nV={govStruk.nV} size={460}
           areaLabel={gov.facade.name||`Fassade ${gov.index+1}`} governing={gov.varies}/>
       </div>}
       <div style={{border:`1px solid ${BD}`,borderRadius:4,padding:12}}>
@@ -2801,7 +2802,7 @@ export default function App(){
                 Detailausschnitt
                 <span style={{fontWeight:500,color:GL,marginLeft:6,textTransform:"none",letterSpacing:0}}>· Maximalabstände</span>
               </div>
-              <DetailCrop LH={fLH} LV={fLV} rasterType={fRaster} seilkreuztyp={fSK} size={320}/>
+              <DetailCrop LH={fLH} LV={fLV} rasterType={fRaster} seilkreuztyp={fSK} nH={fStruk.nH} nV={fStruk.nV} size={320}/>
             </div>
           </div>
         </div>

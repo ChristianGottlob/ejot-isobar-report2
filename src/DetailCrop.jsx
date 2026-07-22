@@ -23,6 +23,7 @@ export default function DetailCrop({
   LH = 0.9, LV = 0.9,
   rasterType = "gitter",
   seilkreuztyp = "ohne",
+  nH = 2, nV = 2,        // Teilung des Ankerfeldes (FLL Tab. 15); 2 = Zellmitte
   size = 420,
   areaLabel = null,    // e.g. "Fläche 2" — shown as a caption inside the frame
   governing = false,   // mark as the maßgebliche (worst-case) area
@@ -35,18 +36,22 @@ export default function DetailCrop({
   const drawH = rasterType === "gitter" || rasterType === "horizontal";
   const drawD = rasterType === "diagonal";
   const skGrid = hasSK && rasterType === "gitter";   // sub-cables only in gitter
+  // Tatsächliche Teilung des Ankerfeldes durch Zwischenseile.
+  const tH = skGrid ? Math.max(1, Math.round(nH)) : 1;
+  const tV = skGrid ? Math.max(1, Math.round(nV)) : 1;
+  const fein = tH > 1 || tV > 1;
 
-  // ── Fixed-scale 2×2-cell patch (3×3 anchors) ──
-  const NC = 2, NR = 2;
+  // ── Ausschnitt: bei feiner Teilung nur EIN Ankerfeld zeigen, sonst 2×2 ──
+  const NC = Math.max(tH, tV) >= 4 ? 1 : 2, NR = NC;
   const cell = 132;                       // plan-pixels per cell — large & legible
   const gridW = NC * cell, gridH = NR * cell;
-  const ML = 96, MR = 34, MT = hasSK ? 56 : 34, MB = 92;
+  const ML = 96, MR = 34, MT = hasSK ? 64 : 34, MB = 92;
   const vbW = ML + gridW + MR;
   const vbH = MT + gridH + MB;
   const gx = ML, gy = MT;
 
-  const xs = useMemo(() => Array.from({ length: NC + 1 }, (_, c) => gx + c * cell), [gx]);
-  const ys = useMemo(() => Array.from({ length: NR + 1 }, (_, r) => gy + r * cell), [gy]);
+  const xs = useMemo(() => Array.from({ length: NC + 1 }, (_, c) => gx + c * cell), [gx, NC]);
+  const ys = useMemo(() => Array.from({ length: NR + 1 }, (_, r) => gy + r * cell), [gy, NR]);
 
   const anchorR = 7;
   const cw = 2.4, subW = 1.4;
@@ -94,14 +99,18 @@ export default function DetailCrop({
         ))
       )}
 
-      {/* Seilkreuz sub-cables (gitter only) — at mid-cell */}
-      {skGrid && (
-        <g stroke={SUBCABLE} strokeWidth={subW} strokeDasharray="5,4" opacity="0.9">
-          {Array.from({ length: NC }).map((_, c) => (
-            <line key={`sv${c}`} x1={gx + (c + 0.5) * cell} y1={gy} x2={gx + (c + 0.5) * cell} y2={gy + gridH} />
+      {/* Zwischenseile (nur gitter) — vollwertige Seile, daher durchgezogen */}
+      {skGrid && fein && (
+        <g stroke={SUBCABLE} strokeWidth={subW} opacity="0.95">
+          {Array.from({ length: NC * tH + 1 }).map((_, c) => (
+            c % tH === 0 ? null : (
+              <line key={`sv${c}`} x1={gx + (c * cell) / tH} y1={gy} x2={gx + (c * cell) / tH} y2={gy + gridH} />
+            )
           ))}
-          {Array.from({ length: NR }).map((_, r) => (
-            <line key={`sh${r}`} x1={gx} y1={gy + (r + 0.5) * cell} x2={gx + gridW} y2={gy + (r + 0.5) * cell} />
+          {Array.from({ length: NR * tV + 1 }).map((_, r) => (
+            r % tV === 0 ? null : (
+              <line key={`sh${r}`} x1={gx} y1={gy + (r * cell) / tV} x2={gx + gridW} y2={gy + (r * cell) / tV} />
+            )
           ))}
         </g>
       )}
@@ -110,13 +119,15 @@ export default function DetailCrop({
       {hasSK && (() => {
         const pts = [];
         if (rasterType === "gitter") {
-          for (let c = 0; c < NC; c++) for (let r = 0; r < NR; r++) pts.push([gx + (c + 0.5) * cell, gy + (r + 0.5) * cell]);
-          for (let c = 0; c < NC; c++) for (let r = 0; r <= NR; r++) pts.push([gx + (c + 0.5) * cell, gy + r * cell]);
-          for (let c = 0; c <= NC; c++) for (let r = 0; r < NR; r++) pts.push([gx + c * cell, gy + (r + 0.5) * cell]);
+          for (let c = 0; c <= NC * tH; c++) for (let r = 0; r <= NR * tV; r++) {
+            if (c % tH === 0 && r % tV === 0) continue;   // Ankerpunkt: Halter statt Seilkreuz
+            pts.push([gx + (c * cell) / tH, gy + (r * cell) / tV]);
+          }
         } else if (rasterType === "diagonal") {
           for (let c = 0; c < NC; c++) for (let r = 0; r < NR; r++) pts.push([gx + (c + 0.5) * cell, gy + (r + 0.5) * cell]);
         }
-        const s = 5;
+        // Markergröße an die Feinzelle koppeln, damit nichts überlappt
+        const s = Math.max(2.2, Math.min(5, (cell / Math.max(tH, tV)) * 0.16));
         return pts.map(([x, y], i) => (
           <rect key={`sk${i}`} x={x - s} y={y - s} width={s * 2} height={s * 2}
             fill="none" stroke={BLUE} strokeWidth="1.4" rx="0.5" opacity="0.9" />
@@ -176,12 +187,22 @@ export default function DetailCrop({
         );
       })()}
 
-      {/* ── Seilkreuz sub-spacing note (top) ── */}
+      {/* ── Strukturmaß-Hinweis (oben): tatsächliche Teilung, nicht fix /2 ── */}
       {hasSK && (
-        <text x={gx + gridW / 2} y={gy - 14} textAnchor="middle" fontSize={fsSub} fontWeight="700" fill={BLUE}
-          fontFamily="Segoe UI, system-ui, sans-serif">
-          + Seilkreuze · Zwischenseil L<tspan baselineShift="sub" fontSize={fsSub * 0.7}>H</tspan>/2 = {fm(lh / 2)} m · L<tspan baselineShift="sub" fontSize={fsSub * 0.7}>V</tspan>/2 = {fm(lv / 2)} m
-        </text>
+        // Zweizeilig und auf die volle Breite zentriert — einzeilig lief der
+        // Text bei feiner Teilung aus dem Bild.
+        <g fontFamily="Segoe UI, system-ui, sans-serif" textAnchor="middle" fill={BLUE}>
+          <text x={vbW / 2} y={gy - 30} fontSize={fsSub} fontWeight="700">
+            {fein ? "+ Seilkreuze · Strukturmaß" : "+ Seilkreuze"}
+          </text>
+          <text x={vbW / 2} y={gy - 14} fontSize={fsSub * 0.95} fontWeight="700">
+            {fein ? <>
+              {tH > 1 && <>L<tspan baselineShift="sub" fontSize={fsSub * 0.7}>H</tspan>/{tH} = {fm(lh / tH)} m</>}
+              {tH > 1 && tV > 1 && " · "}
+              {tV > 1 && <>L<tspan baselineShift="sub" fontSize={fsSub * 0.7}>V</tspan>/{tV} = {fm(lv / tV)} m</>}
+            </> : "keine Unterteilung – Seile nur auf den Ankerachsen"}
+          </text>
+        </g>
       )}
 
       {/* Legend footer */}
