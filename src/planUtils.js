@@ -136,6 +136,8 @@ export function buildPlanGrid({
   rasterType = "gitter",
   hasSeilkreuze = false,
   offsetBottomPx = 0,   // Startversatz der untersten Lage (px); >0 verankert das Raster bodenseitig
+  nH = 2,               // Teilung des Ankerfeldes horizontal (FLL Tab. 15); 2 = Zellmitte
+  nV = 2,               // Teilung des Ankerfeldes vertikal
 }) {
   const anchors = [];
   const cables = [];      // {x1,y1,x2,y2,dir,rectIndex}
@@ -171,9 +173,11 @@ export function buildPlanGrid({
       for (let c = 0; c <= colsR; c++) {
         cables.push({ x1: ax0 + c * cellW, y1: ay0, x2: ax0 + c * cellW, y2: ay0 + totalH, dir: "V", rectIndex });
       }
-      if (hasSeilkreuze && rasterType === "gitter") {
-        for (let c = 0; c < colsR; c++) {
-          subCables.push({ x1: ax0 + (c + 0.5) * cellW, y1: ay0, x2: ax0 + (c + 0.5) * cellW, y2: ay0 + totalH, dir: "V", rectIndex });
+      if (hasSeilkreuze && rasterType === "gitter" && nH > 1) {
+        const fw = cellW / nH;
+        for (let c = 0; c <= colsR * nH; c++) {
+          if (c % nH === 0) continue;                       // liegt auf einer Ankerachse
+          subCables.push({ x1: ax0 + c * fw, y1: ay0, x2: ax0 + c * fw, y2: ay0 + totalH, dir: "V", rectIndex });
         }
       }
     }
@@ -181,9 +185,11 @@ export function buildPlanGrid({
       for (let r = 0; r <= rowsR; r++) {
         cables.push({ x1: ax0, y1: ay0 + r * cellH, x2: ax0 + totalW, y2: ay0 + r * cellH, dir: "H", rectIndex });
       }
-      if (hasSeilkreuze && rasterType === "gitter") {
-        for (let r = 0; r < rowsR; r++) {
-          subCables.push({ x1: ax0, y1: ay0 + (r + 0.5) * cellH, x2: ax0 + totalW, y2: ay0 + (r + 0.5) * cellH, dir: "H", rectIndex });
+      if (hasSeilkreuze && rasterType === "gitter" && nV > 1) {
+        const fh = cellH / nV;
+        for (let r = 0; r <= rowsR * nV; r++) {
+          if (r % nV === 0) continue;
+          subCables.push({ x1: ax0, y1: ay0 + r * fh, x2: ax0 + totalW, y2: ay0 + r * fh, dir: "H", rectIndex });
         }
       }
     }
@@ -198,9 +204,11 @@ export function buildPlanGrid({
     if (hasSeilkreuze) {
       const candidates = [];
       if (rasterType === "gitter") {
-        for (let c = 0; c < colsR; c++) for (let r = 0; r < rowsR; r++) candidates.push({ x: ax0 + (c + 0.5) * cellW, y: ay0 + (r + 0.5) * cellH });
-        for (let c = 0; c < colsR; c++) for (let r = 0; r <= rowsR; r++) candidates.push({ x: ax0 + (c + 0.5) * cellW, y: ay0 + r * cellH });
-        for (let c = 0; c <= colsR; c++) for (let r = 0; r < rowsR; r++) candidates.push({ x: ax0 + c * cellW, y: ay0 + (r + 0.5) * cellH });
+        const fw = cellW / nH, fh = cellH / nV;
+        for (let c = 0; c <= colsR * nH; c++) for (let r = 0; r <= rowsR * nV; r++) {
+          if (c % nH === 0 && r % nV === 0) continue;       // Ankerpunkt: Halter statt Seilkreuz
+          candidates.push({ x: ax0 + c * fw, y: ay0 + r * fh });
+        }
       } else if (rasterType === "diagonal") {
         for (let c = 0; c < colsR; c++) for (let r = 0; r < rowsR; r++) candidates.push({ x: ax0 + (c + 0.5) * cellW, y: ay0 + (r + 0.5) * cellH });
       }

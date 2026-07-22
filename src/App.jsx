@@ -12,6 +12,7 @@ import { computeVorbemessungDE, BETON_KLASSEN, BETON_TEMPERATUR } from "./vorbem
 import { computeVorbemessungMW, STEINE } from "./vorbemessung/de_mauerwerk.js";
 import { computeLinearBeton, computeLinearMauerwerk } from "./vorbemessung/de_linear.js";
 import { windAUT, findStadt, STAEDTE_AUT, GK_AUT } from "./vorbemessung/de_at_wind.js";
+import { strukturInfo, strukturRaster } from "./fllStruktur.js";
 
 // ─── Colors ─────────────────────────────────────────────
 const R="#C8102E",RL="#C8102E10",RM="#C8102E28",BK="#1A1A1A",DK="#333",GY="#666",GL="#999",BG="#F7F6F4",BD="#D8D6D4",WH="#FFF",GN="#2E7D32",GN2="#66BB6A",GN3="#AED581",AM="#E68A00";
@@ -362,12 +363,17 @@ function calcFacadeStats(f, d) {
     const cols = Math.max(0, Math.floor(fw_m / lh_m));
     const rows = Math.max(0, Math.floor(fhEff / lv_m));
     const anker = (cols + 1) * (rows + 1);
-    const sV = hasV ? (cols + 1) * fhEff : 0;
-    const sH = hasH ? (rows + 1) * fw_m : 0;
+    // Feinraster: Zwischenseile unterteilen jedes Ankerfeld (FLL Tab. 15).
+    const stF = facadeStruktur(f, d);
+    const vLines = cols * stF.nH + 1, hLines = rows * stF.nV + 1;
+    const sV = hasV ? vLines * fhEff : 0;
+    const sH = hasH ? hLines * fw_m : 0;
     const sD = hasD ? cols * rows * Math.sqrt(lh_m * lh_m + lv_m * lv_m) * 2 : 0;
     let skCount = 0;
     if (sk !== "ohne") {
-      if (raster === "gitter") skCount = cols * rows + cols * (rows + 1) + (cols + 1) * rows;
+      // Jede Kreuzung des Feinrasters erhält ein Seilkreuz — außer an den
+      // Ankerpunkten, dort hält der Iso-Bar-Halter die Seile.
+      if (raster === "gitter") skCount = Math.max(0, vLines * hLines - (cols + 1) * (rows + 1));
       else if (raster === "diagonal") skCount = cols * rows;
     }
     const single = {
@@ -380,7 +386,7 @@ function calcFacadeStats(f, d) {
       anker, sk: skCount,
       cols: cols + 1, rows: rows + 1,
       sV, sH, sD,
-      endkappen: endcaps(hasV, hasH, hasD, cols, rows),
+      endkappen: endcaps(hasV, hasH, hasD, cols * stF.nH, rows * stF.nV),
     };
     return {
       name: f.name, breite: fw_m, hoehe: fh_m,
@@ -414,6 +420,9 @@ function calcFacadeStats(f, d) {
   }
   const cellWpx = lh_m * pxM;
   const cellHpx = lv_m * pxM;
+  const stF = facadeStruktur(f, d);                 // Teilung des Ankerfeldes
+  const fineWpx = cellWpx / stF.nH;                 // Abstand der Vertikalseile
+  const fineHpx = cellHpx / stF.nV;                 // Abstand der Horizontalseile
   const offPx   = off_m * pxM;                    // Startversatz der untersten Lage in Plan-Pixeln
   const exclusions = [...ann.windows, ...ann.doors];
   const diagPx = Math.sqrt(cellWpx * cellWpx + cellHpx * cellHpx);
@@ -444,12 +453,12 @@ function calcFacadeStats(f, d) {
     }
 
     let sV = 0, sH = 0, sD = 0;
-    if (hasV) for (let c = 0; c <= colsR; c++) {
-      sV += lineInsideLengthPx(ax0 + c * cellWpx, ay0, ax0 + c * cellWpx, ay0 + totalGridH,
+    if (hasV) for (let c = 0; c <= colsR * stF.nH; c++) {
+      sV += lineInsideLengthPx(ax0 + c * fineWpx, ay0, ax0 + c * fineWpx, ay0 + totalGridH,
                                onlyHere, exclusions) / pxM;
     }
-    if (hasH) for (let r = 0; r <= rowsR; r++) {
-      sH += lineInsideLengthPx(ax0, ay0 + r * cellHpx, ax0 + totalGridW, ay0 + r * cellHpx,
+    if (hasH) for (let r = 0; r <= rowsR * stF.nV; r++) {
+      sH += lineInsideLengthPx(ax0, ay0 + r * fineHpx, ax0 + totalGridW, ay0 + r * fineHpx,
                                onlyHere, exclusions) / pxM;
     }
     if (hasD) {
@@ -468,9 +477,10 @@ function calcFacadeStats(f, d) {
     if (sk !== "ohne") {
       const skPts = [];
       if (raster === "gitter") {
-        for (let c = 0; c < colsR; c++) for (let r = 0; r < rowsR; r++) skPts.push({ x: ax0 + (c + 0.5) * cellWpx, y: ay0 + (r + 0.5) * cellHpx });
-        for (let c = 0; c < colsR; c++) for (let r = 0; r <= rowsR; r++) skPts.push({ x: ax0 + (c + 0.5) * cellWpx, y: ay0 + r * cellHpx });
-        for (let c = 0; c <= colsR; c++) for (let r = 0; r < rowsR; r++) skPts.push({ x: ax0 + c * cellWpx, y: ay0 + (r + 0.5) * cellHpx });
+        for (let c = 0; c <= colsR * stF.nH; c++) for (let r = 0; r <= rowsR * stF.nV; r++) {
+          if (c % stF.nH === 0 && r % stF.nV === 0) continue;   // Ankerpunkt: Halter statt Kreuz
+          skPts.push({ x: ax0 + c * fineWpx, y: ay0 + r * fineHpx });
+        }
       } else if (raster === "diagonal") {
         for (let c = 0; c < colsR; c++) for (let r = 0; r < rowsR; r++) skPts.push({ x: ax0 + (c + 0.5) * cellWpx, y: ay0 + (r + 0.5) * cellHpx });
       }
@@ -494,7 +504,7 @@ function calcFacadeStats(f, d) {
       anker, sk: skR,
       cols: colsR + 1, rows: rowsR + 1,
       sV, sH, sD,
-      endkappen: endcaps(hasV, hasH, hasD, colsR, rowsR),
+      endkappen: endcaps(hasV, hasH, hasD, colsR * stF.nH, rowsR * stF.nV),
     };
   });
 
@@ -515,6 +525,88 @@ function calcFacadeStats(f, d) {
     fromPlan: true,
     rects,
   };
+}
+
+// Auswahl der Kletterhilfen-Struktur je Fassade (FLL Tab. 15).
+// Zeigt die Pflanzenvorgabe, den daraus abgeleiteten Teilungsvorschlag und
+// erlaubt dem Planer, die Teilung frei zu wählen (feiner ist immer zulässig).
+function StrukturPanel({ f, d, updateF }) {
+  const st = facadeStruktur(f, d);
+  const info = strukturInfo(d?.pflanze_botanisch);
+  const lh = pf(f?.lh) || pf(d?.LH) || 0.9;
+  const lv = pf(f?.lv) || pf(d?.LV) || 0.9;
+  const cm = v => `${Math.round(v * 100)} cm`;
+  const rng = a => (a ? `${a[0]}–${a[1]} cm` : "–");
+  // Liste muss mindestens bis zur erforderlichen (und aktuell gewählten) Teilung reichen,
+  // sonst zeigt das Select einen falschen Wert an.
+  const opts = (n, need, cur) => Array.from({ length: Math.max(10, (need || 1) + 3, (cur || 1) + 3) }, (_, i) => i + 1)
+    .map(k => ({ v: String(k), l: k === 1 ? "1 (nur Ankerraster)" : `${k} → ${cm(n / k)}` }));
+  const bg = !info ? "#F5F5F5" : st.struktur === "sicherung" ? "#FFF8E1" : st.ok ? "#E8F5E9" : "#FFEBEE";
+  const bd = !info ? BD : st.struktur === "sicherung" ? "#FFB30040" : st.ok ? "#66BB6A40" : `${R}40`;
+
+  return (
+    <div style={{ padding: "8px 10px", background: bg, borderRadius: 5, border: `1px solid ${bd}`, fontSize: 10.5 }}>
+      <div style={{ fontWeight: 800, marginBottom: 4, color: DK, textTransform: "uppercase", letterSpacing: .4, fontSize: 9.5 }}>
+        Strukturmaße Kletterhilfe · FLL Tab. 15
+      </div>
+
+      {!info && <div style={{ color: GY }}>
+        Keine Pflanze gewählt – es gilt das Ankerraster. Seilkreuze sitzen in der Zellmitte.
+      </div>}
+
+      {info && st.struktur === "sicherung" && <div style={{ color: "#8D6E00" }}>
+        <strong>{d.pflanze_botanisch}</strong> ist Selbstklimmer – laut Tab. 15 nur <em>„ggf. Sicherung"</em>,
+        eine Kletterhilfe ist nicht erforderlich. Die Teilung kann trotzdem gesetzt werden.
+      </div>}
+
+      {info && st.aktiv && <>
+        <div style={{ color: DK, marginBottom: 6 }}>
+          <strong>{d.pflanze_botanisch}</strong> · Vorgabe Breite {rng(info.sB)}
+          {info.sH ? ` · Höhe ${rng(info.sH)}` : " · keine Höhenvorgabe (nur Vertikalseile)"}
+          {" · maßgebend: max. "}{info.sB?.[1]}{" cm"}
+        </div>
+        <div style={{ color: GY, marginBottom: 6 }}>
+          Ankerraster {cm(lh)} × {cm(lv)} → erforderliche Teilung {st.nHreq}
+          {info.sH ? ` × ${st.nVreq}` : ""} · Vorschlag {cm(lh / st.nHreq)}
+          {info.sH ? ` × ${cm(lv / st.nVreq)}` : ""}
+        </div>
+      </>}
+
+      {info && <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+        <Field label="Teilung horizontal" value={String(st.nH)} onChange={v => updateF("strukturNH", v)} sel opts={opts(lh, st.nHreq, st.nH)} half />
+        <Field label="Teilung vertikal" value={String(st.nV)} onChange={v => updateF("strukturNV", v)} sel opts={opts(lv, st.nVreq, st.nV)} half />
+      </div>}
+
+      {info && st.aktiv && <div style={{ marginTop: 5, fontWeight: 700, color: st.ok ? GN : R }}>
+        {st.ok
+          ? `✓ Ist-Struktur ${cm(st.bIst)} × ${cm(st.hIst)} – Vorgabe eingehalten`
+          : `✗ Ist-Struktur ${cm(st.bIst)} × ${cm(st.hIst)} – Vorgabe (max. ${st.bMax}${st.hMax ? "/" + st.hMax : ""} cm) überschritten`}
+      </div>}
+
+      <div style={{ marginTop: 5, color: GL, fontSize: 9.5 }}>
+        Zwischenseile sind reine Kletterhilfe und statisch nicht angesetzt; für die Befestigung
+        bleibt das Ankerraster der Vorbemessung maßgebend.
+      </div>
+    </div>
+  );
+}
+
+// Feinraster der Kletterhilfe = Tragraster (LH/LV) + Strukturempfehlung FLL Tab. 15.
+// Ohne Pflanzenvorgabe bleibt das bisherige Verhalten erhalten: bei gewählten
+// Seilkreuzen Teilung 2 ("Seilkreuz im Kreuzungspunkt Mitte"), sonst keine Teilung.
+function facadeStruktur(f, d) {
+  const lh = pf(f?.lh) || pf(d?.LH) || 0.9;
+  const lv = pf(f?.lv) || pf(d?.LV) || 0.9;
+  const sk = f?.seilkreuztyp || d?.seilkreuztyp || "ohne";
+  const nHman = Number(f?.strukturNH) || 0;
+  const nVman = Number(f?.strukturNV) || 0;
+  const an = (f?.strukturAktiv ?? true) && sk !== "ohne";
+  const info = an ? strukturInfo(d?.pflanze_botanisch) : null;
+  const r = strukturRaster({ lh, lv, info, nH: nHman || undefined, nV: nVman || undefined });
+  if (r.aktiv) return r;                       // Pflanze gibt Strukturmaß vor
+  const base = sk !== "ohne" ? 2 : 1;          // Altverhalten
+  const nH = nHman || base, nV = nVman || base;
+  return { ...r, nH, nV, bIst: lh / nH, hIst: lv / nV, zwischenV: nH - 1, zwischenH: nV - 1 };
 }
 
 // Resolve a facade's effective max spacings (per-facade override → global default).
@@ -768,6 +860,7 @@ function FacadePlanPanel({facade,onUpdate}){
 function FacadeReportCard({d,facade,index,total,formCode,coverage,maturity}){
   const fRaster=facade.seilfuehrung||d.seilfuehrung||"gitter";
   const fSK=facade.seilkreuztyp||d.seilkreuztyp||"ohne";
+  const fStruk=facadeStruktur(facade,d);
   const fLH=facade.lh||d.LH||"0.9";
   const fLV=facade.lv||d.LV||"0.9";
   const fLage1=facade.lage1??d.Lage1??"0";
@@ -834,6 +927,7 @@ function FacadeReportCard({d,facade,index,total,formCode,coverage,maturity}){
 function FacadeRasterCard({d,facade,index,total}){
   const fRaster=facade.seilfuehrung||d.seilfuehrung||"gitter";
   const fSK=facade.seilkreuztyp||d.seilkreuztyp||"ohne";
+  const fStruk=facadeStruktur(facade,d);
   const fLH=facade.lh||d.LH||"0.9";
   const fLV=facade.lv||d.LV||"0.9";
   const fLage1=facade.lage1??d.Lage1??"0";
@@ -863,7 +957,7 @@ function FacadeRasterCard({d,facade,index,total}){
       </div>
       <div style={{display:"flex",justifyContent:"center"}}>
         <RasterOverlay LH={fLH} LV={fLV} fW={fW} fH={fH} rasterType={fRaster}
-          lage1={fLage1} seilkreuztyp={fSK} size={820} maxHeight={620}
+          lage1={fLage1} seilkreuztyp={fSK} nH={fStruk.nH} nV={fStruk.nV} size={820} maxHeight={620}
           plan={facade.plan} annotations={facade.annotations}/>
       </div>
     </div>}
@@ -874,7 +968,7 @@ function FacadeRasterCard({d,facade,index,total}){
       </div>
       <div style={{display:"flex",justifyContent:"center"}}>
         <RasterOverlay LH={fLH} LV={fLV} fW={fW} fH={fH} rasterType={fRaster}
-          lage1={fLage1} seilkreuztyp={fSK} size={460} maxHeight={480} forceProcedural/>
+          lage1={fLage1} seilkreuztyp={fSK} nH={fStruk.nH} nV={fStruk.nV} size={460} maxHeight={480} forceProcedural/>
       </div>
     </div>
     {/* Enlarged detail crop — maximum spacings, clearly dimensioned */}
@@ -904,6 +998,7 @@ function PreviewSection({d,maxNw,mat,withRealistic=true}){
   const f0=(d.fassaden||[])[0]||{};
   const prvRaster=f0.seilfuehrung||d.seilfuehrung||"gitter";
   const prvSK=f0.seilkreuztyp||d.seilkreuztyp||"ohne";
+  const prvStruk=facadeStruktur(f0,d);
   const prvLH=f0.lh||d.LH||"0.9";
   const prvLV=f0.lv||d.LV||"0.9";
   const prvLage1=f0.lage1??d.Lage1??"0";
@@ -972,7 +1067,7 @@ function PreviewSection({d,maxNw,mat,withRealistic=true}){
         <div style={{flex:1.4,border:`1px solid ${BD}`,borderRadius:4,padding:12}}>
           <div style={{fontWeight:700,fontSize:10.5,textTransform:"uppercase",letterSpacing:.5,marginBottom:6,color:BK}}>Raster ({RASTER.find(r=>r.id===prvRaster)?.l})</div>
           <RasterOverlay LH={prvLH} LV={prvLV} fW={prvW} fH={prvH} rasterType={prvRaster}
-            lage1={prvLage1} seilkreuztyp={prvSK} size={420} plan={prvPlan} annotations={prvAnn}/>
+            lage1={prvLage1} seilkreuztyp={prvSK} nH={prvStruk.nH} nV={prvStruk.nV} size={420} plan={prvPlan} annotations={prvAnn}/>
           <div style={{fontSize:8.5,color:GL,marginTop:4}}>Schematisch – ersetzt keine Ausführungsplanung.</div></div></div>
       {gov&&<div style={{border:`1px solid ${RM}`,borderRadius:4,padding:12,marginBottom:14}}>
         <div style={{fontWeight:700,fontSize:10.5,textTransform:"uppercase",letterSpacing:.5,marginBottom:2,color:R}}>Detailausschnitt – Maximalabstände</div>
@@ -1953,12 +2048,45 @@ function StatikSection({ d }){
           </Table>
         </Block>
 
+        {(() => {
+          // Pflanzenseitige Strukturmaße: Unterteilung des Ankerfeldes durch
+          // Zwischenseile, damit die Vorgaben aus FLL Tab. 15 eingehalten werden.
+          const pInfo = strukturInfo(d?.pflanze_botanisch);
+          if (!pInfo) return null;
+          const fas = (d.fassaden || []).filter(x => x);
+          const cm = v => `${Math.round(v * 100)} cm`;
+          const rng = a => (a ? `${a[0]}–${a[1]} cm` : "–");
+          return (
+            <Block title="10 · Strukturmaße Kletterhilfe (FLL Tab. 15)"
+              note="Zwischenseile sind reine Kletterhilfe und statisch nicht angesetzt; maßgebend für die Befestigung bleibt das Ankerraster.">
+              <Table>
+                <Row l="Pflanze" v={`${d.pflanze_botanisch}${d.pflanze_deutsch ? " · " + d.pflanze_deutsch : ""}`} />
+                <Row l="Abstandsmaß Breite" f="Tab. 15" v={rng(pInfo.sB)} src="FLL Tab. 15" />
+                <Row l="Abstandsmaß Höhe" f="Tab. 15" v={pInfo.sH ? rng(pInfo.sH) : "keine Vorgabe"} src="FLL Tab. 15" />
+                {pInfo.struktur === "sicherung"
+                  ? <Row l="Kletterhilfe" v="nicht erforderlich (Selbstklimmer, ggf. Sicherung)" strong />
+                  : fas.map((fa, i) => {
+                      const st = facadeStruktur(fa, d);
+                      return (
+                        <Row key={i}
+                          l={fa.name || `Fassade ${i + 1}`}
+                          f={`Teilung ${st.nH}${pInfo.sH ? " × " + st.nV : ""}`}
+                          v={`${cm(st.bIst)}${pInfo.sH ? " × " + cm(st.hIst) : ""}`}
+                          u={st.ok ? "✓" : "✗"} strong />
+                      );
+                    })}
+              </Table>
+            </Block>
+          );
+        })()}
+
         <div style={{ fontSize: 8.5, color: GL, marginTop: 10, lineHeight: 1.5, borderTop: `1px solid ${BD}`, paddingTop: 8 }}>
           Quelle: {isAT ? "ÖNORM B 1991-1-4" : "DIN EN 1991-1-4/NA"} (Wind) · Zulassung Z-21.8-2083 (Befestiger) ·
           FLL-Fassadenbegrünungsrichtlinie (Bewuchslasten). Diese Vorbemessung erfolgt auf Grundlage der gültigen
           Wind- und Schneelastnormen und der vom Kunden mitgeteilten Daten. Sie ersetzt nicht den prüffähigen
-          statischen Nachweis. Abstände/Raster erfüllen nur die statischen Anforderungen; pflanzenseitige
-          Anforderungen (FLL Tab. 15) sind gesondert durch Fachpersonal zu berücksichtigen.
+          statischen Nachweis. Das Ankerraster erfüllt die statischen Anforderungen; die pflanzenseitigen
+          Strukturmaße nach FLL Tab. 15 werden über die Unterteilung durch Zwischenseile abgedeckt
+          (siehe Abschnitt 10) und sind bauseits durch Fachpersonal zu prüfen.
         </div>
       </>}
     </div>
@@ -2634,6 +2762,7 @@ export default function App(){
     {(d.fassaden||[]).map((f,i)=>{
       const fRaster=f.seilfuehrung||d.seilfuehrung||"gitter";
       const fSK=f.seilkreuztyp||d.seilkreuztyp||"ohne";
+      const fStruk=facadeStruktur(f,d);
       const fLH=f.lh||d.LH||"0.9";
       const fLV=f.lv||d.LV||"0.9";
       const updateF=(key,val)=>{const fa=[...(d.fassaden||[])];fa[i]={...fa[i],[key]:val};setD(x=>({...x,fassaden:fa,
@@ -2666,8 +2795,7 @@ export default function App(){
               opts={RASTER.map(r=>({v:r.id,l:`${r.l} – ${r.d}`}))}/>
             <Field label="Seilkreuztyp" value={fSK} onChange={v=>updateF("seilkreuztyp",v)} sel
               opts={SEILKREUZE.map(sk=>({v:sk.id,l:sk.art?`${sk.l} (${sk.art})`:sk.l}))}/>
-            {fSK!=="ohne"&&<div style={{padding:"6px 10px",background:"#E3F2FD",borderRadius:5,border:"1px solid #90CAF940",fontSize:10.5,color:"#1565C0"}}>
-              ⓘ Seilkreuze sitzen in der Zellmitte zwischen vier Ankern.</div>}
+            {fSK!=="ohne"&&<StrukturPanel f={f} d={d} updateF={updateF}/>}
             <div style={{display:"flex",gap:10}}>
               <Field label="LH" value={f.lh ?? d.LH ?? "0.9"} onChange={v=>updateF("lh",v)} unit="m" half/>
               <Field label="LV" value={f.lv ?? d.LV ?? "0.9"} onChange={v=>updateF("lv",v)} unit="m" half/>
@@ -2680,7 +2808,7 @@ export default function App(){
             {f.plan&&f.annotations&&(f.annotations.facades||[]).length>0&&<div style={{background:BG,borderRadius:8,padding:10,textAlign:"center"}}>
               <div style={{fontSize:9.5,fontWeight:700,color:GY,textTransform:"uppercase",letterSpacing:.4,marginBottom:4,textAlign:"left"}}>Live im Plan</div>
               <RasterOverlay LH={fLH} LV={fLV} fW={f.breite||"3"} fH={f.hoehe||"3"} rasterType={fRaster}
-                lage1={f.lage1??d.Lage1??"0"} seilkreuztyp={fSK} size={340} plan={f.plan} annotations={f.annotations}/>
+                lage1={f.lage1??d.Lage1??"0"} seilkreuztyp={fSK} nH={fStruk.nH} nV={fStruk.nV} size={340} plan={f.plan} annotations={f.annotations}/>
             </div>}
             {/* Schematic raster (always shown) — clear cable pattern + Seilkreuze, independent of plan */}
             <div style={{background:BG,borderRadius:8,padding:10,textAlign:"center"}}>
@@ -2689,7 +2817,7 @@ export default function App(){
                 <span style={{fontWeight:500,color:GL,marginLeft:6,textTransform:"none",letterSpacing:0}}>· {RASTER.find(rr=>rr.id===fRaster)?.l}{fSK!=="ohne"?` + ${SEILKREUZE.find(s=>s.id===fSK)?.l}`:""}</span>
               </div>
               <RasterOverlay LH={fLH} LV={fLV} fW={f.breite||"3"} fH={f.hoehe||"3"} rasterType={fRaster}
-                lage1={f.lage1??d.Lage1??"0"} seilkreuztyp={fSK} size={340} forceProcedural/>
+                lage1={f.lage1??d.Lage1??"0"} seilkreuztyp={fSK} nH={fStruk.nH} nV={fStruk.nV} size={340} forceProcedural/>
               <div style={{fontSize:10,color:DK,fontWeight:600,marginTop:4}}>{f.name}: {f.breite||"–"} × {f.hoehe||"–"} m = {((pf(f.breite)||0)*(pf(f.hoehe)||0)).toFixed(1)} m²</div>
             </div>
             {/* Detailausschnitt — Maximalabstände eindeutig bemaßt */}

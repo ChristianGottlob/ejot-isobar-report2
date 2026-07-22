@@ -20,7 +20,7 @@ function pf(v) { return parseFloat(String(v ?? "").replace(",", ".")); }
 
 export default function RasterOverlay({
   LH = 0.9, LV = 0.9, fW = 10, fH = 6,
-  rasterType = "gitter", seilkreuztyp = "ohne",
+  rasterType = "gitter", seilkreuztyp = "ohne", nH = 2, nV = 2,
   lage1 = 0,        // Höhe der ersten Lage (Startversatz unten) in Metern
   size = 420,
   maxHeight,        // optional pixel cap on rendered height; protects tall/narrow facades from blowing up vertically
@@ -105,7 +105,8 @@ export default function RasterOverlay({
     cellW, cellH, rasterType,
     hasSeilkreuze: hasSK,
     offsetBottomPx,
-  }), [greeningRects, exclusions, cellW, cellH, rasterType, hasSK, offsetBottomPx]);
+    nH, nV,
+  }), [greeningRects, exclusions, cellW, cellH, rasterType, hasSK, offsetBottomPx, nH, nV]);
 
   const lines = useMemo(() => [
     ...grid.cables.map(c => ({ ...c, sub: false })),
@@ -177,9 +178,12 @@ export default function RasterOverlay({
         ))}
       </g>
 
-      {/* Seilkreuze */}
+      {/* Seilkreuze — bei sehr feiner Teilung (FLL Tab. 15) können das mehrere
+          hundert Marker werden. Oberhalb der Grenze werden sie nicht mehr
+          einzeln gezeichnet (Lesbarkeit/Performance); die Legende und alle
+          Mengen bleiben unverändert vollständig. */}
       <g>
-        {skPts.map((p, i) => (
+        {(skPts.length <= 700 ? skPts : []).map((p, i) => (
           <rect key={i} x={p.x - skSz} y={p.y - skSz} width={skSz * 2} height={skSz * 2}
             fill="none" stroke={BLUE} strokeWidth={Math.max(0.7, skSz * 0.18)} rx="0.5" opacity="0.85" />
         ))}
