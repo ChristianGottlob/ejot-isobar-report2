@@ -63,6 +63,10 @@ export const GK_PROFILE = {
 // Werte für h/d ≥ 5 bzw. h/d ≤ 1.  Das Excel wählt hart: h/d ≥ 5 → -1,7, sonst -1,4.
 const CPE_A_HD_GE5 = -1.7;
 const CPE_A_HD_LT5 = -1.4;
+// Bereich B (Regelfläche zwischen den Randstreifen) ist im Blatt " CPE Wand"
+// über alle h/d konstant −1,1.  Er gilt nur, wenn die begrünte Fläche
+// nachweislich außerhalb des Randstreifens der Breite e/5 liegt.
+const CPE_B_ALL = -1.1;
 
 // ── Untergrund Beton: Anker-/Bauteilparameter (Zulassung Z-21.8-2083) ──
 // WICHTIG (belegt durch Z-21.8-2083 Tabelle 12, eingebettetes Bild im Workbook):
@@ -125,13 +129,19 @@ export function windQz({ windzone, gelaendekategorie, z }) {
   return seg.f * base * shape;
 }
 
-// cpe,1 Bereich A (Sog) und Bereich D (Druck) aus Wandgeometrie.
-export function cpeWand({ gebaeudelaenge, gebaeudebreite, gebaeudehoehe }) {
+// cpe,1 Bereich A (Randstreifen, Sog), Bereich B (Regelfläche) und Bereich D
+// (Druck) aus der Wandgeometrie.  `bereich` wählt, welcher Sogwert maßgebend
+// ist — Default "rand" (= bisheriges Verhalten, konservativ).
+export function cpeWand({ gebaeudelaenge, gebaeudebreite, gebaeudehoehe, bereich = "rand" }) {
   const d = gebaeudelaenge, b = gebaeudebreite, h = gebaeudehoehe;
   const e = Math.min(b, 2 * h);            // D5
   const hd = Math.max(h / d, h / b);       // D6 (= h/d, robust gegen d>b)
   const cpeA = hd >= 5 ? CPE_A_HD_GE5 : CPE_A_HD_LT5;   // D8
-  return { e, hd, cpeA, cpeD: 1.0 };
+  const cpeB = CPE_B_ALL;                                // D9
+  const randstreifen = e / 5;              // Breite des A-Streifens
+  const useB = bereich === "regel";
+  return { e, hd, cpeA, cpeB, cpeS: useB ? cpeB : cpeA, bereich: useB ? "regel" : "rand",
+           randstreifen, cpeD: 1.0 };
 }
 
 // FRd [kN] aus FRk, Lastverhältnis (asus) und γM.
@@ -173,7 +183,7 @@ export function computeVorbemessungDE(input) {
     ({ qz = input.wind.nek, cpeA, hd } = input.wind);
   } else {
     qz = windQz({ windzone: wz, gelaendekategorie: gk, z });        // q(z)!B38
-    ({ hd, cpeA } = cpeWand({ gebaeudelaenge: d, gebaeudebreite: b, gebaeudehoehe: z }));
+    ({ hd, cpeS: cpeA } = cpeWand({ gebaeudelaenge: d, gebaeudebreite: b, gebaeudehoehe: z, bereich: input.bereich }));
   }
 
   // ── Flächenlasten [kN/m²] ──
@@ -210,8 +220,16 @@ export function computeVorbemessungDE(input) {
   mb.verformL1 = (g * 1.35) / V10;                        // C10
   mb.verformL2 = (g * 1.35) / V5;                         // C11
   const minBef = Math.max(...Object.values(mb));          // C13
-  const LH = Math.sqrt(1 / minBef);                       // C14
-  const LV = LH;                                          // quadratisches Raster
+  // Bemessung: quadratisches Raster aus der Forderung.  Prüfmodus: der Planer
+  // gibt LH/LV vor (die EJOT-Vorbemessungen wählen bewusst nicht-quadratische
+  // Raster wie 0,5 × 1,5 m), dann wird damit nachgewiesen statt bemessen.
+  const LHreq = Math.sqrt(1 / minBef);                    // C14
+  const lhIn = num(input.rasterLH), lvIn = num(input.rasterLV);
+  const gewaehlt = lhIn > 0 && lvIn > 0;
+  const LH = gewaehlt ? lhIn : LHreq;
+  const LV = gewaehlt ? lvIn : LHreq;
+  // Erfüllt das gewählte Raster die Forderung?  (Dichte 1/(LH·LV) ≥ minBef)
+  const rasterOk = 1 / (LH * LV) >= minBef - 1e-9;
 
   // ── Endgültige Nachweise mit gewähltem LH/LV ──
   const Vd  = LH * LV * g * 1.35;                          // B46
@@ -246,7 +264,8 @@ export function computeVorbemessungDE(input) {
     // Tragfähigkeit
     tragfaehigkeit: { frk, temperatur: tempKey, asus, psisus, FRd, Ncr, V10, V5 },
     // Raster
-    raster: { minBefProM2: minBef, minBefDetail: mb, LH, LV, stk_m2: minBef },
+    raster: { minBefProM2: minBef, minBefDetail: mb, LH, LV, stk_m2: 1 / (LH * LV),
+              LHerforderlich: LHreq, gewaehlt, erfuellt: rasterOk },
     // Schnittgrößen
     schnittgroessen: { Vd, Nd, NEd, wL1, wL2 },
     // Nachweise

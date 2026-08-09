@@ -86,7 +86,7 @@ export function computeVorbemessungMW(input) {
     ({ qz = input.wind.nek, cpeA, hd } = input.wind);
   } else {
     qz = windQz({ windzone: wz, gelaendekategorie: gk, z });
-    ({ cpeA, hd } = cpeWand({ gebaeudelaenge: d, gebaeudebreite: b, gebaeudehoehe: z }));
+    ({ cpeS: cpeA, hd } = cpeWand({ gebaeudelaenge: d, gebaeudebreite: b, gebaeudehoehe: z, bereich: input.bereich }));
   }
 
   // ── Flächenlasten ──
@@ -117,8 +117,14 @@ export function computeVorbemessungMW(input) {
   mb.verformL1 = (g * 1.35) / V10;                       // C9
   mb.verformL2 = (g * 1.35) / V5;                        // C10
   const minBef = Math.max(...Object.values(mb));         // C12
-  const LH = Math.sqrt(1 / minBef);                      // C13
-  const LV = LH;
+  // Bemessung: quadratisches Raster aus der Forderung.  Prüfmodus: der Planer
+  // gibt LH/LV vor, dann wird damit nachgewiesen statt bemessen.
+  const LHreq = Math.sqrt(1 / minBef);                   // C13
+  const lhIn = num(input.rasterLH), lvIn = num(input.rasterLV);
+  const gewaehlt = lhIn > 0 && lvIn > 0;
+  const LH = gewaehlt ? lhIn : LHreq;
+  const LV = gewaehlt ? lvIn : LHreq;
+  const rasterOk = 1 / (LH * LV) >= minBef - 1e-9;
 
   // ── Endgültige Nachweise mit LH/LV ──
   const NEdz = LH * LV * ws * psi * 1.5;                  // B46  Zug
@@ -155,7 +161,8 @@ export function computeVorbemessungMW(input) {
     lasten: { g0, g, psi, ws, nek },
     tragfaehigkeit: { nrk: stein.nrk, vrk: stein.vrk, alphaDruck: stein.alphaDruck,
                       gammaMm: stein.gammaMm, NRd, NRdd, VRd, Ncr, V10, V5 },
-    raster: { minBefProM2: minBef, minBefDetail: mb, LH, LV, stk_m2: minBef },
+    raster: { minBefProM2: minBef, minBefDetail: mb, LH, LV, stk_m2: 1 / (LH * LV),
+              LHerforderlich: LHreq, gewaehlt, erfuellt: rasterOk },
     schnittgroessen: { NEdz, NEdd, VEd, wL1, wL2 },
     nachweise,
     produkt: { laenge: Lgew, bezeichnung: produkt, stein: stein.label },

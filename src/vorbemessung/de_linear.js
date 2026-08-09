@@ -49,7 +49,7 @@ function commonLinear(input) {
     ({ qz = input.wind.nek, cpeA, hd } = input.wind);
   } else {
     qz = windQz({ windzone: wz, gelaendekategorie: gk, z });
-    ({ cpeA, hd } = cpeWand({ gebaeudelaenge: d, gebaeudebreite: b, gebaeudehoehe: z }));
+    ({ cpeS: cpeA, hd } = cpeWand({ gebaeudelaenge: d, gebaeudebreite: b, gebaeudehoehe: z, bereich: input.bereich }));
   }
 
   // Projektspezifisches Pflanzengewicht schlägt den FLL-Tabellenwert (kg/m).

@@ -7,12 +7,22 @@ dist
 # Vertrauliche Quell-/Referenzdateien — NICHT committen (Repo ist öffentlich,
 # enthält EJOT-Interna und Kunden-PII).  Die App braucht sie zur Laufzeit nicht;
 # alle Berechnungsdaten sind in src/vorbemessung/*.js eingebaut.
-/files.zip
-/public/Vorbemessung_Deutschland/
-/public/Vorbemessung_Oesterreich/
-/public/Multifix USF/
-/public/Zusatzartikel/
-/public/*.pdf
-/public/*.xlsx
-/public/*.xlsm
-/public/*.docx
+# Catch-all: greift auch in NEUEN Unterordnern.  Die bisherige Aufzählung
+# einzelner Ordner musste bei jedem neuen Projektordner nachgepflegt werden —
+# ein vergessener Eintrag hätte Kundendaten öffentlich gemacht.
+*.pdf
+*.xlsx
+*.xlsm
+*.xlsb
+*.docx
+*.doc
+*.pptx
+*.msg
+*.eml
+*.zip
+*.7z
+*.rar
+
+# Ausnahme: die App braucht zur Laufzeit keine dieser Dateien.  Soll doch
+# einmal ein Dokument ausgeliefert werden, hier gezielt freigeben:
+# !/public/freigegeben/datenblatt.pdf

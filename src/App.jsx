@@ -8,7 +8,7 @@ import DetailCrop from "./DetailCrop";
 import PlanAnnotator from "./PlanAnnotator";
 import { normalizeAnnotations, unionBBox, pointInRect, pointInAny, greeningAreaPx, lineInsideLengthPx, pxPerMeter, rectIntersectionArea } from "./planUtils";
 import { loadDocument, saveDocument, clearDocument } from "./idbStore";
-import { computeVorbemessungDE, BETON_KLASSEN, BETON_TEMPERATUR, LASTKLASSEN as VM_LASTKLASSEN } from "./vorbemessung/de.js";
+import { computeVorbemessungDE, BETON_KLASSEN, BETON_TEMPERATUR, LASTKLASSEN as VM_LASTKLASSEN, cpeWand } from "./vorbemessung/de.js";
 import { computeVorbemessungMW, STEINE } from "./vorbemessung/de_mauerwerk.js";
 import { computeLinearBeton, computeLinearMauerwerk } from "./vorbemessung/de_linear.js";
 import { windAUT, findStadt, STAEDTE_AUT, GK_AUT } from "./vorbemessung/de_at_wind.js";
@@ -1531,6 +1531,11 @@ function buildVmInput(d){
     pflanzengewicht:   d.vm_pflanzengewicht || "",
     // Lastbreite je Seil (nur "linear"); leer = 0,7 m nach FLL.
     bewuchsbreite:     d.vm_bewuchsbreite || "",
+    // Sogbereich: "rand" (Randstreifen A, Default) oder "regel" (Regelfläche B)
+    bereich:           d.vm_at_bereich === "regel" ? "regel" : "rand",
+    // Prüfmodus: vorgegebenes Raster (leer = quadratisch bemessen)
+    rasterLH:          d.vm_raster_lh || "",
+    rasterLV:          d.vm_raster_lv || "",
   };
 }
 
@@ -1596,6 +1601,20 @@ function VorbemessungDE({ d, setD, hasPdf }){
     d.vm_at_stadt, d.vm_at_seehoehe, d.vm_at_gk, d.vm_at_bereich,
   ]);
 
+  // Hinweistext zum Sogbereich — zeigt beide Werte und die Randstreifenbreite.
+  const sogHint = useMemo(() => {
+    if (isAT) {
+      return atWind
+        ? `A: ${fm(atWind.wsRand)} · B: ${fm(atWind.wsRegel)} kN/m² · Randstreifen r ≈ ${fm(atWind.randstreifen, 1)} m`
+        : "Regelbereich nur, wenn die Fläche außerhalb des Randstreifens liegt.";
+    }
+    try {
+      const c = cpeWand({ gebaeudelaenge: pf(inp.gebaeudelaenge), gebaeudebreite: pf(inp.gebaeudebreite),
+                          gebaeudehoehe: pf(inp.gebaeudehoehe) });
+      return `cpe A: ${fm(c.cpeA)} · B: ${fm(c.cpeB)} (h/d ${fm(c.hd, 1)}) · Randstreifen r ≈ ${fm(c.randstreifen, 1)} m`;
+    } catch { return "Regelbereich nur, wenn die Fläche außerhalb des Randstreifens liegt."; }
+  }, [isAT, atWind, inp.gebaeudelaenge, inp.gebaeudebreite, inp.gebaeudehoehe]);
+
   // ── Normalisierte Ergebnis-Ansicht (vereinheitlicht Beton/Mauerwerk · Raster/Linear) ──
   const view = useMemo(() => {
     if (!res) return null;
@@ -1626,7 +1645,8 @@ function VorbemessungDE({ d, setD, hasPdf }){
     const metrics = isLin
       ? [{ label: "Vert. Abstand LV", value: fm(res.linear.LV), unit: "m" },
          { label: "Anzahl je Seil", value: String(res.linear.anzahl), unit: "Stk" }]
-      : [{ label: "Raster LH = LV", value: fm(res.raster.LH), unit: "m" },
+      : [{ label: res.raster.gewaehlt ? "Raster LH × LV (vorgegeben)" : "Raster LH × LV",
+           value: `${fm(res.raster.LH)} × ${fm(res.raster.LV)}`, unit: "m" },
          { label: "Iso-Bar ECO pro m²", value: fm(res.raster.stk_m2), unit: "Stk" }];
     const geomPatch = isLin
       ? { LV: res.linear.LV }
@@ -1750,15 +1770,17 @@ function VorbemessungDE({ d, setD, hasPdf }){
                 <Field label="Seehöhe Standort" value={d.vm_at_seehoehe || (atStadt ? String(atStadt.seehoehe) : "")} onChange={set("vm_at_seehoehe")} unit="müM" half
                   hint={atStadt ? `Ref-Seehöhe der Region: ${atStadt.seehoehe} müM` : ""}/>
                 <Field label="Geländekategorie (ÖNORM)" value={d.vm_at_gk || "III"} onChange={set("vm_at_gk")} sel opts={atGkOpts} half/>
-                <Field label="Sogbereich der Fläche" value={d.vm_at_bereich || "rand"} onChange={set("vm_at_bereich")} sel half
-                  opts={[{v:"rand",l:"Randbereich A (ungünstig)"},{v:"regel",l:"Regelbereich B"}]}
-                  hint={atWind ? `A: ${fm(atWind.wsRand)} · B: ${fm(atWind.wsRegel)} kN/m² · Randstreifen r ≈ ${fm(atWind.randstreifen,1)} m` : "Regelbereich nur, wenn die Fläche außerhalb des Randstreifens liegt."}/>
               </>
             ) : (
               <Field label="Windzone" value={inp.windzone} onChange={set("windlastzone")} sel opts={VM_WINDZONEN} half/>
             )}
             <Field label="Gebäudelänge L / d" value={inp.gebaeudelaenge} onChange={set("vm_geb_laenge")} unit="m" half hint="für cpe"/>
             <Field label="Gebäudebreite B / b" value={inp.gebaeudebreite} onChange={set("vm_geb_breite")} unit="m" half hint="für cpe"/>
+            {/* Sogbereich gilt für beide Normen: DIN EN 1991-1-4/NA und ÖNORM
+                weisen beide einen Randstreifen A und eine Regelfläche B aus. */}
+            <Field label="Sogbereich der Fläche" value={d.vm_at_bereich || "rand"} onChange={set("vm_at_bereich")} sel full
+              opts={[{v:"rand",l:"Randbereich A (ungünstig, Default)"},{v:"regel",l:"Regelbereich B"}]}
+              hint={sogHint}/>
             {!isAT && (
               <Field label="Geländekategorie" value={inp.gelaendekategorie} onChange={set("vm_gk")} sel opts={VM_GK_PROFILE} full/>
             )}
@@ -1769,6 +1791,14 @@ function VorbemessungDE({ d, setD, hasPdf }){
             <Field label={`Pflanzengewicht (${isLin ? "kg/m" : "kg/m²"})`} value={inp.pflanzengewicht}
               onChange={set("vm_pflanzengewicht")} unit={isLin ? "kg/m" : "kg/m²"} half
               hint={`leer = FLL-Tabellenwert der Lastklasse (${FLL_G0(inp.lastklasse, isLin)} ${isLin ? "kg/m" : "kg/m²"}). Projektangabe hier eintragen.`}/>
+            {!isLin && (
+              <Field label="Raster LH vorgeben" value={inp.rasterLH} onChange={set("vm_raster_lh")} unit="m" half
+                hint="leer = quadratisches Raster aus der Bemessung"/>
+            )}
+            {!isLin && (
+              <Field label="Raster LV vorgeben" value={inp.rasterLV} onChange={set("vm_raster_lv")} unit="m" half
+                hint="beide Felder füllen, um ein gewähltes Raster nachzuweisen"/>
+            )}
             {isLin && (
               <Field label="Seillänge (vertikal)" value={inp.seillaenge} onChange={set("vm_seillaenge")} unit="m" half
                 hint="Länge der vertikalen Seillinie – bestimmt Anzahl Iso-Bar je Seil."/>
@@ -1995,7 +2025,15 @@ function StatikSection({ d }){
                 <Row l="Anzahl Iso-Bar je Seil" v={res.linear.anzahl} u="Stk" strong />
                 <Row l="Vertikaler Abstand" f="LV = L/(n−1)" v={fm(res.linear.LV)} u="m" strong />
               </> : <>
-                <Row l="Max. Rasterabstand" f="LH = LV = √(1/min)" v={`${fm(res.raster.LH)} × ${fm(res.raster.LV)}`} u="m" strong />
+                <Row l={res.raster.gewaehlt ? "Gewähltes Raster" : "Max. Rasterabstand"}
+                  f={res.raster.gewaehlt ? "vorgegeben (Prüfmodus)" : "LH = LV = √(1/min)"}
+                  v={`${fm(res.raster.LH)} × ${fm(res.raster.LV)}`} u="m" strong />
+                {res.raster.gewaehlt && (
+                  <Row l="Nachweis Rasterdichte"
+                    f={`1/(LH·LV) ≥ min = ${fm(res.raster.minBefProM2)}`}
+                    v={fm(res.raster.stk_m2)} u="Stk/m²"
+                    src={res.raster.erfuellt ? "✓ erfüllt" : "✗ zu weit"} strong />
+                )}
                 <Row l="Iso-Bar ECO pro m²" v={fm(res.raster.stk_m2)} u="Stk/m²" />
               </>}
             </Table>
