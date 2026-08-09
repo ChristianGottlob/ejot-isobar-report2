@@ -7,11 +7,12 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node --test \"src/**/*.test.js\""
+    "test": "node --test \"src/**/*.test.js\"",
+    "port": "node scripts/sync-port.mjs",
+    "port:check": "node scripts/sync-port.mjs --check"
   },
   "dependencies": {
     "@zumer/snapdom": "^2.12.9",
-    "html2canvas": "^1.4.1",
     "jspdf": "^4.2.1",
     "pdfjs-dist": "^4.7.76",
     "react": "^18.3.1",

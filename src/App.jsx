@@ -1,7 +1,9 @@
 import { useState, useRef, useCallback, useMemo, useEffect } from "react";
-import { snapdom } from "@zumer/snapdom";
-import { jsPDF } from "jspdf";
-import { extractPdfText, buildDocument, loadPlanImage, FIELD_LABELS } from "./pdfExtract";
+// snapdom, jsPDF und pdfjs werden erst beim tatsächlichen Export/Import
+// geladen (dynamic import).  Sie machen zusammen den Großteil des Bundles aus,
+// werden aber nur gebraucht, wenn der Nutzer wirklich exportiert oder ein PDF
+// einliest — nicht beim Öffnen der Seite.
+import { buildDocument, FIELD_LABELS } from "./pdfFields.js";
 import RealisticFacade from "./RealisticFacade";
 import RasterOverlay from "./RasterOverlay";
 import DetailCrop from "./DetailCrop";
@@ -776,6 +778,7 @@ function FacadePlanPanel({facade,onUpdate}){
     if(!file)return;
     setLoading(true);setErr("");
     try{
+      const { loadPlanImage }=await import("./pdfExtract");
       const plan=await loadPlanImage(file);
       onUpdate({plan,annotations:{facades:[],windows:[],doors:[]}});
     }catch(er){console.error(er);setErr(er.message||String(er));}
@@ -2225,6 +2228,7 @@ export default function App(){
     setParsing(true); setParseErr(""); setParseInfo(null);
     try{
       setPdfN(file.name);
+      const { extractPdfText }=await import("./pdfExtract");
       const raw=await extractPdfText(file);
       const {document:doc,hits,misses,rawText}=buildDocument(raw);
       setD(doc);
@@ -2336,6 +2340,11 @@ export default function App(){
     const origParentStyle=root.parentElement.style.cssText;
     const origRootStyle=root.style.cssText;      // EJOT-Härtung: Root-Style ebenfalls sichern
     try{
+      // Erst hier laden — spart beim Seitenaufruf rund 700 KB.
+      const [{ snapdom }, { jsPDF }]=await Promise.all([
+        import("@zumer/snapdom"),
+        import("jspdf"),
+      ]);
       if(outerWrapper) outerWrapper.style.cssText="position:absolute;left:0;top:0;width:880px;z-index:9999;overflow:visible;pointer-events:none;";
       root.parentElement.style.cssText="width:880px;background:#FFF;font-family:'Segoe UI',system-ui,sans-serif;";
       root.style.width="880px";
