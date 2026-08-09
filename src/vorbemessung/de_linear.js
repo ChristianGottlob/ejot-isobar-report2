@@ -52,9 +52,15 @@ function commonLinear(input) {
     ({ cpeA, hd } = cpeWand({ gebaeudelaenge: d, gebaeudebreite: b, gebaeudehoehe: z }));
   }
 
-  const g0 = LASTKLASSEN.linear[li] / 100;               // kN/m (LINEARE Zeile)
+  // Projektspezifisches Pflanzengewicht schlägt den FLL-Tabellenwert (kg/m).
+  const g0 = (num(input.pflanzengewicht) > 0 ? num(input.pflanzengewicht)
+                                             : LASTKLASSEN.linear[li]) / 100;   // kN/m
   const g = g0 * 0.75 * 1.8;
   const psi = LASTKLASSEN.durchstroemung[li];
+  // Lastbreite je Seil: nach FLL ist linearer Bewuchs ≤ 0,7 m breit.  Stehen
+  // mehrere Seile enger nebeneinander, trägt jedes Seil nur seinen Achsabstand
+  // (die AT-Vorbemessungen rechnen z. B. mit 0,30 m bzw. 0,50 m).
+  const bw = num(input.bewuchsbreite) > 0 ? Math.min(num(input.bewuchsbreite), 0.7) : 0.7;
   const ws = input.wind ? input.wind.ws : qz * cpeA * -1;
   const nek = input.wind ? input.wind.nek : qz;
 
@@ -62,7 +68,7 @@ function commonLinear(input) {
   const V10 = (3 * K.E * K.I * 6.66) / l1 ** 3 / 1000;
   const V5  = (6 * K.E * K.I * 3.33) / (l2 ** 2 * (3 * l1 - l2)) / 1000;
 
-  return { K, L, e, l1, l2, qref: WINDZONEN_QREF[wz], qz, cpeA, hd, g0, g, psi, ws, nek, Ncr, V10, V5 };
+  return { K, L, e, l1, l2, qref: WINDZONEN_QREF[wz], qz, cpeA, hd, g0, g, psi, bw, ws, nek, Ncr, V10, V5 };
 }
 
 // ── Linear BETON ──
@@ -78,9 +84,9 @@ export function computeLinearBeton(input) {
 
   // Min. Befestiger (pro m) → max. Abstand (Beton: √-Umrechnung)
   const mb = {
-    zug:          (c.ws * c.psi * 0.7 * 1.5) / FRd,
-    druckKnicken: (c.nek * c.psi * 0.7 * 1.5) / (c.Ncr / c.K.gammaME),
-    druckBeton:   (c.nek * c.psi * 0.7 * 1.5) / c.K.Fd,
+    zug:          (c.ws * c.psi * c.bw * 1.5) / FRd,
+    druckKnicken: (c.nek * c.psi * c.bw * 1.5) / (c.Ncr / c.K.gammaME),
+    druckBeton:   (c.nek * c.psi * c.bw * 1.5) / c.K.Fd,
     quer:         (c.g * 1.35) / FRd,
   };
   mb.zugQuer   = mb.zug + mb.quer;
@@ -93,8 +99,8 @@ export function computeLinearBeton(input) {
   const LV = c.L / (anzahl - 1);
 
   const Vd  = (c.g * 1.35 * c.L) / (anzahl - 1);
-  const Nd  = (c.ws * 0.7 * 1.5 * c.psi * c.L) / anzahl;
-  const NEd = (c.nek * 0.7 * 1.5 * c.psi * c.L) / anzahl;
+  const Nd  = (c.ws * c.bw * 1.5 * c.psi * c.L) / anzahl;
+  const NEd = (c.nek * c.bw * 1.5 * c.psi * c.L) / anzahl;
   const wL1 = (Vd * 1000) * c.l1 ** 3 / 3 / c.K.E / c.K.I;
   const wL2 = -1 / c.K.E / c.K.I * (Vd * 1000 * c.l2 ** 3 / 6 - Vd * 1000 * c.l1 * c.l2 ** 2 / 2);
 
@@ -133,9 +139,9 @@ export function computeLinearMauerwerk(input) {
   const { NRd, NRdd, VRd } = steinTragfaehigkeit(stein);
 
   // Linien-Bezugskräfte (kN/m)
-  const NEd_line = c.ws * c.psi * 0.7 * 1.5;             // J21
+  const NEd_line = c.ws * c.psi * c.bw * 1.5;             // J21
   const VEd_line = c.g * 1.35;                           // J22
-  const NEdd_line = c.nek * c.psi * 0.7 * 1.5;          // J24
+  const NEdd_line = c.nek * c.psi * c.bw * 1.5;          // J24
 
   const mb = {
     zug:    NEd_line / NRd,                              // C4
@@ -151,8 +157,8 @@ export function computeLinearMauerwerk(input) {
   const anzahl = roundUp(c.L * minBef);                  // B45 = ⌈L·minBef⌉
   const LV = c.L / (anzahl - 1);                         // B48
 
-  const wsI  = (c.ws * c.L * 0.7) / anzahl;              // B46
-  const nekI = (c.nek * c.L * 0.7) / anzahl;             // B47
+  const wsI  = (c.ws * c.L * c.bw) / anzahl;              // B46
+  const nekI = (c.nek * c.L * c.bw) / anzahl;             // B47
   const NEdz = wsI * c.psi * 1.5;                        // B51
   const NEdd = nekI * c.psi * 1.5;                       // B54
   const VEd  = c.g * LV * 1.35;                          // B81

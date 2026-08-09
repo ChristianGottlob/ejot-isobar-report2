@@ -90,7 +90,9 @@ export function computeVorbemessungMW(input) {
   }
 
   // ── Flächenlasten ──
-  const g0 = LASTKLASSEN.schmal[li] / 100;              // B37
+  // Projektspezifisches Pflanzengewicht schlägt den FLL-Tabellenwert (s. de.js).
+  const g0 = (num(input.pflanzengewicht) > 0 ? num(input.pflanzengewicht)
+                                             : LASTKLASSEN.schmal[li]) / 100;   // B37
   const g = g0 * 0.75 * 1.8;                            // B38
   const psi = LASTKLASSEN.durchstroemung[li];           // B39
   const ws = input.wind ? input.wind.ws : qz * cpeA * -1;  // B40

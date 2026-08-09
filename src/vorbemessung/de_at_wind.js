@@ -109,13 +109,21 @@ export function ceAUT(z, gkKey) {
   return gk.a * Math.pow(zr / 10, gk.b);
 }
 
-// cpe,A (schlimmster Sog) für eine Windrichtung (b = angeströmte Breite, d = Tiefe).
+// cpe,A (Randbereich, schlimmster Sog) für eine Windrichtung (b = angeströmte
+// Breite, d = Tiefe).
 export function cpeA_AUT(h, b, d) {
   return interp2(CPE_A, HB, DB, h / b, d / b);
 }
 
+// cpe,B (Regelbereich) — die Fläche zwischen den Randstreifen.  Wird gebraucht,
+// wenn die Begrünung nachweislich außerhalb des Randbereichs r liegt; die
+// EJOT-Vorbemessungen weisen beide Bereiche aus und der Planer wählt.
+export function cpeB_AUT(h, b, d) {
+  return interp2(CPE_B, HB, DB, h / b, d / b);
+}
+
 // Komplettes AT-Windergebnis: liefert ws (Sog, positiv) und Nek (Druck).
-export function windAUT({ vb0, seehoehe, seehoeheStadt, gelaendekategorie, gebaeudehoehe, gebaeudelaenge, gebaeudebreite }) {
+export function windAUT({ vb0, seehoehe, seehoeheStadt, gelaendekategorie, gebaeudehoehe, gebaeudelaenge, gebaeudebreite, bereich = "rand" }) {
   const z = gebaeudehoehe, L = gebaeudelaenge, B = gebaeudebreite;
   const qb = qbAUT(vb0);
   const ce = ceAUT(z, gelaendekategorie);
@@ -128,14 +136,26 @@ export function windAUT({ vb0, seehoehe, seehoeheStadt, gelaendekategorie, gebae
   const cpeA1 = cpeA_AUT(z, L, B);   // Wind ⊥ zur Länge L
   const cpeA2 = cpeA_AUT(z, B, L);   // Wind ⊥ zur Breite B
   const cpeA = Math.min(cpeA1, cpeA2);
+  const cpeB = Math.min(cpeB_AUT(z, L, B), cpeB_AUT(z, B, L));
   const cpeD = 1.0;
-  const we_s = qp * cpeA;            // negativ
+  // Randbereich (A) ist der Regelfall und konservativ; Regelbereich (B) nur,
+  // wenn die begrünte Fläche nachweislich außerhalb des Randstreifens r liegt.
+  const useB = bereich === "regel";
+  const cpeS = useB ? cpeB : cpeA;
+  const we_sA = qp * cpeA, we_sB = qp * cpeB;
+  const we_s = qp * cpeS;            // negativ
   const we_d = qp * cpeD;            // positiv
+  // Breite des Randstreifens r = e/5 mit e = min(b, 2h) — zur Orientierung,
+  // ob der Regelbereich überhaupt in Frage kommt.
+  const rL = Math.min(L, 2 * z) / 5, rB = Math.min(B, 2 * z) / 5;
   return {
     qb, ce, qp,
-    cpeA, cpeA1, cpeA2, cpeD,
+    bereich: useB ? "regel" : "rand",
+    cpeA, cpeA1, cpeA2, cpeB, cpeD, cpeS,
     ws: Math.abs(we_s),              // Windsog (positiv) → Engine
     nek: we_d,                       // Winddruck → Engine
-    we_s, we_d,
+    wsRand: Math.abs(we_sA), wsRegel: Math.abs(we_sB),
+    randstreifen: Math.max(rL, rB),
+    we_s, we_d, we_sA, we_sB,
   };
 }

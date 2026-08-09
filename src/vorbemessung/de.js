@@ -177,7 +177,12 @@ export function computeVorbemessungDE(input) {
   }
 
   // ── Flächenlasten [kN/m²] ──
-  const g0 = LASTKLASSEN.schmal[li] / 100;              // B38
+  // Pflanzengewicht: FLL-Tabellenwert (Lastklasse), sofern der Planer keinen
+  // projektspezifischen Wert angibt.  Die EJOT-Vorbemessungen tragen hier
+  // regelmäßig die Kundenangabe ein (z. B. "Annahme 6 kg/m²") statt des
+  // Tabellenwerts — ohne diese Eingabe rechnet das Tool deutlich zu schwer.
+  const g0 = (num(input.pflanzengewicht) > 0 ? num(input.pflanzengewicht)
+                                             : LASTKLASSEN.schmal[li]) / 100;   // B38
   const g = g0 * 0.75 * 1.8;                            // B39  (Vereisung +80% −25%)
   const psi = LASTKLASSEN.durchstroemung[li];           // B40
   const ws = input.wind ? input.wind.ws : qz * cpeA * -1;  // B41  Windsog (positiv)

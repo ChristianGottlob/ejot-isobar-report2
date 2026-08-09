@@ -8,7 +8,7 @@ import DetailCrop from "./DetailCrop";
 import PlanAnnotator from "./PlanAnnotator";
 import { normalizeAnnotations, unionBBox, pointInRect, pointInAny, greeningAreaPx, lineInsideLengthPx, pxPerMeter, rectIntersectionArea } from "./planUtils";
 import { loadDocument, saveDocument, clearDocument } from "./idbStore";
-import { computeVorbemessungDE, BETON_KLASSEN, BETON_TEMPERATUR } from "./vorbemessung/de.js";
+import { computeVorbemessungDE, BETON_KLASSEN, BETON_TEMPERATUR, LASTKLASSEN as VM_LASTKLASSEN } from "./vorbemessung/de.js";
 import { computeVorbemessungMW, STEINE } from "./vorbemessung/de_mauerwerk.js";
 import { computeLinearBeton, computeLinearMauerwerk } from "./vorbemessung/de_linear.js";
 import { windAUT, findStadt, STAEDTE_AUT, GK_AUT } from "./vorbemessung/de_at_wind.js";
@@ -1499,6 +1499,12 @@ function fmtAgo(ts){
 // ─────────────────────────────────────────────────────────────────
 // Baut das Engine-Eingabeobjekt aus dem document `d` (gleiche Defaults wie das
 // Live-Panel) — zentral, damit Panel und Statik-Report identisch rechnen.
+// FLL-Tabellenwert der Lastklasse — nur für den Hinweistext im Eingabefeld.
+function FLL_G0(lk, isLinear){
+  const i = Math.max(0, Math.min(4, (Number(lk) || 3) - 1));
+  return (isLinear ? VM_LASTKLASSEN.linear : VM_LASTKLASSEN.schmal)[i];
+}
+
 function buildVmInput(d){
   const gkDefault = (() => {
     const g = String(d.gelaendekategorie || "");
@@ -1520,6 +1526,11 @@ function buildVmInput(d){
     temperatur:        d.vm_temperatur || "normal",
     steinart:          d.vm_steinart || "ks_vollstein",
     seillaenge:        d.vm_seillaenge || "10",
+    // Projektspezifisches Pflanzengewicht (kg/m² bzw. kg/m bei "linear").
+    // Leer = FLL-Tabellenwert der Lastklasse.
+    pflanzengewicht:   d.vm_pflanzengewicht || "",
+    // Lastbreite je Seil (nur "linear"); leer = 0,7 m nach FLL.
+    bewuchsbreite:     d.vm_bewuchsbreite || "",
   };
 }
 
@@ -1531,9 +1542,10 @@ function runVorbemessung(d){
   const land = d.vm_land || "DE";
   const isMW = untergrund === "mauerwerk", isLin = system === "linear", isAT = land === "AT";
   const inp = buildVmInput(d);
-  let atWind = null, atStadt = null;
+  let atWind = null, atStadt = null, atErr = null;
   if (isAT) {
-    atStadt = findStadt(d.vm_at_stadt || "Wien, alle übrige B.");
+    const ortName = d.vm_at_stadt || "Wien, alle übrige B.";
+    atStadt = findStadt(ortName);
     if (atStadt) {
       try {
         atWind = windAUT({
@@ -1541,11 +1553,20 @@ function runVorbemessung(d){
           seehoehe: pf(d.vm_at_seehoehe) || atStadt.seehoehe,
           gelaendekategorie: d.vm_at_gk || "III",
           gebaeudehoehe: pf(inp.gebaeudehoehe), gebaeudelaenge: pf(inp.gebaeudelaenge), gebaeudebreite: pf(inp.gebaeudebreite),
+          bereich: d.vm_at_bereich === "regel" ? "regel" : "rand",
         });
-      } catch { atWind = null; }
+      } catch (e) { atWind = null; atErr = e.message || String(e); }
+    } else {
+      atErr = `Ort „${ortName}" ist nicht in der ÖNORM-Städtetabelle enthalten.`;
     }
   }
   let res = null, err = null;
+  // Ohne gültige ÖNORM-Windlast NICHT stillschweigend mit deutschen Windzonen
+  // weiterrechnen — das lieferte bisher unbemerkt völlig andere Ergebnisse.
+  if (isAT && !atWind) {
+    return { res: null, err: `Österreich: Windlast konnte nicht ermittelt werden. ${atErr || ""} Bitte einen Ort aus der Liste wählen.`.trim(),
+             inp, atWind, atStadt, untergrund, system, land, isMW, isLin, isAT };
+  }
   try {
     const fn = isLin
       ? (isMW ? computeLinearMauerwerk : computeLinearBeton)
@@ -1572,7 +1593,7 @@ function VorbemessungDE({ d, setD, hasPdf }){
   const inp = buildVmInput(d);
   const { res, err, atWind, atStadt } = useMemo(() => runVorbemessung(d), [
     JSON.stringify(buildVmInput(d)), d.vm_untergrund, d.vm_system, d.vm_land,
-    d.vm_at_stadt, d.vm_at_seehoehe, d.vm_at_gk,
+    d.vm_at_stadt, d.vm_at_seehoehe, d.vm_at_gk, d.vm_at_bereich,
   ]);
 
   // ── Normalisierte Ergebnis-Ansicht (vereinheitlicht Beton/Mauerwerk · Raster/Linear) ──
@@ -1729,6 +1750,9 @@ function VorbemessungDE({ d, setD, hasPdf }){
                 <Field label="Seehöhe Standort" value={d.vm_at_seehoehe || (atStadt ? String(atStadt.seehoehe) : "")} onChange={set("vm_at_seehoehe")} unit="müM" half
                   hint={atStadt ? `Ref-Seehöhe der Region: ${atStadt.seehoehe} müM` : ""}/>
                 <Field label="Geländekategorie (ÖNORM)" value={d.vm_at_gk || "III"} onChange={set("vm_at_gk")} sel opts={atGkOpts} half/>
+                <Field label="Sogbereich der Fläche" value={d.vm_at_bereich || "rand"} onChange={set("vm_at_bereich")} sel half
+                  opts={[{v:"rand",l:"Randbereich A (ungünstig)"},{v:"regel",l:"Regelbereich B"}]}
+                  hint={atWind ? `A: ${fm(atWind.wsRand)} · B: ${fm(atWind.wsRegel)} kN/m² · Randstreifen r ≈ ${fm(atWind.randstreifen,1)} m` : "Regelbereich nur, wenn die Fläche außerhalb des Randstreifens liegt."}/>
               </>
             ) : (
               <Field label="Windzone" value={inp.windzone} onChange={set("windlastzone")} sel opts={VM_WINDZONEN} half/>
@@ -1742,9 +1766,16 @@ function VorbemessungDE({ d, setD, hasPdf }){
             <Field label="Putzdicke" value={inp.putzdicke} onChange={set("vm_putz")} unit="mm" half/>
             <Field label="Dicke Kleber + Altputz t_tol" value={inp.ttol} onChange={set("dicke_klebschicht")} unit="mm" half/>
             <Field label="Lastklasse (aus Pflanze, überschreibbar)" value={String(inp.lastklasse)} onChange={set("lastklasse")} sel opts={LASTKLASSEN} half/>
+            <Field label={`Pflanzengewicht (${isLin ? "kg/m" : "kg/m²"})`} value={inp.pflanzengewicht}
+              onChange={set("vm_pflanzengewicht")} unit={isLin ? "kg/m" : "kg/m²"} half
+              hint={`leer = FLL-Tabellenwert der Lastklasse (${FLL_G0(inp.lastklasse, isLin)} ${isLin ? "kg/m" : "kg/m²"}). Projektangabe hier eintragen.`}/>
             {isLin && (
               <Field label="Seillänge (vertikal)" value={inp.seillaenge} onChange={set("vm_seillaenge")} unit="m" half
                 hint="Länge der vertikalen Seillinie – bestimmt Anzahl Iso-Bar je Seil."/>
+            )}
+            {isLin && (
+              <Field label="Lastbreite je Seil" value={inp.bewuchsbreite} onChange={set("vm_bewuchsbreite")} unit="m" half
+                hint="leer = 0,7 m nach FLL. Bei engerem Seilabstand den Achsabstand eintragen."/>
             )}
           </div>
 
