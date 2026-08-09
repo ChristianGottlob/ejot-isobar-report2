@@ -13,6 +13,7 @@ import { computeVorbemessungMW, STEINE } from "./vorbemessung/de_mauerwerk.js";
 import { computeLinearBeton, computeLinearMauerwerk } from "./vorbemessung/de_linear.js";
 import { windAUT, findStadt, STAEDTE_AUT, GK_AUT } from "./vorbemessung/de_at_wind.js";
 import { strukturInfo, strukturRaster } from "./fllStruktur.js";
+import { parseNum, parseClamped } from "./num.js";
 
 // ─── Colors ─────────────────────────────────────────────
 const R="#C8102E",RL="#C8102E10",RM="#C8102E28",BK="#1A1A1A",DK="#333",GY="#666",GL="#999",BG="#F7F6F4",BD="#D8D6D4",WH="#FFF",GN="#2E7D32",GN2="#66BB6A",GN3="#AED581",AM="#E68A00";
@@ -297,7 +298,10 @@ function endcaps(hasV,hasH,hasD,colsCells,rowsCells){
 }
 
 // ─── Material calculator ────────────────────────────────
-function pf(v){return parseFloat(String(v).replace(",","."));}
+const pf = parseNum;   // deutsche/englische Tausendertrenner, s. num.js
+// Zulässiger Bereich für Rasterabstände [m].  Untergrenze schützt vor
+// Endlosschleifen, Obergrenze fängt Zahlendreher wie 90 statt 0,9 ab.
+const RASTER_MIN_M = 0.05, RASTER_MAX_M = 10;
 function fm(v,d=2){return v?Number(v).toFixed(d).replace(".",","):"–";}
 
 // ── German number formatting via Intl (handles thousands separator + decimal comma)
@@ -317,8 +321,11 @@ function fmtDec(n, d = 2) { return Number.isFinite(n) ? (d === 1 ? _NF1 : d === 
 // inside that rectangle.  Aggregating bbox-wide (the previous behaviour)
 // silently dropped anchors that fell in the gaps between disjoint rects.
 function calcFacadeStats(f, d) {
-  const lh_m = pf(f.lh) || pf(d.LH) || 0.9;
-  const lv_m = pf(f.lv) || pf(d.LV) || 0.9;
+  // Geklemmt: aus LH/LV folgt direkt die Schleifenlänge über die Fassade.  Ein
+  // Tippfehler (0,09 statt 0,9 m) erzeugte sonst hunderttausende Iterationen
+  // und ließ den Tab einfrieren; 0 oder ein negativer Wert sogar Infinity.
+  const lh_m = parseClamped(f.lh ?? d.LH, RASTER_MIN_M, RASTER_MAX_M, 0.9);
+  const lv_m = parseClamped(f.lv ?? d.LV, RASTER_MIN_M, RASTER_MAX_M, 0.9);
   const raster = f.seilfuehrung || d.seilfuehrung || "gitter";
   const sk = f.seilkreuztyp || d.seilkreuztyp || "ohne";
   const fw_m = pf(f.breite) || 0;
@@ -2194,7 +2201,8 @@ export default function App(){
   const[parseErr,setParseErr]=useState("");
   const[dragOver,setDragOver]=useState(false);
   const[restored,setRestored]=useState(false);    // banner shown after auto-restore
-  const[lastSaved,setLastSaved]=useState(null);   // timestamp of last successful save
+  const[lastSaved,setLastSaved]=useState(null);
+  const[saveErr,setSaveErr]=useState("");   // sichtbarer Hinweis, wenn Autosave scheitert   // timestamp of last successful save
   const[saving,setSaving]=useState(false);        // a save is queued / in flight
   const[, forceTick]=useState(0);                 // re-render every 15s so fmtAgo stays fresh
   const fRef=useRef(null);
@@ -2268,7 +2276,9 @@ export default function App(){
       const res=await saveDocument({d,step,pdfN,savedAt:Date.now()},expectedVersion);
       if(saveSeq!==saveSeqRef.current) return;          // ein neuerer Save war schneller
       if(res?.version!==null&&res?.version!==undefined) idbVersionRef.current=res.version;
-      if(res?.ok) setLastSaved(Date.now());
+      if(res?.ok){ setLastSaved(Date.now()); setSaveErr(""); }
+      else if(res?.conflict) setSaveErr("In einem anderen Tab wurde zwischenzeitlich gespeichert.");
+      else setSaveErr("Automatisches Speichern fehlgeschlagen (Browser-Speicher voll?). Bitte das Projekt manuell sichern.");
       setSaving(false);
     },1200);
     return()=>clearTimeout(handle);
@@ -2287,6 +2297,7 @@ export default function App(){
     const cleared=await clearDocument();
     if(cleared?.version!==null&&cleared?.version!==undefined) idbVersionRef.current=cleared.version;
     setSaving(false);
+    setSaveErr("");
     setD({});
     setPdfN("");
     setParseInfo(null);
@@ -2630,10 +2641,10 @@ export default function App(){
             <div style={{fontSize:10,color:GY,marginTop:2,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
               <span>{d.bauvorhaben||"Neues Projekt"} {d.ort_plz&&<>· {d.ort_plz}</>}</span>
               {pdfN&&<span style={{color:GL}}>← {pdfN}</span>}
-              {(saving||lastSaved)&&<span title="Wird lokal in deinem Browser gespeichert (IndexedDB). Nichts wird hochgeladen."
-                style={{display:"inline-flex",alignItems:"center",gap:4,padding:"1px 7px",borderRadius:10,background:saving?"#E3F2FD":"#E8F5E9",color:saving?"#1565C0":"#1B5E20",border:`1px solid ${saving?"#90CAF9":"#A5D6A7"}`,fontWeight:600,fontSize:9.5}}>
+              {(saving||lastSaved||saveErr)&&<span title={saveErr||"Wird lokal in deinem Browser gespeichert (IndexedDB). Nichts wird hochgeladen."}
+                style={{display:"inline-flex",alignItems:"center",gap:4,padding:"1px 7px",borderRadius:10,background:saving?"#E3F2FD":saveErr?"#FFEBEE":"#E8F5E9",color:saving?"#1565C0":saveErr?R:"#1B5E20",border:`1px solid ${saving?"#90CAF9":saveErr?R+"60":"#A5D6A7"}`,fontWeight:600,fontSize:9.5}}>
                 <span style={{width:6,height:6,borderRadius:"50%",background:saving?"#1565C0":"#2E7D32",boxShadow:saving?"":""}}/>
-                {saving?"Speichert…":fmtAgo(lastSaved)}
+                {saving?"Speichert…":saveErr?"⚠ nicht gespeichert":fmtAgo(lastSaved)}
               </span>}
             </div>
           </div>

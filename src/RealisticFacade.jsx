@@ -18,6 +18,7 @@
 
 import React, { useMemo } from "react";
 import { normalizeAnnotations, pointInAny, unionBBox, pxPerMeter, buildPlanGrid } from "./planUtils";
+import { parseNum } from "./num.js";
 
 const R = "#C8102E", BK = "#1A1A1A";
 const COL_FACADE_OUTLINE = "#2E7D32";  // green for greening-area outline (matches PlanAnnotator)
@@ -72,7 +73,7 @@ function hashStr(s) {
   for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
   return h >>> 0;
 }
-function pf(v) { return parseFloat(String(v ?? "").replace(",", ".")); }
+const pf = parseNum;
 
 // Clean procedural backdrop — no fictitious windows.  Just a plastered wall
 // with subtle texture against a sky/ground gradient.  Real windows come from

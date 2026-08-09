@@ -151,8 +151,10 @@ export function buildPlanGrid({
   const offPx = Math.max(0, offsetBottomPx || 0);
   greeningRects.forEach((g, rectIndex) => {
     const effH  = Math.max(0, g.h - offPx);
-    const colsR = Math.max(0, Math.floor(g.w / cellW));
-    const rowsR = Math.max(0, Math.floor(effH / cellH));
+    // Obergrenze: selbst bei absurd feinem Raster darf die Zeichnung nicht
+    // unbegrenzt Elemente erzeugen (Browser-Freeze).
+    const colsR = Math.max(0, Math.min(400, Math.floor(g.w / cellW) || 0));
+    const rowsR = Math.max(0, Math.min(400, Math.floor(effH / cellH) || 0));
     const totalW = colsR * cellW;
     const totalH = rowsR * cellH;
     const ax0 = g.x + (g.w - totalW) / 2;

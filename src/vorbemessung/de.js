@@ -20,6 +20,8 @@
 // ── Lastklassen-Tabelle (Sheet "Lastklassen", Spalten C..G = LK 1..5) ──
 // Das Excel nimmt für die Gewichtskraft die Zeile "schmaler Bewuchs (bis 1 m
 // breit)" (HLOOKUP-Index 3) — nicht die flächige Zeile.  ψ = Durchströmung.
+import { parseNum } from "../num.js";
+
 export const LASTKLASSEN = {
   //         LK:   1     2     3     4     5
   flaechig:    [   6,   11,   15,   17,   24],   // kg/m² (Info, nicht in Rechnung)
@@ -115,7 +117,7 @@ export const BETON_KONST = {
 export const ECO_LAENGEN_RASTER = [200, 260, 320, 380, 440, 500];
 
 // ── Helfer ──
-const num = (v) => (typeof v === "number" ? v : parseFloat(String(v ?? "").replace(",", ".")));
+const num = parseNum;
 
 // q_p(z): Böengeschwindigkeitsdruck [kN/m²] aus Windzone, GK-Profil und Höhe z.
 export function windQz({ windzone, gelaendekategorie, z }) {

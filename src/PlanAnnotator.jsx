@@ -9,6 +9,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { normalizeAnnotations, nid, pointInRect, selKey, unionBBox, pxPerMeter } from "./planUtils";
+import { parseNum } from "./num.js";
 
 const R = "#C8102E", BK = "#1A1A1A", DK = "#333", GY = "#666", GL = "#999";
 const BG = "#F7F6F4", BD = "#D8D6D4", WH = "#FFF";
@@ -274,7 +275,7 @@ export default function PlanAnnotator({ plan, annotations, onChange, height = 48
   // Commit the scale calibration from the draft + user-entered meters.
   const confirmScale = useCallback(() => {
     if (!scaleDraft) return;
-    const m = parseFloat(String(scaleInput).replace(",", "."));
+    const m = parseNum(scaleInput);
     if (!Number.isFinite(m) || m <= 0) return;
     commit({ ...ann, scale: { p1: scaleDraft.p1, p2: scaleDraft.p2, m } });
     setScaleDraft(null);

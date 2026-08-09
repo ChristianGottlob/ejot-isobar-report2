@@ -9,6 +9,7 @@
 
 import React, { useMemo } from "react";
 import { normalizeAnnotations, pointInAny, unionBBox, pxPerMeter, buildPlanGrid } from "./planUtils";
+import { parseNum } from "./num.js";
 
 const R  = "#C8102E", BK = "#1A1A1A", GY = "#666";
 const BD = "#D8D6D4", WH = "#FFF";
@@ -16,7 +17,7 @@ const PLASTER = "#F1ECDE";
 const BLUE = "#1565C0";
 const COL_FACADE_OUTLINE = "#2E7D32";  // green for greening-area outline
 
-function pf(v) { return parseFloat(String(v ?? "").replace(",", ".")); }
+const pf = parseNum;
 
 export default function RasterOverlay({
   LH = 0.9, LV = 0.9, fW = 10, fH = 6,

@@ -11,12 +11,13 @@
 // caller selects the governing (largest-spacing) area and draws THAT here.
 
 import React, { useMemo } from "react";
+import { parseNum } from "./num.js";
 
 const R  = "#C8102E", BK = "#1A1A1A", GY = "#666", GL = "#999";
 const BD = "#D8D6D4", WH = "#FFF", BLUE = "#1565C0";
 const CABLE = "#1F2A33", SUBCABLE = "#7A8794";
 
-function pf(v) { return parseFloat(String(v ?? "").replace(",", ".")); }
+const pf = parseNum;
 function fm(v, d = 2) { return Number.isFinite(v) ? v.toFixed(d).replace(".", ",") : "–"; }
 
 export default function DetailCrop({

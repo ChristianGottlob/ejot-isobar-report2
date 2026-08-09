@@ -26,8 +26,9 @@
 import { windQz, cpeWand, LASTKLASSEN, BAUTEIL_KONST, BETON_FRK, WINDZONEN_QREF,
          ECO_LAENGEN_RASTER } from "./de.js";
 import { STEINE, AJ, ECO_LAENGEN_MW, steinTragfaehigkeit } from "./de_mauerwerk.js";
+import { parseNum } from "../num.js";
 
-const num = (v) => (typeof v === "number" ? v : parseFloat(String(v ?? "").replace(",", ".")));
+const num = parseNum;
 const roundUp = (x) => Math.ceil(x - 1e-9);   // Excel ROUNDUP(x,0)
 
 // Gemeinsame Vorbereitung (Geometrie, Wind, Linear-Lasten, Steifigkeiten).

@@ -20,6 +20,7 @@
 // ─────────────────────────────────────────────────────────────────────────
 
 import { windQz, cpeWand, LASTKLASSEN, BAUTEIL_KONST, WINDZONEN_QREF } from "./de.js";
+import { parseNum } from "../num.js";
 
 // ── Steintabelle (Sheet "Steine", Z-21.8-2083 Tabelle 14/15/16) ──
 // Je Stein die in Berechnung_de per VLOOKUP genutzten Werte:
@@ -47,7 +48,7 @@ export const AJ = 0.75;   // Beiwert aj (Berechnung_de B17), fest
 // Standard-Bestelllängen "Raster"-Set Mauerwerk [mm] (Längenwahl-Block, nur bis 380).
 export const ECO_LAENGEN_MW = [200, 260, 320, 380];
 
-const num = (v) => (typeof v === "number" ? v : parseFloat(String(v ?? "").replace(",", ".")));
+const num = parseNum;
 
 // NR,d / NR,d,d / V_Rd aus Steinwiderständen.
 export function steinTragfaehigkeit(stein) {
