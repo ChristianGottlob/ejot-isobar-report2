@@ -4,6 +4,7 @@ import { useState, useRef, useCallback, useMemo, useEffect } from "react";
 // werden aber nur gebraucht, wenn der Nutzer wirklich exportiert oder ein PDF
 // einliest — nicht beim Öffnen der Seite.
 import { buildDocument, leeresDokument, FIELD_LABELS } from "./pdfFields.js";
+import { baueProjektPayload, leseProjektdatei, projektDateiname } from "./projektdatei.js";
 import RealisticFacade from "./RealisticFacade";
 import RasterOverlay from "./RasterOverlay";
 import DetailCrop from "./DetailCrop";
@@ -2484,17 +2485,11 @@ export default function App(){
   // kann, um das Projekt im Tool weiterzubearbeiten.
   const saveProject=useCallback(()=>{
     setShowExportMenu(false);
-    const payload={
-      _typ:"ejot-isobar-projekt", _version:1,
-      gespeichert:new Date().toISOString(),
-      pdfN, d,
-    };
-    const json=JSON.stringify(payload,null,2);
+    const json=JSON.stringify(baueProjektPayload({d,pdfN}),null,2);
     const blob=new Blob([json],{type:"application/json"});
     const url=URL.createObjectURL(blob);
     const a=document.createElement("a");
-    const safe=(d.bauvorhaben||d.dokNr||"Projekt").replace(/[^\w\-äöüÄÖÜß ]+/g,"").trim()||"Projekt";
-    a.href=url; a.download=`EJOT_IsoBar_${safe}.ejot.json`;
+    a.href=url; a.download=projektDateiname(d);
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     setTimeout(()=>URL.revokeObjectURL(url),1000);
   },[d,pdfN]);
@@ -2503,12 +2498,15 @@ export default function App(){
     if(!file) return;
     try{
       const text=await file.text();
-      const obj=JSON.parse(text);
-      const doc=obj&&obj._typ==="ejot-isobar-projekt"?obj.d:(obj&&obj.d?obj.d:obj);
-      if(!doc||typeof doc!=="object"||Array.isArray(doc)) throw new Error("Keine gültige Projektdatei.");
+      const {doc,pdfN:pdfName}=leseProjektdatei(text);
+      // Laufenden Restore/Autosave des vorherigen Dokuments verwerfen, sonst
+      // könnte er das gerade geladene Projekt überschreiben.
+      docEpochRef.current+=1;
+      saveSeqRef.current+=1;
       setD(doc);
-      setPdfN(obj?.pdfN||"");
+      setPdfN(pdfName);
       setParseInfo(null); setParseErr("");
+      setRestored(false); setSaving(false); setSaveErr(""); setLastSaved(null);
       setStep("edit");
     }catch(err){
       setParseErr("Projektdatei konnte nicht geladen werden: "+(err.message||String(err)));
@@ -2789,6 +2787,17 @@ export default function App(){
       </div>
 
       {/* Restoration banner (shown once after auto-restore) */}
+      {/* Ladefehler auch außerhalb des Upload-Schritts zeigen — sonst schlug das
+          Laden einer fehlerhaften Projektdatei stumm fehl. */}
+      {parseErr&&step!=="upload"&&<div style={{maxWidth:980,margin:"12px auto 0",padding:"0 14px"}}>
+        <div style={{display:"flex",gap:10,alignItems:"center",padding:"10px 14px",background:"#FFEBEE",border:`1px solid ${R}40`,borderRadius:8,fontSize:12,color:R}}>
+          <span style={{fontSize:18}}>⚠</span>
+          <div style={{flex:1}}><strong>Projektdatei nicht geladen.</strong> {parseErr}
+            <div style={{fontSize:10.5,color:GY,marginTop:2}}>Das geöffnete Projekt wurde nicht verändert.</div>
+          </div>
+          <button onClick={()=>setParseErr("")} style={{border:"none",background:"transparent",color:R,cursor:"pointer",fontSize:16,fontWeight:700}}>×</button>
+        </div>
+      </div>}
       {restored&&step!=="upload"&&<div style={{maxWidth:980,margin:"12px auto 0",padding:"0 14px"}}>
         <div style={{display:"flex",gap:10,alignItems:"center",padding:"10px 14px",background:"#E8F5E9",border:"1px solid #2E7D3240",borderRadius:8,fontSize:12}}>
           <span style={{fontSize:18}}>📂</span>
