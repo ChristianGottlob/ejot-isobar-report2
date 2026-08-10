@@ -67,7 +67,8 @@ export function computeVorbemessungMW(input) {
   const gk  = String(input.gelaendekategorie);
   const lk  = Number(input.lastklasse);
   const daemm = num(input.daemmdicke);
-  const putz  = num(input.putzdicke);
+  // Putzdicke ist optional: keine Angabe = keine zusätzliche Putzschicht.
+  const putz  = Number.isFinite(num(input.putzdicke)) ? num(input.putzdicke) : 0;   // mm
   const ttol  = num(input.ttol);
   const steinKey = input.steinart || "ks_vollstein";
   const stein = STEINE[steinKey];
@@ -77,7 +78,8 @@ export function computeVorbemessungMW(input) {
 
   // ── Geometrie [mm] ──
   const tWDVS = daemm + putz;                            // B6
-  const e = tWDVS + ttol;                                // B15
+  const e = tWDVS + ttol;
+  if (!Number.isFinite(e)) throw new Error("Unvollständige Eingaben: Dämmdicke und Dicke Kleber + Altputz werden benötigt.");                                // B15
   const l1 = e + K.a + 0.5 * K.d2 + K.La;               // B84
   const l2 = l1 - K.La - 15;                            // B85
 

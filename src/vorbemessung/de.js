@@ -163,7 +163,8 @@ export function computeVorbemessungDE(input) {
   const gk  = String(input.gelaendekategorie);
   const lk  = Number(input.lastklasse);                 // 1..5
   const daemm = num(input.daemmdicke);                  // mm
-  const putz  = num(input.putzdicke);                   // mm
+  // Putzdicke ist optional: keine Angabe = keine zusätzliche Putzschicht.
+  const putz  = Number.isFinite(num(input.putzdicke)) ? num(input.putzdicke) : 0;   // mm
   const ttol  = num(input.ttol);                        // mm (Kleber+Altputz)
   const klasseKey = input.betonklasse || "c2025";
   const klasse = BETON_KLASSEN[klasseKey];
@@ -175,7 +176,8 @@ export function computeVorbemessungDE(input) {
 
   // ── Geometrie [mm] ──
   const tWDVS = daemm + putz;                            // B7
-  const e = tWDVS + ttol;                                // B14  (= e)
+  const e = tWDVS + ttol;
+  if (!Number.isFinite(e)) throw new Error("Unvollständige Eingaben: Dämmdicke und Dicke Kleber + Altputz werden benötigt.");                                // B14  (= e)
   const l1 = e + K.a + 0.5 * K.d2 + K.La;               // B76  Hebelarm lges
   const l2 = l1 - K.La - 15;                            // B77  Hebelarm am Putz
 

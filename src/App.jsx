@@ -3,7 +3,7 @@ import { useState, useRef, useCallback, useMemo, useEffect } from "react";
 // geladen (dynamic import).  Sie machen zusammen den Großteil des Bundles aus,
 // werden aber nur gebraucht, wenn der Nutzer wirklich exportiert oder ein PDF
 // einliest — nicht beim Öffnen der Seite.
-import { buildDocument, FIELD_LABELS } from "./pdfFields.js";
+import { buildDocument, leeresDokument, FIELD_LABELS } from "./pdfFields.js";
 import RealisticFacade from "./RealisticFacade";
 import RasterOverlay from "./RasterOverlay";
 import DetailCrop from "./DetailCrop";
@@ -657,9 +657,18 @@ function Field({label,value,onChange,unit,half,ro,sel,opts,hint,full}){
       onFocus={e=>e.currentTarget.style.borderColor=R}
       onBlur={e=>e.currentTarget.style.borderColor=BD}>
       {sel
-        ? <select value={value??""} onChange={e=>onChange?.(e.target.value)} style={{flex:1,border:"none",padding:"7px 8px",fontSize:12,fontWeight:600,background:"transparent",outline:"none",fontFamily:"inherit",color:BK,cursor:"pointer",appearance:"none"}}>
-            {opts.map(o=><option key={o.v??o} value={o.v??o}>{o.l??o}</option>)}
-          </select>
+        ? (()=>{
+            // Ein <select> ohne passende Option zeigt automatisch die ERSTE an.
+            // Ein noch nicht gewähltes Feld sähe dadurch gefüllt aus (z. B.
+            // "GK I", obwohl nichts gewählt wurde).  Darum ein sichtbarer
+            // Platzhalter, solange der Wert leer ist.
+            const leer = value===undefined||value===null||String(value)==="";
+            return <select value={leer?"":String(value)} onChange={e=>onChange?.(e.target.value)}
+              style={{flex:1,border:"none",padding:"7px 8px",fontSize:12,fontWeight:600,background:"transparent",outline:"none",fontFamily:"inherit",color:leer?GL:BK,cursor:"pointer",appearance:"none"}}>
+              {leer&&<option value="">– bitte wählen –</option>}
+              {opts.map(o=><option key={o.v??o} value={o.v??o}>{o.l??o}</option>)}
+            </select>;
+          })()
         : <input value={value??""} onChange={e=>onChange?.(e.target.value)} readOnly={ro} style={{flex:1,border:"none",padding:"7px 8px",fontSize:12,fontWeight:600,background:"transparent",outline:"none",fontFamily:"inherit",color:BK,minWidth:0}}/>
       }
       {unit&&<span style={{padding:"0 8px",fontSize:10,color:GL,whiteSpace:"nowrap",alignSelf:"center"}}>{unit}</span>}
@@ -1481,6 +1490,14 @@ function MaterialSection({d,setD}){
 function hasContent(d){
   if(!d) return false;
   if(d.bauvorhaben||d.ort_plz||d.bearbeiter) return true;
+  // Auch reine Vorbemessungs-Eingaben sind Arbeit: ohne sie wurden Projekte,
+  // in denen nur gerechnet (aber kein Bauvorhaben benannt) wurde, weder
+  // automatisch gespeichert noch beim Zurücksetzen abgefragt.
+  for(const k of ["gebaeudehoehe","vm_geb_laenge","vm_geb_breite","vm_daemm","wdvs_dicke",
+                  "dicke_klebschicht","vm_putz","windlastzone","vm_gk","lastklasse",
+                  "vm_seillaenge","vm_at_stadt","vm_pflanzengewicht","pflanze_botanisch"]){
+    if(String(d[k] ?? "").trim() !== "") return true;
+  }
   if(Array.isArray(d.fassaden)){
     for(const f of d.fassaden){
       if(f.plan) return true;
@@ -1515,27 +1532,53 @@ function FLL_G0(lk, isLinear){
   return (isLinear ? VM_LASTKLASSEN.linear : VM_LASTKLASSEN.schmal)[i];
 }
 
+// Ohne diese Angaben ist keine Vorbemessung möglich.  Sie werden benannt,
+// statt sie stillschweigend anzunehmen — die Werte gehen direkt in Windlast,
+// Hebelarm und Bemessung ein.
+function fehlendeEingaben(inp, { isLin, isAT }) {
+  const fehlt = [];
+  const zahl = (v, label) => { if (!(parseNum(v) > 0)) fehlt.push(label); };
+  zahl(inp.gebaeudehoehe,  "Gebäudehöhe");
+  zahl(inp.gebaeudelaenge, "Gebäudelänge");
+  zahl(inp.gebaeudebreite, "Gebäudebreite");
+  zahl(inp.daemmdicke,     "Dämmdicke");
+  if (String(inp.ttol).trim() === "") fehlt.push("Dicke Kleber + Altputz");
+  if (!isAT) {
+    if (!String(inp.windzone).trim())          fehlt.push("Windzone");
+    if (!String(inp.gelaendekategorie).trim()) fehlt.push("Geländekategorie");
+  }
+  if (!String(inp.lastklasse).trim()) fehlt.push("Lastklasse");
+  if (isLin) zahl(inp.seillaenge, "Seillänge");
+  return fehlt;
+}
+
 function buildVmInput(d){
   const gkDefault = (() => {
     const g = String(d.gelaendekategorie || "");
     if (["I","II","III","IV"].includes(g)) return g;
     if (g === "BV") return "binnenland";
-    return "II";
+    return "";                       // keine Geländekategorie unterstellen
   })();
+  // WICHTIG: hier werden KEINE Projektmaße erfunden.  Früher standen hier
+  // Vorgaben (Gebäude 10×10×10 m, Dämmung 180 mm, Windzone 2, Lastklasse 3).
+  // Eine frisch geöffnete Vorbemessung zeigte dadurch sofort ein vollständiges
+  // Ergebnis samt Bestellbezeichnung — gerechnet aus Zahlen, die niemand
+  // eingegeben hatte.  Leer bleibt leer; die Berechnung startet erst, wenn die
+  // Pflichtangaben da sind (siehe fehlendeEingaben).
   return {
-    gebaeudehoehe:     d.gebaeudehoehe || "10",
-    gebaeudelaenge:    d.vm_geb_laenge || "10",
-    gebaeudebreite:    d.vm_geb_breite || "10",
-    windzone:          d.windlastzone || "2",
+    gebaeudehoehe:     d.gebaeudehoehe ?? "",
+    gebaeudelaenge:    d.vm_geb_laenge ?? "",
+    gebaeudebreite:    d.vm_geb_breite ?? "",
+    windzone:          d.windlastzone ?? "",
     gelaendekategorie: d.vm_gk || gkDefault,
-    lastklasse:        d.lastklasse || "3",
-    daemmdicke:        d.vm_daemm || d.wdvs_dicke || "180",
-    putzdicke:         d.vm_putz || "10",
-    ttol:              d.dicke_klebschicht || "10",
+    lastklasse:        d.lastklasse ?? "",
+    daemmdicke:        d.vm_daemm || d.wdvs_dicke || "",
+    putzdicke:         d.vm_putz ?? "",
+    ttol:              d.dicke_klebschicht ?? "",
     betonklasse:       d.vm_betonklasse || "c2025",
     temperatur:        d.vm_temperatur || "normal",
     steinart:          d.vm_steinart || "ks_vollstein",
-    seillaenge:        d.vm_seillaenge || "10",
+    seillaenge:        d.vm_seillaenge ?? "",
     // Projektspezifisches Pflanzengewicht (kg/m² bzw. kg/m bei "linear").
     // Leer = FLL-Tabellenwert der Lastklasse.
     pflanzengewicht:   d.vm_pflanzengewicht || "",
@@ -1575,12 +1618,20 @@ function runVorbemessung(d){
       atErr = `Ort „${ortName}" ist nicht in der ÖNORM-Städtetabelle enthalten.`;
     }
   }
+  // Erst rechnen, wenn die Pflichtangaben da sind — sonst entstünde ein
+  // vollständiges Ergebnis (inkl. Bestellbezeichnung) aus Annahmen.
+  const fehlt = fehlendeEingaben(inp, { isLin, isAT });
+  if (fehlt.length) {
+    return { res: null, err: null, fehlt, inp, atWind: null, atStadt: null,
+             untergrund, system, land, isMW, isLin, isAT };
+  }
+
   let res = null, err = null;
   // Ohne gültige ÖNORM-Windlast NICHT stillschweigend mit deutschen Windzonen
   // weiterrechnen — das lieferte bisher unbemerkt völlig andere Ergebnisse.
   if (isAT && !atWind) {
     return { res: null, err: `Österreich: Windlast konnte nicht ermittelt werden. ${atErr || ""} Bitte einen Ort aus der Liste wählen.`.trim(),
-             inp, atWind, atStadt, untergrund, system, land, isMW, isLin, isAT };
+             fehlt: [], inp, atWind, atStadt, untergrund, system, land, isMW, isLin, isAT };
   }
   try {
     const fn = isLin
@@ -1591,7 +1642,7 @@ function runVorbemessung(d){
       : inp;
     res = fn(engineInp);
   } catch (e) { err = e.message || String(e); }
-  return { res, err, inp, atWind, atStadt, untergrund, system, land, isMW, isLin, isAT };
+  return { res, err, fehlt: [], inp, atWind, atStadt, untergrund, system, land, isMW, isLin, isAT };
 }
 
 function VorbemessungDE({ d, setD, hasPdf }){
@@ -1606,7 +1657,7 @@ function VorbemessungDE({ d, setD, hasPdf }){
   const isAT = land === "AT";
 
   const inp = buildVmInput(d);
-  const { res, err, atWind, atStadt } = useMemo(() => runVorbemessung(d), [
+  const { res, err, fehlt, atWind, atStadt } = useMemo(() => runVorbemessung(d), [
     JSON.stringify(buildVmInput(d)), d.vm_untergrund, d.vm_system, d.vm_land,
     d.vm_at_stadt, d.vm_at_seehoehe, d.vm_at_gk, d.vm_at_bereich,
   ]);
@@ -1819,6 +1870,17 @@ function VorbemessungDE({ d, setD, hasPdf }){
             )}
           </div>
 
+          {fehlt?.length > 0 && (
+            <div style={{ padding: "10px 12px", background: "#FFF8E1", border: "1px solid #FFB30055",
+              borderRadius: 6, color: "#7A5900", fontSize: 12, marginTop: 10 }}>
+              <strong>Noch keine Berechnung möglich.</strong> Es fehlen:{" "}
+              {fehlt.join(" · ")}
+              <div style={{ fontSize: 10.5, color: GL, marginTop: 4 }}>
+                Diese Angaben werden bewusst nicht vorbelegt — sie gehen direkt in Windlast,
+                Hebelarm und Bemessung ein.
+              </div>
+            </div>
+          )}
           {err && (
             <div style={{ marginTop: 12, padding: "10px 12px", background: "#FFF8E1", border: "1px solid #E68A0040", borderRadius: 6, fontSize: 11.5, color: "#7A4A00" }}>
               ⚠ {err}
@@ -2613,7 +2675,7 @@ export default function App(){
           <strong>Fehler beim Lesen:</strong> {parseErr}
         </div>}
         <div style={{marginTop:18,display:"flex",gap:10,justifyContent:"center",flexWrap:"wrap"}}>
-          <button onClick={()=>{const{document:doc}=buildDocument("");setD({...doc,vm_modus:"rechnen"});setStep("edit");}}
+          <button onClick={()=>{setD({...leeresDokument(),vm_modus:"rechnen"});setStep("edit");}}
             style={{padding:"8px 18px",fontSize:11,color:R,background:WH,border:`1px solid ${R}`,borderRadius:6,cursor:"pointer",fontWeight:700}}>
             🧮 Ohne PDF – Vorbemessung im Tool berechnen →
           </button>

@@ -36,12 +36,15 @@ function commonLinear(input) {
   const z = num(input.gebaeudehoehe), d = num(input.gebaeudelaenge), b = num(input.gebaeudebreite);
   const wz = Number(input.windzone), gk = String(input.gelaendekategorie);
   const lk = Number(input.lastklasse), li = lk - 1;
-  const daemm = num(input.daemmdicke), putz = num(input.putzdicke), ttol = num(input.ttol);
+  const daemm = num(input.daemmdicke), ttol = num(input.ttol);
+  // Putzdicke ist optional: keine Angabe = keine zusätzliche Putzschicht.
+  const putz = Number.isFinite(num(input.putzdicke)) ? num(input.putzdicke) : 0;
   const L = num(input.seillaenge);                       // Seillänge [m]
   const K = BAUTEIL_KONST;
 
   const tWDVS = daemm + putz;
   const e = tWDVS + ttol;
+  if (!Number.isFinite(e)) throw new Error("Unvollständige Eingaben: Dämmdicke und Dicke Kleber + Altputz werden benötigt.");
   const l1 = e + K.a + 0.5 * K.d2 + K.La;
   const l2 = l1 - K.La - 15;
 

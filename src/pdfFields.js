@@ -370,6 +370,40 @@ export function parseFields(rawText) {
   return { values, hits, misses, unplausibel };
 }
 
+/**
+ * Leeres Dokument für eine NEUE Vorbemessung ohne PDF.
+ *
+ * Bewusst ohne Projektdaten: buildDocument() setzt als Rückfall für den
+ * PDF-Import Werte wie Gebäude 10 m, Fassade 10 × 6 m, Windzone 2,
+ * Lastklasse 3, t_tol 10 mm.  Beim Start ohne PDF wirkten die wie eine
+ * fertige Vorbemessung — inklusive gerechnetem Raster und Bestellbezeichnung,
+ * ohne dass jemand eine Zahl eingegeben hatte.
+ *
+ * Vorbelegt bleibt nur, was keine Messgröße ist: Dokumentnummer, Datum,
+ * Version und die Auswahlfelder (Verankerungsgrund, Seilführung, Seilkreuztyp).
+ */
+export function leeresDokument() {
+  return {
+    bauvorhaben: "", ort_plz: "", bearbeiter: "",
+    datum: todayDe(), dokNr: todayDoc(), version: "V1.0",
+    // Auswahlfelder mit echtem Standard
+    produkt: "eco260",
+    verankerungsgrund: "ks_vollstein",
+    seilfuehrung: "gitter",
+    seilkreuztyp: "ohne",
+    // Alles Messbare bleibt leer
+    wdvs_dicke: "", dicke_klebschicht: "", gebaeudehoehe: "",
+    gelaendekategorie: "", windlastzone: "", lastklasse: "",
+    druckfestigkeit: "", rohdichte: "", verankerungstiefe: "",
+    pflanze_botanisch: "", pflanze_deutsch: "", psi: "",
+    ws: "", nek: "", ned_z: "", ned_d: "", ved: "", vrd: "",
+    LH: "", LV: "", stk_m2: "",
+    nw_zug: "", nw_druck: "", nw_quer: "", nw_kombi: "",
+    fassadenlaenge: "", fassadenhoehe: "", geometrie_art: "",
+    fassaden: [{ name: "Fassade 1", breite: "", hoehe: "" }],
+  };
+}
+
 // Build the complete defaults object and overlay parsed values.
 // `rawText` is also returned so the UI can show what we actually got.
 export function buildDocument(rawText) {
