@@ -2268,7 +2268,10 @@ export default function App(){
   const[dragOver,setDragOver]=useState(false);
   const[restored,setRestored]=useState(false);    // banner shown after auto-restore
   const[lastSaved,setLastSaved]=useState(null);
-  const[saveErr,setSaveErr]=useState("");   // sichtbarer Hinweis, wenn Autosave scheitert   // timestamp of last successful save
+  const[saveErr,setSaveErr]=useState("");   // sichtbarer Hinweis, wenn Autosave scheitert
+  const[dateiName,setDateiName]=useState("");   // zuletzt gespeicherte/geoeffnete Projektdatei
+  const dateiHandleRef=useRef(null);            // FileSystemFileHandle, wenn der Browser ihn kennt
+  const loadProjectRef=useRef(null);            // damit openProject das Laden aufrufen kann   // timestamp of last successful save
   const[saving,setSaving]=useState(false);        // a save is queued / in flight
   const[, forceTick]=useState(0);                 // re-render every 15s so fmtAgo stays fresh
   const fRef=useRef(null);
@@ -2365,6 +2368,8 @@ export default function App(){
     if(cleared?.version!==null&&cleared?.version!==undefined) idbVersionRef.current=cleared.version;
     setSaving(false);
     setSaveErr("");
+    dateiHandleRef.current=null;
+    setDateiName("");
     setD({});
     setPdfN("");
     setParseInfo(null);
@@ -2483,16 +2488,71 @@ export default function App(){
   // Serialisiert das komplette document `d` (inkl. Fassaden, Plan-Bilder als
   // Data-URLs und Annotationen) in eine Datei, die später wieder geladen werden
   // kann, um das Projekt im Tool weiterzubearbeiten.
-  const saveProject=useCallback(()=>{
+  // ── Projekt speichern / öffnen ───────────────────────────
+  // Wo möglich über die File System Access API: dann laesst sich dieselbe
+  // Datei erneut beschreiben ("Speichern"), statt bei jedem Mal eine weitere
+  // Kopie in den Download-Ordner zu legen.  Wo sie fehlt (Firefox, Safari,
+  // teils im eingebetteten Plattform-Frame), faellt es auf den Download
+  // zurueck — dort ist jedes Speichern automatisch ein "Speichern unter".
+  const kannDateiPicker = typeof window!=="undefined" && typeof window.showSaveFilePicker==="function";
+  const DATEI_TYP=[{description:"Iso-Bar ECO Projekt",accept:{"application/json":[".ejot.json",".json"]}}];
+
+  const saveProject=useCallback(async({alsNeu=false}={})=>{
     setShowExportMenu(false);
     const json=JSON.stringify(baueProjektPayload({d,pdfN}),null,2);
+    if(kannDateiPicker){
+      try{
+        let handle=alsNeu?null:dateiHandleRef.current;
+        if(!handle) handle=await window.showSaveFilePicker({suggestedName:projektDateiname(d),types:DATEI_TYP});
+        const w=await handle.createWritable();
+        await w.write(json); await w.close();
+        dateiHandleRef.current=handle;
+        setDateiName(handle.name);
+        setSaveErr("");
+        return true;
+      }catch(err){
+        if(err?.name==="AbortError") return false;          // Nutzer hat abgebrochen
+        // sonst weiter zum Download-Fallback (z. B. Frame ohne Berechtigung)
+      }
+    }
+    const name=projektDateiname(d);
     const blob=new Blob([json],{type:"application/json"});
     const url=URL.createObjectURL(blob);
     const a=document.createElement("a");
-    a.href=url; a.download=projektDateiname(d);
+    a.href=url; a.download=name;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     setTimeout(()=>URL.revokeObjectURL(url),1000);
-  },[d,pdfN]);
+    setDateiName(name);
+    return true;
+  },[d,pdfN,kannDateiPicker]);
+
+  const openProject=useCallback(async()=>{
+    setShowExportMenu(false);
+    if(kannDateiPicker){
+      try{
+        const [handle]=await window.showOpenFilePicker({types:DATEI_TYP,multiple:false});
+        const file=await handle.getFile();
+        await loadProjectRef.current?.(file);
+        dateiHandleRef.current=handle;
+        setDateiName(handle.name);
+        return;
+      }catch(err){ if(err?.name==="AbortError") return; }
+    }
+    projectInRef.current?.click();
+  },[kannDateiPicker]);
+
+  // Tastenkürzel: Strg+S speichern, Strg+Umschalt+S speichern unter, Strg+O öffnen.
+  useEffect(()=>{
+    const onKey=e=>{
+      if(!(e.ctrlKey||e.metaKey)) return;
+      const k=e.key?.toLowerCase();
+      if(k==="s"){ e.preventDefault(); saveProject({alsNeu:e.shiftKey}); }
+      else if(k==="o"){ e.preventDefault(); openProject(); }
+    };
+    window.addEventListener("keydown",onKey);
+    return()=>window.removeEventListener("keydown",onKey);
+  },[saveProject,openProject]);
+
 
   const loadProject=useCallback(async(file)=>{
     if(!file) return;
@@ -2507,12 +2567,16 @@ export default function App(){
       setPdfN(pdfName);
       setParseInfo(null); setParseErr("");
       setRestored(false); setSaving(false); setSaveErr(""); setLastSaved(null);
+      if(file.name) setDateiName(file.name);
       setStep("edit");
     }catch(err){
       setParseErr("Projektdatei konnte nicht geladen werden: "+(err.message||String(err)));
     }
   },[]);
-  const handleProjectFile=useCallback(e=>{const f=e.target.files?.[0];if(f)loadProject(f);if(e.target)e.target.value="";},[loadProject]);
+  loadProjectRef.current=loadProject;
+  // Ueber das versteckte Eingabefeld geladen: kein Handle, spaeteres "Speichern"
+  // erzeugt daher eine neue Datei.
+  const handleProjectFile=useCallback(e=>{const f=e.target.files?.[0];if(f){dateiHandleRef.current=null;loadProject(f);}if(e.target)e.target.value="";},[loadProject]);
 
   // CSV export of the material list — for direct hand-off to Einkauf.
   // German Excel-friendly: ';' separator, BOM, comma decimal, dot thousands.
@@ -2710,10 +2774,11 @@ export default function App(){
             <div style={{fontSize:10,color:GY,marginTop:2,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
               <span>{d.bauvorhaben||"Neues Projekt"} {d.ort_plz&&<>· {d.ort_plz}</>}</span>
               {pdfN&&<span style={{color:GL}}>← {pdfN}</span>}
-              {(saving||lastSaved||saveErr)&&<span title={saveErr||"Wird lokal in deinem Browser gespeichert (IndexedDB). Nichts wird hochgeladen."}
+              {(saving||lastSaved||saveErr||dateiName)&&<span title={saveErr||"Wird lokal in deinem Browser gespeichert (IndexedDB). Nichts wird hochgeladen."}
                 style={{display:"inline-flex",alignItems:"center",gap:4,padding:"1px 7px",borderRadius:10,background:saving?"#E3F2FD":saveErr?"#FFEBEE":"#E8F5E9",color:saving?"#1565C0":saveErr?R:"#1B5E20",border:`1px solid ${saving?"#90CAF9":saveErr?R+"60":"#A5D6A7"}`,fontWeight:600,fontSize:9.5}}>
                 <span style={{width:6,height:6,borderRadius:"50%",background:saving?"#1565C0":"#2E7D32",boxShadow:saving?"":""}}/>
-                {saving?"Speichert…":saveErr?"⚠ nicht gespeichert":fmtAgo(lastSaved)}
+                {saving?"Speichert…":saveErr?"⚠ nicht gespeichert":lastSaved?fmtAgo(lastSaved):"gespeichert"}
+                {dateiName&&!saving&&!saveErr&&<span style={{color:GL,fontWeight:500}}> · {dateiName}</span>}
               </span>}
             </div>
           </div>
@@ -2726,6 +2791,26 @@ export default function App(){
             style={{padding:"6px 10px",fontSize:11,border:`1px solid ${BD}`,borderRadius:6,background:WH,cursor:"pointer",color:DK,fontWeight:600,display:"flex",alignItems:"center",gap:4,transition:"all .15s"}}>
             ↩ Neu
           </button>
+          {/* Speichern/Öffnen gehören sichtbar in die Leiste — vorher lagen sie
+              im Menü hinter "PDF Export", wo sie niemand vermutet. */}
+          {(()=>{const btn={padding:"6px 10px",fontSize:11,border:`1px solid ${BD}`,borderRadius:6,background:WH,
+                            cursor:"pointer",color:DK,fontWeight:600,display:"flex",alignItems:"center",gap:4,transition:"all .15s"};
+            const hov=e=>{e.currentTarget.style.background=BG;e.currentTarget.style.borderColor=GL;};
+            const out=e=>{e.currentTarget.style.background=WH;e.currentTarget.style.borderColor=BD;};
+            return(<>
+              <button onClick={()=>saveProject()} onMouseEnter={hov} onMouseLeave={out} style={btn}
+                title={dateiName?`Speichern in „${dateiName}" (Strg+S)`:"Projekt als Datei speichern (Strg+S)"}>
+                💾 Speichern
+              </button>
+              <button onClick={()=>saveProject({alsNeu:true})} onMouseEnter={hov} onMouseLeave={out} style={btn}
+                title="Unter neuem Namen speichern (Strg+Umschalt+S)">
+                Speichern unter …
+              </button>
+              <button onClick={openProject} onMouseEnter={hov} onMouseLeave={out} style={btn}
+                title="Gespeichertes Projekt öffnen (Strg+O)">
+                📂 Öffnen
+              </button>
+            </>);})()}
           <div style={{display:"flex",gap:2,background:BG,padding:3,borderRadius:8,border:`1px solid ${BD}`}}>
             {tabs.map(t=>{const active=step===t.id;return(<button key={t.id} onClick={()=>setStep(t.id)}
               onMouseEnter={e=>{if(!active)e.currentTarget.style.background=`${R}08`;}}
