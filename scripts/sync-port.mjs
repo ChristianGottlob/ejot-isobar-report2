@@ -27,6 +27,7 @@ const MODULE = [
   ["src/num.js",             "src/isobar/num.ts"],
   ["src/fllStruktur.js",     "src/isobar/fllStruktur.ts"],
   ["src/pdfFields.js",       "src/isobar/pdfFields.ts"],
+  ["src/projektdatei.js",    "src/isobar/projektdatei.ts"],
   ["src/pdfExtract.js",      "src/isobar/pdfExtract.ts"],
   ["src/planUtils.js",       "src/isobar/planUtils.ts"],
   ["src/idbStore.js",        "src/isobar/idbStore.ts"],
