@@ -1,0 +1,23 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # Rechenkerne: Vorbemessung DE/AT, FLL-Strukturmaße, Zahlparser,
+      # PDF-Feldmuster.  Läuft ohne Browser (node:test).
+      - run: npm test
+      # Der Produktionsbuild ist Teil der Prüfung: er hat in der Vergangenheit
+      # Fehler gefunden, die im Dev-Server nicht auffielen.
+      - run: npm run build
