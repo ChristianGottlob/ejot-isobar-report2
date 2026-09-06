@@ -1159,7 +1159,7 @@ function SystemIso({ d }){
   const S=0.24;
   const T={wand:28,tol:Math.max(3,Math.min(20,tolMm*S)),daemm:Math.max(20,Math.min(80,wdvsMm*S)),putz:Math.max(3,Math.min(10,putzMm*S)),luft:40};
   const zTol=T.tol,zDae=zTol+T.daemm,zPutz=zDae+T.putz,zSeil=zPutz+T.luft;
-  const W=240,H=130,ox=248,oy=165,kx=0.9,ky=0.33;
+  const W=240,H=130,ox=282,oy=165,kx=0.9,ky=0.33;
   const P=(x,y,z)=>[ox-x*kx+z*kx, oy+x*ky+z*ky-y];
   const q=(pts,fill,extra)=>{const dd="M"+pts.map(p=>p[0].toFixed(1)+","+p[1].toFixed(1)).join("L")+"Z";
     return <path d={dd} fill={fill} stroke="rgba(20,25,30,.28)" strokeWidth=".6" {...(extra||{})}/>;};
@@ -1175,10 +1175,13 @@ function SystemIso({ d }){
   </g>);
   // Iso-Bar entlang der Tiefenachse (30 Grad): Rippenstab, Dichtscheibe,
   // Edelstahl-Scheibe, Gewindestift, Sechskant, Adapterzylinder mit Bohrung.
+  // Achsrichtung der Tiefe exakt aus der Projektion ableiten, damit
+  //   Dichtscheibe auf der Putzflaeche und Bohrung auf der Seilebene liegen.
+  const angZ=Math.atan2(ky,kx)*180/Math.PI, sclZ=Math.hypot(kx,ky);
   const Anker=({ax,ay,mitStab})=>{
     const [px,py]=P(ax,ay,-16); const z0=16;
     const xP=z0+zPutz, xS=z0+zSeil, xHex=xS-26, xStift0=xP+8;
-    return(<g transform={`translate(${px.toFixed(1)},${py.toFixed(1)}) rotate(20.1)`}>
+    return(<g transform={`translate(${px.toFixed(1)},${py.toFixed(1)}) rotate(${angZ.toFixed(2)}) scale(${sclZ.toFixed(4)},1)`}>
       {mitStab
         ? <><rect x="0" y="-4.5" width={xP+1} height="9" rx="4.5" fill="url(#siRod)"/>
             <rect x="4" y="-4.5" width={xP-6} height="9" fill="url(#siRibs)"/></>
@@ -1198,15 +1201,15 @@ function SystemIso({ d }){
   };
   const ax1=W*0.30, ax2=W*0.70, ay2=H*0.42;
   const seil="#79828B";
-  const lbl={fontFamily:MONO_F,fontSize:7,fill:GY,letterSpacing:.8};
-  const leader="#B5B1AA";
-  const mitte=(z0,z1)=>P(W,H*0.78,(z0+z1)/2);
-  const L=(tx,ty,anchor,pt,text)=>(<g>
-    <text x={tx} y={ty} textAnchor={anchor} style={lbl}>{text}</text>
-    <line x1={anchor==="end"?tx+3:tx-3} y1={ty+2} x2={pt[0]} y2={pt[1]} stroke={leader} strokeWidth=".7"/>
+  // Nummerierte Positionsmarken (wie im Detailblatt) statt langer, sich
+  //   kreuzender Hinweislinien; die Legende steht unter der Zeichnung.
+  const Num=({n,x,y,tx,ty})=>(<g>
+    <line x1={tx} y1={ty} x2={x} y2={y} stroke="#9C978F" strokeWidth=".8"/>
+    <circle cx={x} cy={y} r="8" fill={WH} stroke="#8B939C" strokeWidth=".9"/>
+    <text x={x} y={y+2.8} textAnchor="middle" fontFamily={MONO_F} fontSize="8.5" fontWeight="700" fill="#333">{n}</text>
   </g>);
   return(
-    <svg viewBox="0 0 560 306" width="100%" style={{display:"block",maxWidth:660,margin:"0 auto"}} aria-label="Isometrischer Systemschnitt">
+    <svg viewBox="0 0 560 312" width="100%" style={{display:"block",maxWidth:660,margin:"0 auto"}} aria-label="Isometrischer Systemschnitt">
       <defs>
         <linearGradient id="siSteel" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0" stopColor="#7E858D"/><stop offset=".45" stopColor="#E6EAED"/>
@@ -1242,16 +1245,26 @@ function SystemIso({ d }){
         <line x1={P(-10,ay2,zSeil)[0]} y1={P(-10,ay2,zSeil)[1]} x2={P(W+10,ay2,zSeil)[0]} y2={P(W+10,ay2,zSeil)[1]}/>
         <line x1={P(-10,H,zSeil)[0]} y1={P(-10,H,zSeil)[1]} x2={P(W+10,H,zSeil)[0]} y2={P(W+10,H,zSeil)[1]}/>
       </g>
+      {/* Bohrkanal des oberen Ankers auf der Schnittflaeche — bindet den
+          Rippenstab sichtbar in den Wandaufbau ein */}
+      {q([P(ax1-5,H,-16),P(ax1+5,H,-16),P(ax1+5,H,zPutz),P(ax1-5,H,zPutz)],"rgba(96,86,60,.18)",{stroke:"rgba(96,86,60,.35)",strokeWidth:.5})}
+      {/* Schattenwurf des vorderen Adapters auf der Putzflaeche */}
+      <ellipse cx={P(ax2,ay2,zPutz)[0]+7} cy={P(ax2,ay2,zPutz)[1]+9} rx="13" ry="5.5" fill="rgba(20,25,30,.13)"/>
       {/* Anker: oben im Schnitt (mit sichtbarem Rippenstab), vorne auf der Flaeche */}
       <Anker ax={ax1} ay={H} mitStab/>
       <Anker ax={ax2} ay={ay2}/>
       {/* Beschriftung */}
-      {L(112,18,"end",mitte(-T.wand,0),"VERANKERUNGSGRUND")}
-      {L(112,34,"end",mitte(0,zTol),"KLEBER + ALTPUTZ")}
-      {L(112,50,"end",mitte(zTol,zDae),"DÄMMUNG (WDVS)")}
-      {L(112,66,"end",mitte(zDae,zPutz),"PUTZ")}
-      {L(462,26,"start",P(ax1,H+3,zDae*0.6),"ISO-BAR ECO")}
-      {L(462,42,"start",P(ax1,H+10,zSeil),"SEILEBENE")}
+      {/* Spalte links, von oben nach unten in Schichtreihenfolge — die
+          Hinweislinien fächern ohne Überschneidung zu den Dickenbändern. */}
+      {[[1,-T.wand/2],[2,zTol/2],[3,(zTol+zDae)/2],[4,(zDae+zPutz)/2]].map(([n,zm],i)=>{
+        const t=P(W,H*0.5,zm);
+        return <Num key={n} n={n} x={22} y={116+i*26} tx={t[0]} ty={t[1]}/>;
+      })}
+      {(()=>{const t=P(ax1,H,4);return <Num n={5} x={t[0]+34} y={t[1]-30} tx={t[0]} ty={t[1]}/>;})()}
+      {(()=>{const t=P(ax1,H+14,zSeil);return <Num n={6} x={t[0]+36} y={t[1]-20} tx={t[0]} ty={t[1]}/>;})()}
+      <text x="270" y="300" textAnchor="middle" fontFamily={MONO_F} fontSize="7.5" fill={GY} letterSpacing=".6">
+        1 VERANKERUNGSGRUND · 2 KLEBER + ALTPUTZ · 3 DÄMMUNG (WDVS) · 4 PUTZ · 5 ISO-BAR ECO · 6 SEILEBENE
+      </text>
     </svg>
   );
 }

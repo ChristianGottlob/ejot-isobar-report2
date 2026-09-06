@@ -226,7 +226,17 @@ export default function Facade3D({ d }) {
             {/* Seilebene */}
             {hatV && xs.map((x) => <Seil key={`v${x}`} x={x} z={zSeil} len={g.H - 24} vertikal dim={dimOf("seil")} />)}
             {hatH && ys.map((y) => <Seil key={`h${y}`} y={y} z={zSeil} len={g.W - 24} vertikal={false} dim={dimOf("seil")} />)}
-            {hatD && xs.map((x) => [45, -45].map((wk) => <Seil key={`d${x}${wk}`} x={x} z={zSeil} len={g.H + 40} vertikal rotZ={wk} dim={dimOf("seil")} />))}
+            {/* Raute: beide Diagonalen jedes Ankerfelds — Seile laufen von
+                Adapter zu Adapter statt frei durch den Raum. */}
+            {hatD && xs.slice(0, -1).map((x, i) => ys.slice(0, -1).map((y, j) => {
+              const x2 = xs[i + 1], y2 = ys[j + 1];
+              const cx = (x + x2) / 2, cy = (y + y2) / 2;
+              const len = Math.hypot(x2 - x, y2 - y);
+              const ang = Math.atan2(y2 - y, x2 - x) * 180 / Math.PI;
+              return [ang, -ang].map((a) => (
+                <Seil key={`d${i}-${j}-${a}`} x={cx} y={cy} z={zSeil} len={len} vertikal={false} rotZ={a} dim={dimOf("seil")} />
+              ));
+            }))}
           </div>
         </div>
         <div style={{ position: "absolute", left: 14, bottom: 10, fontFamily: MONO, fontSize: 9.5, color: "#7B838C", letterSpacing: 0.4 }}>
