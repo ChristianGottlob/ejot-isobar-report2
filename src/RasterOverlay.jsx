@@ -156,6 +156,10 @@ export default function RasterOverlay({
         <pattern id="ro-hatch" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">
           <line x1="0" y1="0" x2="0" y2="6" stroke="#222" strokeWidth="0.8" opacity="0.25" />
         </pattern>
+        {/* Draufsicht Iso-Bar-ECO-Adapter: Edelstahl mit Innensechskant-Senkung */}
+        <radialGradient id="ro-anker" cx="35%" cy="30%" r="80%">
+          <stop offset="0" stopColor="#F2F4F6" /><stop offset=".55" stopColor="#C9CED3" /><stop offset="1" stopColor="#8F969E" />
+        </radialGradient>
         <marker id={`${maskId}-arr`} markerWidth="8" markerHeight="8" refX="4.5" refY="4"
           orient="auto" markerUnits="userSpaceOnUse">
           <path d="M1,1 L7,4 L1,7" fill="none" stroke={BK} strokeWidth="1.1" />
@@ -193,13 +197,17 @@ export default function RasterOverlay({
       </g>
 
       {/* Anchors */}
+      {/* Anker als realistische Adapter-Draufsicht (Stahl + Innensechskant);
+          der dünne rote Ring erhält die Zählbarkeit als Planmarker. */}
       {havePlan ? (
         <g>
           {anchors.map((p, i) => (
             <g key={i}>
-              <circle cx={p.x} cy={p.y} r={anchorR} fill="#FFF" stroke={R} strokeWidth={Math.max(0.6, anchorR * 0.25)} />
               <line x1={p.x - anchorR * 1.6} y1={p.y} x2={p.x + anchorR * 1.6} y2={p.y} stroke={R} strokeWidth={Math.max(0.5, anchorR * 0.18)} />
               <line x1={p.x} y1={p.y - anchorR * 1.6} x2={p.x} y2={p.y + anchorR * 1.6} stroke={R} strokeWidth={Math.max(0.5, anchorR * 0.18)} />
+              <circle cx={p.x} cy={p.y} r={anchorR} fill="url(#ro-anker)" stroke={R} strokeWidth={Math.max(0.5, anchorR * 0.16)} />
+              <circle cx={p.x} cy={p.y} r={anchorR * 0.62} fill="none" stroke="#8B9199" strokeWidth={Math.max(0.4, anchorR * 0.1)} />
+              <circle cx={p.x} cy={p.y} r={anchorR * 0.3} fill="#26292D" />
             </g>
           ))}
         </g>
@@ -207,8 +215,9 @@ export default function RasterOverlay({
         <g>
           {anchors.map((p, i) => (
             <g key={i}>
-              <circle cx={p.x} cy={p.y} r={anchorR} fill={R} />
-              <circle cx={p.x} cy={p.y} r={anchorR * 0.4} fill={WH} opacity="0.55" />
+              <circle cx={p.x} cy={p.y} r={anchorR} fill="url(#ro-anker)" stroke={R} strokeWidth={Math.max(0.5, anchorR * 0.18)} />
+              <circle cx={p.x} cy={p.y} r={anchorR * 0.62} fill="none" stroke="#8B9199" strokeWidth={Math.max(0.4, anchorR * 0.1)} />
+              <circle cx={p.x} cy={p.y} r={anchorR * 0.32} fill="#26292D" />
             </g>
           ))}
         </g>

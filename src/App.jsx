@@ -1146,6 +1146,113 @@ function PreviewSection({d,maxNw,withRealistic=true}){
 // hilfen geeigneten Arten).  Das ist Inhalt der Richtlinie und gehört nicht in
 // den Projektauswurf — ausgegeben werden nur noch die Übersicht der
 // Pflanzenlastklassen (Anlage A) und die tatsächlich gewählte Pflanze.
+// ─────────────────────────────────────────────────────────────────
+// Anlage C: Isometrische Systemdarstellung — statisches, PDF-taugliches
+// Pendant zum interaktiven 3D-Modell.  Horizontaler Schnitt durch die obere
+// Ankerachse (Schraffur = Schnittflaeche), Iso-Bar ECO nach Produktfoto,
+// Schichtdicken skalieren mit den Projektwerten.
+function SystemIso({ d }){
+  const wdvsMm=pf(d.vm_daemm)||pf(d.wdvs_dicke)||200;
+  const tolMm=pf(d.dicke_klebschicht)||10;
+  const putzMm=pf(d.vm_putz)||10;
+  const isMW=d.vm_untergrund?d.vm_untergrund==="mauerwerk":!/beton/i.test(String(d.verankerungsgrund||"stein"));
+  const S=0.24;
+  const T={wand:28,tol:Math.max(3,Math.min(20,tolMm*S)),daemm:Math.max(20,Math.min(80,wdvsMm*S)),putz:Math.max(3,Math.min(10,putzMm*S)),luft:40};
+  const zTol=T.tol,zDae=zTol+T.daemm,zPutz=zDae+T.putz,zSeil=zPutz+T.luft;
+  const W=240,H=130,ox=248,oy=165,kx=0.9,ky=0.33;
+  const P=(x,y,z)=>[ox-x*kx+z*kx, oy+x*ky+z*ky-y];
+  const q=(pts,fill,extra)=>{const dd="M"+pts.map(p=>p[0].toFixed(1)+","+p[1].toFixed(1)).join("L")+"Z";
+    return <path d={dd} fill={fill} stroke="rgba(20,25,30,.28)" strokeWidth=".6" {...(extra||{})}/>;};
+  // Schicht als Iso-Block: Front, Deckflaeche (Schnitt, schraffiert), rechte Seite
+  const slab=(z0,z1,front,top,side,key)=>(<g key={key}>
+    {q([P(0,0,z1),P(W,0,z1),P(W,H,z1),P(0,H,z1)],front)}
+    {q([P(0,H,z0),P(W,H,z0),P(W,H,z1),P(0,H,z1)],top)}
+    {q([P(0,H,z0),P(W,H,z0),P(W,H,z1),P(0,H,z1)],"url(#siHatch)",{stroke:"none"})}
+    {q([P(0,0,z0),P(0,H,z0),P(0,H,z1),P(0,0,z1)],side)}
+  </g>);
+  // Iso-Bar entlang der Tiefenachse (30 Grad): Rippenstab, Dichtscheibe,
+  // Edelstahl-Scheibe, Gewindestift, Sechskant, Adapterzylinder mit Bohrung.
+  const Anker=({ax,ay,mitStab})=>{
+    const [px,py]=P(ax,ay,-16); const z0=16;
+    const xP=z0+zPutz, xS=z0+zSeil, xHex=xS-26, xStift0=xP+8;
+    return(<g transform={`translate(${px.toFixed(1)},${py.toFixed(1)}) rotate(20.1)`}>
+      {mitStab
+        ? <><rect x="0" y="-4.5" width={xP+1} height="9" rx="4.5" fill="url(#siRod)"/>
+            <rect x="4" y="-4.5" width={xP-6} height="9" fill="url(#siRibs)"/></>
+        : <rect x={xP-6} y="-4.5" width="7" height="9" rx="3.5" fill="url(#siRod)"/>}
+      <rect x={xP+0.5} y="-7.5" width="4.5" height="15" rx="2" fill="url(#siDark)"/>
+      <rect x={xP+5.2} y="-5.5" width="2.6" height="11" rx="1.3" fill="url(#siSteel)"/>
+      <rect x={xStift0} y="-2.4" width={xHex-xStift0} height="4.8" rx="2" fill="url(#siSteel)"/>
+      <rect x={xStift0} y="-2.4" width={xHex-xStift0} height="4.8" fill="url(#siThread)"/>
+      <rect x={xHex} y="-7.5" width="10" height="15" rx="1.5" fill="url(#siSteel)"/>
+      <line x1={xHex+1} y1="-2.6" x2={xHex+9} y2="-2.6" stroke="rgba(255,255,255,.55)" strokeWidth="1"/>
+      <rect x={xS-16} y="-5.8" width="24" height="11.6" rx="4.6" fill="url(#siSteel)"/>
+      <ellipse cx={xS+7.6} cy="0" rx="1.7" ry="5.4" fill="#AEB4BB" stroke="rgba(20,25,30,.3)" strokeWidth=".5"/>
+      <ellipse cx={xS+7.6} cy="0" rx="0.8" ry="2.4" fill="#26292D"/>
+      <circle cx={xS} cy="0" r="3" fill="#26292D"/>
+      <circle cx={xS-1} cy="-1.1" r="1.1" fill="#5A6067"/>
+    </g>);
+  };
+  const ax1=W*0.30, ax2=W*0.70, ay2=H*0.42;
+  const seil="#79828B";
+  const lbl={fontFamily:MONO_F,fontSize:7,fill:GY,letterSpacing:.8};
+  const leader="#B5B1AA";
+  const mitte=(z0,z1)=>P(W*0.86,H,(z0+z1)/2);
+  const L=(tx,ty,anchor,pt,text)=>(<g>
+    <text x={tx} y={ty} textAnchor={anchor} style={lbl}>{text}</text>
+    <line x1={anchor==="end"?tx+3:tx-3} y1={ty+2} x2={pt[0]} y2={pt[1]} stroke={leader} strokeWidth=".7"/>
+  </g>);
+  return(
+    <svg viewBox="0 0 560 306" width="100%" style={{display:"block",maxWidth:660,margin:"0 auto"}} aria-label="Isometrischer Systemschnitt">
+      <defs>
+        <linearGradient id="siSteel" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#7E858D"/><stop offset=".45" stopColor="#E6EAED"/>
+          <stop offset=".68" stopColor="#B7BDC3"/><stop offset="1" stopColor="#767D85"/>
+        </linearGradient>
+        <linearGradient id="siRod" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#B9B09A"/><stop offset=".45" stopColor="#F4EFE0"/>
+          <stop offset=".75" stopColor="#D6CEB6"/><stop offset="1" stopColor="#A99F85"/>
+        </linearGradient>
+        <linearGradient id="siDark" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#17181A"/><stop offset=".5" stopColor="#3E4044"/><stop offset="1" stopColor="#141517"/>
+        </linearGradient>
+        <pattern id="siRibs" width="5" height="60" patternUnits="userSpaceOnUse">
+          <rect width="2" height="60" fill="rgba(96,86,60,.32)"/>
+        </pattern>
+        <pattern id="siThread" width="3" height="30" patternUnits="userSpaceOnUse" patternTransform="rotate(8)">
+          <rect width="1" height="30" fill="rgba(20,25,30,.32)"/>
+        </pattern>
+        <pattern id="siHatch" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+          <line x1="0" y1="0" x2="0" y2="7" stroke="rgba(20,25,30,.32)" strokeWidth=".8"/>
+        </pattern>
+      </defs>
+      {/* Schichten von innen nach aussen */}
+      {slab(-T.wand,0,isMW?"#C3897B":"#B8B4AD",
+        isMW?"#D5A79A":"#C6C2BA", isMW?"#A87A6E":"#9A958D","wand")}
+      {slab(0,zTol,"#C9A86A","#DCBE86","#B39355","tol")}
+      {slab(zTol,zDae,"#EFE8D8","#F2ECDC","#CFC6AC","dae")}
+      {slab(zDae,zPutz,"#F6F3EC","#FBF9F4","#DDD8CC","putz")}
+      {/* Seilebene: je Anker eine vertikale + horizontale Seillinie */}
+      <g stroke={seil} strokeWidth="2" strokeLinecap="round">
+        <line x1={P(ax1,-8,zSeil)[0]} y1={P(ax1,-8,zSeil)[1]} x2={P(ax1,H+16,zSeil)[0]} y2={P(ax1,H+16,zSeil)[1]}/>
+        <line x1={P(ax2,-8,zSeil)[0]} y1={P(ax2,-8,zSeil)[1]} x2={P(ax2,H+16,zSeil)[0]} y2={P(ax2,H+16,zSeil)[1]}/>
+        <line x1={P(-10,ay2,zSeil)[0]} y1={P(-10,ay2,zSeil)[1]} x2={P(W+10,ay2,zSeil)[0]} y2={P(W+10,ay2,zSeil)[1]}/>
+        <line x1={P(-10,H,zSeil)[0]} y1={P(-10,H,zSeil)[1]} x2={P(W+10,H,zSeil)[0]} y2={P(W+10,H,zSeil)[1]}/>
+      </g>
+      {/* Anker: oben im Schnitt (mit sichtbarem Rippenstab), vorne auf der Flaeche */}
+      <Anker ax={ax1} ay={H} mitStab/>
+      <Anker ax={ax2} ay={ay2}/>
+      {/* Beschriftung */}
+      {L(112,18,"end",mitte(-T.wand,0),"VERANKERUNGSGRUND")}
+      {L(112,34,"end",mitte(0,zTol),"KLEBER + ALTPUTZ")}
+      {L(112,50,"end",mitte(zTol,zDae),"DÄMMUNG (WDVS)")}
+      {L(112,66,"end",mitte(zDae,zPutz),"PUTZ")}
+      {L(462,26,"start",P(ax1,H+3,zDae*0.6),"ISO-BAR ECO")}
+      {L(462,42,"start",P(ax1,H+10,zSeil),"SEILEBENE")}
+    </svg>
+  );
+}
+
 function AnlagenSection({d}){
   return(<div style={{background:WH}}>
     <div data-pdf-page="anlage-a" style={{borderTop:`3px solid ${R}`,padding:"16px 24px"}}>
@@ -1194,28 +1301,10 @@ function AnlagenSection({d}){
           schädigen Putz und Dämmung.
         </div></div></div>
     <div data-pdf-page="anlage-c" style={{borderTop:`6px solid ${BG}`,padding:"16px 24px"}}>
-      <PageHead title="Anlage C – Systemdetail" subtitle="ISO-Bar ECO, Schnittdarstellung"/>
+      <PageHead title="Anlage C – Systemdetail" subtitle="Isometrischer Systemschnitt mit EJOT Iso-Bar ECO"/>
       <div style={{borderTop:`1px solid ${R}`,marginBottom:12}}/>
       <div style={{border:`1px solid ${BD}`,borderRadius:4,padding:16}}>
-        <svg viewBox="0 0 500 170" width="100%" style={{maxWidth:520}}>
-          <defs><pattern id="ct" width="8" height="8" patternUnits="userSpaceOnUse"><path d="M0,4l2,-2M3,8l5,-5M7,8l1,-1" stroke="#999" strokeWidth=".5" fill="none"/></pattern>
-            <pattern id="ins" width="5" height="5" patternUnits="userSpaceOnUse"><circle cx="2.5" cy="2.5" r=".8" fill="#DDD"/></pattern></defs>
-          <rect x="10" y="15" width="130" height="140" fill="url(#ct)" stroke="#888" strokeWidth=".8"/>
-          <text x="60" y="164" textAnchor="middle" fontSize="7" fill={GY}>Verankerungs-</text><text x="60" y="172" textAnchor="middle" fontSize="7" fill={GY}>grund</text>
-          <rect x="148" y="15" width="120" height="140" fill="url(#ins)" stroke="#AAA" strokeWidth=".8"/>
-          <rect x="80" y="82" width="220" height="6" fill="#999" stroke="#666" strokeWidth=".5" rx="1"/>
-          {[...Array(12)].map((_,i)=><line key={i} x1={85+i*8} y1={81} x2={89+i*8} y2={89} stroke="#777" strokeWidth=".6"/>)}
-          <rect x="268" y="15" width="8" height="140" fill="#E8E4E0" stroke="#BBB" strokeWidth=".5"/>
-          <rect x="276" y="78" width="14" height="14" fill="#888" stroke="#666" strokeWidth=".5" rx="1"/>
-          <rect x="290" y="80" width="16" height="10" fill="#777" stroke="#555" strokeWidth=".5" rx="2"/>
-          <circle cx="320" cy="85" r="9" fill="none" stroke="#555" strokeWidth="1.5"/><line x1="306" y1="85" x2="311" y2="85" stroke="#555" strokeWidth="1.5"/>
-          <text x="338" y="88" fontSize="7" fill={GY}><tspan>T</tspan><tspan dy="2" fontSize="5">inst</tspan></text>
-          <line x1="80" y1="10" x2="140" y2="10" stroke={BK} strokeWidth=".5"/><text x="110" y="8" textAnchor="middle" fontSize="7" fill={BK}>h<tspan dy="2" fontSize="5">ef</tspan></text>
-          <line x1="150" y1="6" x2="268" y2="6" stroke={BK} strokeWidth=".5"/><text x="209" y="4" textAnchor="middle" fontSize="7" fill={BK}>t<tspan dy="2" fontSize="5">WDVS</tspan></text>
-          <line x1="148" y1="2" x2="276" y2="2" stroke={R} strokeWidth=".6"/><text x="212" y="0" textAnchor="middle" fontSize="7" fill={R} fontWeight="bold">e</text>
-          <line x1="276" y1="10" x2="306" y2="10" stroke={BK} strokeWidth=".5"/><text x="291" y="8" textAnchor="middle" fontSize="7" fill={BK}>a</text>
-          <text x="148" y="168" textAnchor="middle" fontSize="6" fill={GL}>US</text><text x="295" y="168" textAnchor="middle" fontSize="6" fill={GL}>AS</text>
-        </svg>
+        <SystemIso d={d}/>
         <div style={{fontSize:8.5,color:GL,marginTop:8}}>Maßgebend: Zulassung Z-21.8-2083, Montageanleitung, projektspezifische Planung.</div>
         {d.wdvs_dicke&&<div style={{display:"flex",gap:14,marginTop:8,flexWrap:"wrap"}}>
           {[["t_WDVS",`${d.wdvs_dicke} mm`],["t_tol",`${d.dicke_klebschicht||10} mm`],["h_ef,min",d.verankerungstiefe?`${d.verankerungstiefe} mm`:"–"],

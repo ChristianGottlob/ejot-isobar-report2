@@ -72,6 +72,10 @@ export default function DetailCrop({
           orient="auto" markerUnits="userSpaceOnUse">
           <path d="M1,1 L8,4.5 L1,8" fill="none" stroke={dimCol} strokeWidth="1.4" />
         </marker>
+        {/* Draufsicht Iso-Bar-ECO-Adapter: Edelstahl mit Innensechskant-Senkung */}
+        <radialGradient id="dc-anker" cx="35%" cy="30%" r="80%">
+          <stop offset="0" stopColor="#F2F4F6" /><stop offset=".55" stopColor="#C9CED3" /><stop offset="1" stopColor="#8F969E" />
+        </radialGradient>
       </defs>
 
       {/* Frame + caption */}
@@ -135,12 +139,14 @@ export default function DetailCrop({
         ));
       })()}
 
-      {/* Anchors (CAD crosshair) */}
+      {/* Anchors: realistische Adapter-Draufsicht mit CAD-Fadenkreuz */}
       {xs.map((x, ci) => ys.map((y, ri) => (
         <g key={`a${ci}-${ri}`}>
           <line x1={x - anchorR * 1.7} y1={y} x2={x + anchorR * 1.7} y2={y} stroke={R} strokeWidth="1.4" />
           <line x1={x} y1={y - anchorR * 1.7} x2={x} y2={y + anchorR * 1.7} stroke={R} strokeWidth="1.4" />
-          <circle cx={x} cy={y} r={anchorR} fill={WH} stroke={R} strokeWidth="2" />
+          <circle cx={x} cy={y} r={anchorR} fill="url(#dc-anker)" stroke={R} strokeWidth="1.6" />
+          <circle cx={x} cy={y} r={anchorR * 0.62} fill="none" stroke="#8B9199" strokeWidth="1" />
+          <circle cx={x} cy={y} r={anchorR * 0.3} fill="#26292D" />
         </g>
       )))}
 
