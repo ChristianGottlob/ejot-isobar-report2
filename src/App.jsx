@@ -2800,23 +2800,69 @@ export default function App(){
           PDF einlesen, Werte prüfen, Nachweise rechnen — und als sauberes Report-Paket
           exportieren. Alle Daten bleiben lokal in deinem Browser.
         </p>
-        {/* Systemskizze Wand → Dämmung → Iso-Bar → Seil → Bewuchs, zeichnet sich beim Laden */}
-        <svg viewBox="0 0 640 96" width="100%" height="76" style={{display:"block",marginBottom:20}} aria-hidden="true">
-          <g fill="none" strokeLinecap="round">
-            <rect x="8" y="10" width="96" height="76" stroke="#9A968F" strokeWidth="1.2" style={{strokeDasharray:344,strokeDashoffset:344,animation:"zeichnen .9s .1s ease-out forwards"}}/>
-            {[0,1,2,3,4].map(i=><line key={i} x1={16+i*18} y1="82" x2={32+i*18} y2="14" stroke="#C6C2BB" strokeWidth="1" style={{strokeDasharray:80,strokeDashoffset:80,animation:`zeichnen .6s ${.25+i*.06}s ease-out forwards`}}/>)}
-            <rect x="112" y="10" width="72" height="76" stroke="#C9A86A" strokeWidth="1.2" style={{strokeDasharray:296,strokeDashoffset:296,animation:"zeichnen .9s .45s ease-out forwards"}}/>
-            <line x1="56" y1="48" x2="302" y2="48" stroke="#1A1A1A" strokeWidth="2.2" style={{strokeDasharray:246,strokeDashoffset:246,animation:"zeichnen .8s .75s ease-out forwards"}}/>
-            <circle cx="314" cy="48" r="9" stroke={R} strokeWidth="2" style={{strokeDasharray:57,strokeDashoffset:57,animation:"zeichnen .5s 1.15s ease-out forwards"}}/>
-            <line x1="314" y1="12" x2="314" y2="86" stroke="#8B939C" strokeWidth="1.4" style={{strokeDasharray:74,strokeDashoffset:74,animation:"zeichnen .6s 1.3s ease-out forwards"}}/>
-            <path d="M 314 86 C 360 70 380 34 428 44 C 470 52 490 20 548 26 C 570 28 592 18 620 22" stroke={GN} strokeWidth="1.8" style={{strokeDasharray:340,strokeDashoffset:340,animation:"zeichnen 1.1s 1.5s ease-out forwards"}}/>
-            {[[430,40],[500,32],[560,22]].map(([cx,cy],i)=><circle key={i} cx={cx} cy={cy} r="3.2" stroke={GN} strokeWidth="1.4" style={{strokeDasharray:21,strokeDashoffset:21,animation:`zeichnen .4s ${1.9+i*.15}s ease-out forwards`}}/>)}
+        {/* Produktgrafik: EJOT Iso-Bar ECO (Rippenstab · Dichtscheibe · Gewinde · Seilhalter) */}
+        <svg viewBox="0 0 640 108" width="100%" height="86" style={{display:"block",marginBottom:20}} aria-hidden="true">
+          <defs>
+            <linearGradient id="ibRod" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stopColor="#B9B09A"/><stop offset=".45" stopColor="#F4EFE0"/>
+              <stop offset=".75" stopColor="#D6CEB6"/><stop offset="1" stopColor="#A99F85"/>
+            </linearGradient>
+            <linearGradient id="ibSteel" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stopColor="#7E858D"/><stop offset=".45" stopColor="#E6EAED"/>
+              <stop offset=".68" stopColor="#B7BDC3"/><stop offset="1" stopColor="#767D85"/>
+            </linearGradient>
+            <linearGradient id="ibDark" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stopColor="#17181A"/><stop offset=".5" stopColor="#3E4044"/><stop offset="1" stopColor="#141517"/>
+            </linearGradient>
+            <pattern id="ibRibs" width="7" height="60" patternUnits="userSpaceOnUse">
+              <rect x="0" y="0" width="2.6" height="60" fill="rgba(96,86,60,.30)"/>
+            </pattern>
+            <pattern id="ibThread" width="4" height="20" patternUnits="userSpaceOnUse" patternTransform="rotate(10)">
+              <rect x="0" y="0" width="1.3" height="20" fill="rgba(20,25,30,.30)"/>
+            </pattern>
+          </defs>
+          {/* Beschriftungen mit Hinweislinien */}
+          <g fontFamily="IBM Plex Mono,monospace" fontSize="7" fill="#8B939C" style={{animation:"fadeUp .5s 1s both"}}>
+            <text x="200" y="16" textAnchor="middle" letterSpacing="1">RIPPENSTAB</text>
+            <line x1="200" y1="20" x2="200" y2="30" stroke="#C6C2BB" strokeWidth=".8"/>
+            <text x="386" y="10" textAnchor="middle" letterSpacing="1">DICHTSCHEIBE</text>
+            <line x1="386" y1="14" x2="386" y2="21" stroke="#C6C2BB" strokeWidth=".8"/>
+            <text x="500" y="16" textAnchor="middle" letterSpacing="1">SEILHALTER</text>
+            <line x1="500" y1="20" x2="500" y2="30" stroke="#C6C2BB" strokeWidth=".8"/>
           </g>
-          <text x="56" y="8" fontSize="7" fill="#8B939C" fontFamily="IBM Plex Mono,monospace">WAND</text>
-          <text x="130" y="8" fontSize="7" fill="#8B939C" fontFamily="IBM Plex Mono,monospace">WDVS</text>
-          <text x="252" y="42" fontSize="7" fill="#8B939C" fontFamily="IBM Plex Mono,monospace">ISO-BAR</text>
-          <text x="322" y="10" fontSize="7" fill="#8B939C" fontFamily="IBM Plex Mono,monospace">SEIL</text>
-          <text x="596" y="40" fontSize="7" fill={GN} fontFamily="IBM Plex Mono,monospace">BEWUCHS</text>
+          {/* Rippenstab */}
+          <g style={{animation:"fadeUp .5s .15s both"}}>
+            <rect x="40" y="34" width="344" height="28" rx="14" fill="url(#ibRod)"/>
+            <rect x="46" y="34" width="332" height="28" fill="url(#ibRibs)"/>
+          </g>
+          {/* Dichtscheibe + Edelstahl-Scheibe */}
+          <g style={{animation:"fadeUp .5s .35s both"}}>
+            <rect x="380" y="24" width="10" height="48" rx="4" fill="url(#ibDark)"/>
+            <rect x="391" y="30" width="6" height="36" rx="2.5" fill="url(#ibSteel)"/>
+          </g>
+          {/* Gewindestift */}
+          <g style={{animation:"fadeUp .5s .5s both"}}>
+            <rect x="397" y="44" width="46" height="9" rx="3.5" fill="url(#ibSteel)"/>
+            <rect x="399" y="44" width="42" height="9" fill="url(#ibThread)"/>
+          </g>
+          {/* Seilhalter: Sechskant + Zylinder mit Querbohrung und Schlitz */}
+          <g style={{animation:"fadeUp .5s .65s both"}}>
+            <rect x="443" y="32" width="26" height="33" rx="2.5" fill="url(#ibSteel)"/>
+            <line x1="443" y1="42" x2="469" y2="42" stroke="rgba(255,255,255,.55)" strokeWidth="1"/>
+            <line x1="443" y1="55" x2="469" y2="55" stroke="rgba(20,25,30,.22)" strokeWidth="1"/>
+            <rect x="469" y="36" width="64" height="25" rx="9" fill="url(#ibSteel)"/>
+            <circle cx="509" cy="48.5" r="5.5" fill="#2E3237"/>
+            <circle cx="507.5" cy="47" r="2" fill="#5A6067"/>
+            <rect x="522" y="44" width="4.5" height="9" rx="2" fill="#3A3F44"/>
+          </g>
+          {/* Maßlinie mit den Set-Längen */}
+          <g style={{animation:"fadeUp .5s .85s both"}} stroke="#1A1A1A" strokeWidth=".8">
+            <line x1="40" y1="80" x2="384" y2="80"/>
+            <line x1="40" y1="75" x2="40" y2="85"/>
+            <line x1="384" y1="75" x2="384" y2="85"/>
+          </g>
+          <text x="212" y="97" textAnchor="middle" fontFamily="IBM Plex Mono,monospace" fontSize="8" fill="#1A1A1A" style={{animation:"fadeUp .5s .85s both"}}>L = 200 · 260 · 320 · 380 mm</text>
+          <text x="500" y="80" textAnchor="middle" fontFamily="IBM Plex Mono,monospace" fontSize="7" fill="#8B939C" letterSpacing="1" style={{animation:"fadeUp .5s 1s both"}}>EJOT ISO-BAR ECO</text>
         </svg>
         <div
           onClick={()=>fRef.current?.click()}
