@@ -7,6 +7,10 @@
 // Darstellung mit typischen Maßen ersetzt und in der Maßliste als "–" gezeigt.
 // Schnittflächen (oben/rechts) tragen eine 45°-Schraffur wie im technischen
 // Schnitt.  Drehen per Ziehen, Explosionsansicht per Regler.
+//
+// Runde Bauteile (Stab, Scheiben, Adapter) sind Facetten-Zylinder mit
+// geschlossener Mantelfläche — gekreuzte Ebenen sahen aus schrägen
+// Blickwinkeln durchsichtig aus.
 // ─────────────────────────────────────────────────────────────────
 import { Fragment, useEffect, useRef, useState } from "react";
 import { parseNum } from "./num.js";
@@ -38,7 +42,7 @@ function Quader({ x = 0, y = 0, z = 0, w, h, t, color, cut = false, dim = false,
   );
 }
 
-// Seil als zwei gekreuzte, dünne Ebenen — bleibt aus jedem Blickwinkel sichtbar.
+// Seil als zwei gekreuzte, dünne Ebenen — bei 2 px Stärke unproblematisch.
 function Seil({ x = 0, y = 0, z = 0, len, vertikal = true, rotZ = 0, dim = false }) {
   const pl = (rot) => (
     <div style={{
@@ -55,40 +59,50 @@ function Seil({ x = 0, y = 0, z = 0, len, vertikal = true, rotZ = 0, dim = false
   );
 }
 
-// Zylindrischer Stab entlang der z-Achse: zwei gekreuzte Streifen mit
-// Längsschattierung + runden Enden — liest sich aus jedem Winkel als Zylinder.
-// Optional eine Kreis-Kappe am äußeren Ende (endKappe = Hintergrund).
-function Stab({ x = 0, y = 0, z = 0, len, dia, grad, endKappe = null, loch = null, dim = false }) {
-  // loch: Position der Querbohrung in % der Länge (0 = innen, 100 = außen).
-  const strip = (rot) => (
-    <div style={{ position: "absolute", left: -dia / 2, top: -len / 2, width: dia, height: len,
-      transform: rot, background: loch != null
-        ? `radial-gradient(circle at 50% ${loch}%, #2E3237 0 2.6px, rgba(0,0,0,.35) 2.6px 3.4px, rgba(0,0,0,0) 3.6px), ${grad}`
-        : grad,
-      borderRadius: dia / 2 }} />
-  );
+// Massiver Facetten-Zylinder entlang z: n Mantelflächen (n=6 ergibt einen
+// echten Sechskant), Beleuchtung je Facette über brightness.  `ring` legt
+// eine Ring-Textur (Gewinde/Rippen) über die Grundfarbe, `endKappe` zeichnet
+// die äußere Stirnfläche, `loecher` vier Querbohrungs-Punkte nahe dem
+// äußeren Ende (dort läuft das Seil durch).
+function Zyl({ x = 0, y = 0, z = 0, len, r, n = 10, farbe, ring = null, endKappe = null, loecher = false, dim = false }) {
+  const a = Math.PI / n;
+  const apo = r * Math.cos(a);
+  const chord = 2 * r * Math.sin(a) + 0.4;        // minimale Überlappung gegen Fugen
+  const faces = [];
+  for (let i = 0; i < n; i++) {
+    const ang = i * (360 / n);
+    const lum = 0.66 + 0.55 * Math.max(0, Math.cos((ang + 35) * Math.PI / 180));
+    faces.push(
+      <div key={i} style={{ position: "absolute", left: -chord / 2, top: -len / 2, width: chord, height: len,
+        transform: `rotateY(${ang}deg) translateZ(${apo}px)`, backfaceVisibility: "hidden",
+        background: ring ? `${ring}, ${farbe}` : farbe, filter: `brightness(${lum})` }} />
+    );
+  }
   return (
     <div style={{ position: "absolute", transformStyle: "preserve-3d",
       transform: `translate3d(${x}px,${y}px,${z}px) rotateX(90deg)`, opacity: dim ? 0.25 : 1,
       transition: "opacity .2s, transform .25s ease-out" }}>
-      {strip("")}
-      {strip("rotateY(90deg)")}
-      {endKappe && <div style={{ position: "absolute", left: -dia / 2, top: -dia / 2, width: dia, height: dia,
+      {faces}
+      {endKappe && <div style={{ position: "absolute", left: -r, top: -r, width: 2 * r, height: 2 * r,
         borderRadius: "50%", background: endKappe, transform: `rotateX(90deg) translateZ(${-len / 2}px)` }} />}
+      {loecher && [0, 90, 180, 270].map((w) => (
+        <div key={w} style={{ position: "absolute", left: -3, top: -3, width: 6, height: 6, borderRadius: "50%",
+          background: "radial-gradient(circle, #26292D 0 55%, rgba(38,41,45,0) 72%)",
+          transform: `translateY(${len / 2 - 6}px) rotateY(${w}deg) translateZ(${apo + 0.3}px)` }} />
+      ))}
     </div>
   );
 }
 
-// Materialien des Iso-Bar ECO (nach Produktfoto): cremefarbener Rippenstab,
-// schwarze Dichtscheibe, Edelstahl-Gewindestift und -Seilhalterkopf.
+// Materialien des Iso-Bar ECO (nach Produktfoto).
 const MAT = {
-  rippen: "repeating-linear-gradient(180deg, rgba(120,110,80,.38) 0 2px, rgba(255,255,255,0) 2px 5px), linear-gradient(90deg,#C6BEA2,#F6F2E3 42%,#DAD3BA 70%,#B4AB8F)",
-  dicht:  "linear-gradient(90deg,#17181A,#3A3C3F 45%,#1C1D1F)",
-  gewinde:"repeating-linear-gradient(180deg, rgba(0,0,0,.28) 0 1px, rgba(255,255,255,0) 1px 2.5px), linear-gradient(90deg,#7E858D,#E0E4E8 45%,#959CA3)",
-  hex:    "linear-gradient(90deg,#A9AFB6 0 25%,#DFE3E7 25% 50%,#969DA4 50% 75%,#C9CED3 75% 100%)",
-  kopf:   "linear-gradient(90deg,#8F969E,#E9ECEF 42%,#C2C7CC 60%,#868D95)",
-  // Stirnfläche des Adapters: umlaufender Stahlrand, Senkung, dunkler Innensechskant
-  kopfEnde:"radial-gradient(circle, #26292D 0 26%, #4E545B 26% 38%, #D7DBDF 38% 58%, #AEB4BB 58% 78%, #C9CED3 78% 100%)",
+  rippenFarbe: "#EFE8D5",
+  rippenRing: "repeating-linear-gradient(180deg, rgba(96,86,60,.42) 0 2px, rgba(0,0,0,0) 2px 5px)",
+  stahl: "#C9CED3",
+  gewindeRing: "repeating-linear-gradient(180deg, rgba(20,25,30,.4) 0 1px, rgba(0,0,0,0) 1px 2.6px)",
+  dicht: "#26282B",
+  // Stirnfläche des Adapters: Stahlrand, Senkung, dunkler Innensechskant
+  kopfEnde: "radial-gradient(circle, #26292D 0 26%, #4E545B 26% 38%, #D7DBDF 38% 58%, #AEB4BB 58% 78%, #C9CED3 78% 100%)",
 };
 
 const SCHICHT_INFO = [
@@ -164,8 +178,9 @@ export default function Facade3D({ d }) {
   // Ankerraster auf der Fläche (Rand 34 px)
   const xs = Array.from({ length: cols }, (_, i) => -g.W / 2 + 34 + (i * (g.W - 68)) / (cols - 1));
   const ys = Array.from({ length: rows }, (_, i) => -g.H / 2 + 30 + (i * (g.H - 60)) / (rows - 1));
-  // Anker-Geometrie (nach Produktfoto): Rippenstab bis Putzoberfläche,
-  // dort Dichtscheibe, dann Gewindestift bis zum Seilhalterkopf am Seil.
+  // Anker-Geometrie (nach Produktfoto): Rippenstab bis Putzoberfläche, dort
+  // Dichtscheibe + Edelstahl-Scheibe, Gewindestift, dann der Adapter:
+  // kompakter Sechskant unten, langer Zylinder mit Querbohrung am Seil.
   const zPutzAussen = zPutz + g.putz / 2;
   const rodLen = zPutzAussen + 25;                 // von −24 (im Grund) bis +1 hinter dem Putz
   const stiftLen = (zSeil - 28) - (zPutzAussen + 5);
@@ -192,17 +207,17 @@ export default function Facade3D({ d }) {
             <Quader w={g.W} h={g.H} t={g.tol} z={zTol} color="#C9A86A" cut dim={dimOf("tol")} />
             <Quader w={g.W} h={g.H} t={g.daemm} z={zDaemm} color="repeating-linear-gradient(180deg,#EFE8D8 0 11px,#E5DCC6 11px 13px), #EFE8D8" cut dim={dimOf("daemm")} />
             <Quader w={g.W} h={g.H} t={g.putz} z={zPutz} color="#F4F1EA" cut dim={dimOf("putz")} />
-            {/* Anker an jedem Rasterpunkt: Rippenstab → Dichtscheibe → Gewindestift → Seilhalterkopf */}
+            {/* Anker an jedem Rasterpunkt: Rippenstab → Dichtscheibe → Gewindestift → Adapter */}
             {xs.map((x) => ys.map((y) => {
               const dim = dimOf("anker");
               return (
               <Fragment key={`${x}${y}`}>
-                <Stab x={x} y={y} z={rodLen / 2 - 24} len={rodLen} dia={8} grad={MAT.rippen} dim={dim} />
-                <Stab x={x} y={y} z={zPutzAussen + 2} len={4} dia={13} grad={MAT.dicht} dim={dim} />
-                <Stab x={x} y={y} z={zPutzAussen + 4.5} len={2} dia={10} grad={MAT.kopf} endKappe="radial-gradient(circle,#DCE0E4 0 55%,#A9AFB6)" dim={dim} />
-                <Stab x={x} y={y} z={zPutzAussen + 5 + stiftLen / 2} len={stiftLen} dia={3.5} grad={MAT.gewinde} dim={dim} />
-                <Stab x={x} y={y} z={zSeil - 23} len={10} dia={15.5} grad={MAT.hex} dim={dim} />
-                <Stab x={x} y={y} z={zSeil - 6} len={24} dia={11.5} grad={MAT.kopf} loch={77} endKappe={MAT.kopfEnde} dim={dim} />
+                <Zyl x={x} y={y} z={rodLen / 2 - 24} len={rodLen} r={4.2} n={8} farbe={MAT.rippenFarbe} ring={MAT.rippenRing} dim={dim} />
+                <Zyl x={x} y={y} z={zPutzAussen + 2} len={4} r={7} n={12} farbe={MAT.dicht} endKappe="radial-gradient(circle,#3A3D41 0 60%,#1B1C1E)" dim={dim} />
+                <Zyl x={x} y={y} z={zPutzAussen + 4.5} len={2.5} r={5.5} n={12} farbe={MAT.stahl} endKappe="radial-gradient(circle,#DDE0E4 0 55%,#AEB4BB)" dim={dim} />
+                <Zyl x={x} y={y} z={zPutzAussen + 5 + stiftLen / 2} len={stiftLen} r={2} n={6} farbe={MAT.stahl} ring={MAT.gewindeRing} dim={dim} />
+                <Zyl x={x} y={y} z={zSeil - 23} len={10} r={9} n={6} farbe={MAT.stahl} dim={dim} />
+                <Zyl x={x} y={y} z={zSeil - 6} len={24} r={5.8} n={10} farbe={MAT.stahl} endKappe={MAT.kopfEnde} loecher dim={dim} />
               </Fragment>
             );}))}
             {/* Seilebene */}
