@@ -6,6 +6,7 @@ import { useState, useRef, useCallback, useMemo, useEffect } from "react";
 import { buildDocument, leeresDokument, FIELD_LABELS } from "./pdfFields.js";
 import { baueProjektPayload, leseProjektdatei, projektDateiname } from "./projektdatei.js";
 import RealisticFacade from "./RealisticFacade";
+import Facade3D from "./Facade3D";
 import RasterOverlay from "./RasterOverlay";
 import DetailCrop from "./DetailCrop";
 import PlanAnnotator from "./PlanAnnotator";
@@ -20,6 +21,11 @@ import { parseNum, parseClamped } from "./num.js";
 
 // ─── Colors ─────────────────────────────────────────────
 const R="#C8102E",RL="#C8102E10",RM="#C8102E28",BK="#1A1A1A",DK="#333",GY="#666",GL="#999",BG="#F7F6F4",BD="#D8D6D4",WH="#FFF",GN="#2E7D32",GN2="#66BB6A",GN3="#AED581",AM="#E68A00";
+// Werkleiste ("Zink") + Schriften der Oberflaeche.  Die Report-Sektionen
+// behalten Segoe UI, damit der PDF-Export unveraendert bleibt.
+const ZK="#15191E",ZH="#2C333B",ZT="#C9CFD6",ZG="#9AA2AB";
+const UI_F="'Archivo','Segoe UI',system-ui,sans-serif";
+const MONO_F="'IBM Plex Mono',ui-monospace,Consolas,monospace";
 
 // ─── Complete FLL Tabelle 15 (52 plants) ────────────────
 const FLL_PLANTS=[
@@ -636,6 +642,49 @@ function Sub({children:s}){
   return <>{p}</>;
 }
 
+// ─── Blattansicht: Report-Sektion als DIN-A4-Blatt auf dunklem Tisch ───
+// Reine Bildschirmdarstellung mit Zoom/Einpassen.  Der PDF-Export rendert die
+// Sektionen separat offscreen und bleibt von der Skalierung hier unberuehrt.
+function PaperView({label,children}){
+  const wrapRef=useRef(null),innerRef=useRef(null);
+  const[fit,setFit]=useState(true);
+  const[zoom,setZoom]=useState(1);
+  const[scale,setScale]=useState(1);
+  const[h,setH]=useState(0);
+  useEffect(()=>{
+    const calc=()=>{
+      const w=wrapRef.current?.clientWidth||960;
+      const sc=fit?Math.min(1,(w-56)/880):zoom;
+      setScale(sc);
+      setH((innerRef.current?.offsetHeight||0)*sc);
+    };
+    calc();
+    const ro=new ResizeObserver(calc);
+    if(wrapRef.current)ro.observe(wrapRef.current);
+    if(innerRef.current)ro.observe(innerRef.current);
+    return()=>ro.disconnect();
+  },[fit,zoom]);
+  const zBtn={padding:"4px 10px",fontSize:11,fontWeight:700,border:`1px solid ${ZH}`,borderRadius:5,background:"transparent",color:ZT,cursor:"pointer"};
+  return(<div ref={wrapRef} style={{background:"linear-gradient(160deg,#20252B,#2A3138)",borderRadius:10,border:`1px solid ${ZH}`,overflow:"hidden"}}>
+    <div style={{display:"flex",alignItems:"center",gap:8,padding:"8px 14px",borderBottom:`1px solid ${ZH}`}}>
+      <span style={{fontFamily:MONO_F,fontSize:9.5,letterSpacing:1.2,color:"#8B939C"}}>BLATTANSICHT · DIN A4 · {label}</span>
+      <span style={{flex:1}}/>
+      <button style={zBtn} title="Verkleinern" onClick={()=>{setFit(false);setZoom(z=>Math.max(.5,+(z-.1).toFixed(2)));}}>−</button>
+      <span style={{fontFamily:MONO_F,fontSize:10.5,color:ZT,minWidth:44,textAlign:"center"}}>{Math.round(scale*100)} %</span>
+      <button style={zBtn} title="Vergroessern" onClick={()=>{setFit(false);setZoom(z=>Math.min(1.4,+(z+.1).toFixed(2)));}}>＋</button>
+      <button style={{...zBtn,fontWeight:600,background:fit?"rgba(200,16,46,.18)":"transparent",borderColor:fit?R:ZH}} onClick={()=>setFit(true)}>Einpassen</button>
+    </div>
+    <div style={{overflow:"auto",padding:"26px 12px 38px"}}>
+      <div style={{width:880*scale,margin:"0 auto",height:h}}>
+        <div ref={innerRef} style={{width:880,transform:`scale(${scale})`,transformOrigin:"top left",background:WH,
+          boxShadow:"0 26px 60px rgba(0,0,0,.5), 0 2px 10px rgba(0,0,0,.35)"}}>
+          {children}
+        </div>
+      </div>
+    </div>
+  </div>);
+}
+
 function NwBar({label,value}){
   const v=pf(value)||0;const pct=Math.min(v,1.1)*100;
   const col=v<.5?GN:v<.7?GN2:v<.95?GN3:v<=1?AM:R;
@@ -643,7 +692,8 @@ function NwBar({label,value}){
     <div style={{width:160,fontSize:12,color:DK}}><Sub>{label}</Sub></div>
     <div style={{flex:1,height:18,background:"#ECECEC",borderRadius:9,position:"relative",overflow:"hidden",border:`1px solid ${BD}`}}>
       <div style={{width:`${Math.min(pct,100)}%`,height:"100%",background:`linear-gradient(90deg, ${col}, ${col}dd)`,borderRadius:9,transition:"width .3s"}}/>
-      <span style={{position:"absolute",right:pct>55?8:"auto",left:pct<=55?`${Math.min(pct,100)}%`:"auto",marginLeft:pct<=55?8:0,top:"50%",transform:"translateY(-50%)",fontSize:11,fontWeight:700,color:pct>55?WH:BK}}>{v?v.toFixed(2):"–"}</span>
+      {/* Zahl immer schwarz: auf hellem Balken (z. B. 0,75 grün) war Weiß auf Weiß kaum lesbar. */}
+      <span style={{position:"absolute",right:pct>55?8:"auto",left:pct<=55?`${Math.min(pct,100)}%`:"auto",marginLeft:pct<=55?8:0,top:"50%",transform:"translateY(-50%)",fontSize:11,fontWeight:700,color:BK}}>{v?v.toFixed(2):"–"}</span>
     </div>
     <span style={{fontSize:14,fontWeight:700,color:v&&v<=1?GN:v>1?R:GL,width:18,textAlign:"center"}}>{v?(v<=1?"✓":"✗"):"–"}</span>
   </div>);
@@ -1090,10 +1140,16 @@ function PreviewSection({d,maxNw,withRealistic=true}){
   </div>);
 }
 
-function AnlagenSection({d,usable}){
+// Anlagen zum Report.
+//
+// Anlage B enthielt früher die komplette FLL-Tabelle 15 (alle 41 für Kletter-
+// hilfen geeigneten Arten).  Das ist Inhalt der Richtlinie und gehört nicht in
+// den Projektauswurf — ausgegeben werden nur noch die Übersicht der
+// Pflanzenlastklassen (Anlage A) und die tatsächlich gewählte Pflanze.
+function AnlagenSection({d}){
   return(<div style={{background:WH}}>
     <div data-pdf-page="anlage-a" style={{borderTop:`3px solid ${R}`,padding:"16px 24px"}}>
-      <PageHead title="Anlage A – FLL Tabelle 15" subtitle="Lastklassen & Gewichtsabschätzung (Auszug)"/>
+      <PageHead title="Anlage A – Pflanzenlastklassen" subtitle="Übersicht der Lastklassen & Gewichtsabschätzung"/>
       <div style={{borderTop:`1px solid ${R}`,marginBottom:12}}/>
       <table style={{width:"100%",borderCollapse:"collapse",fontSize:10}}>
         <thead><tr>{["LK","Flächig ≤2m","Schmal ≤1m","Linear ≤0,7m","ψ"].map(h=>
@@ -1107,33 +1163,36 @@ function AnlagenSection({d,usable}){
             <td style={{padding:"4px 6px",textAlign:"center",borderBottom:`1px solid ${BD}`}}>{FLL_LK[k].psi.toFixed(2).replace(".",",")}</td></tr>);})}</tbody></table>
       <div style={{fontSize:8.5,color:GL,marginTop:6}}>Quelle: FLL-Richtlinie Fassadenbegrünung (2018), Tab. 15. LK {d.lastklasse} hervorgehoben.</div></div>
     <div data-pdf-page="anlage-b" style={{borderTop:`6px solid ${BG}`,padding:"16px 24px"}}>
-      <PageHead title="Anlage B – Pflanzenübersicht" subtitle={`FLL Tab. 15 – ${usable.length} Arten mit Lastklasse für Kletterhilfen`}/>
+      <PageHead title="Anlage B – Gewählte Pflanze" subtitle="Projektbezogene Angaben zur Bepflanzung"/>
       <div style={{borderTop:`1px solid ${R}`,marginBottom:12}}/>
-      <table style={{width:"100%",borderCollapse:"collapse",fontSize:9}}>
-        <thead><tr>{["Botanische Bezeichnung","Form","Deutsch","h_max [m]","Trieb-Ø [cm]","Ges. [kg/Pfl]","fl [kg/m²]","sm [kg/m²]","li [kg/m]","LK"].map(h=>
-          <th key={h} style={{background:DK,color:WH,fontWeight:700,padding:"4px 5px",fontSize:8.5,textAlign:"left",whiteSpace:"nowrap"}}><Sub>{h}</Sub></th>)}</tr></thead>
-        <tbody>{usable.map(p=>{const act=p.bot===d.pflanze_botanisch;return(
-          <tr key={p.bot} style={{background:act?RL:"transparent"}}>
-            <td style={{padding:"3px 5px",fontStyle:"italic",borderBottom:`1px solid ${BD}`,fontWeight:act?700:400}}>{p.bot}</td>
-            <td style={{padding:"3px 5px",borderBottom:`1px solid ${BD}`}}>{FORMS[p.form]||p.form}</td>
-            <td style={{padding:"3px 5px",borderBottom:`1px solid ${BD}`}}>{p.de}</td>
-            <td style={{padding:"3px 5px",borderBottom:`1px solid ${BD}`,textAlign:"center"}}>{p.hMax}</td>
-            <td style={{padding:"3px 5px",borderBottom:`1px solid ${BD}`,textAlign:"center"}}>{p.trieb}</td>
-            <td style={{padding:"3px 5px",borderBottom:`1px solid ${BD}`,textAlign:"center"}}>{p.gesamt}</td>
-            <td style={{padding:"3px 5px",borderBottom:`1px solid ${BD}`,textAlign:"center"}}>{p.fl}</td>
-            <td style={{padding:"3px 5px",borderBottom:`1px solid ${BD}`,textAlign:"center"}}>{p.sm}</td>
-            <td style={{padding:"3px 5px",borderBottom:`1px solid ${BD}`,textAlign:"center"}}>{p.li}</td>
-            <td style={{padding:"3px 5px",borderBottom:`1px solid ${BD}`,textAlign:"center",fontWeight:700,color:act?R:BK}}>{p.lk}</td></tr>);})}</tbody></table>
-      {d.pflanze_botanisch&&(()=>{const p=FLL_PLANTS.find(x=>x.bot===d.pflanze_botanisch);if(!p)return null;return(
-        <div style={{border:`1px solid ${RM}`,borderRadius:4,padding:12,marginTop:12,background:RL}}>
-          <div style={{fontWeight:700,fontSize:10.5,textTransform:"uppercase",color:R,marginBottom:6}}>Ausgewählte Pflanze</div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"3px 14px"}}>
-            <KV l="Botanisch" v={p.bot} b/><KV l="Deutsch" v={p.de} b/><KV l="LK" v={String(p.lk)} b/>
-            <KV l="Form" v={FORMS[p.form]} b/><KV l="h_max" v={`${p.hMax} m`} b/><KV l="Gesamtgew." v={`${p.gesamt} kg/Pfl`} b/>
-            <KV l="Flächig" v={p.fl?`${p.fl} kg/m²`:"–"} b/><KV l="Schmal" v={p.sm?`${p.sm} kg/m²`:"–"} b/><KV l="Linear" v={p.li?`${p.li} kg/m`:"–"} b/></div></div>);})()}
+      {(()=>{const p=FLL_PLANTS.find(x=>x.bot===d.pflanze_botanisch);
+        if(!p) return(
+          <div style={{padding:"10px 12px",background:"#FFF8E1",border:`1px solid ${AM}40`,borderRadius:4,fontSize:11,color:DK}}>
+            Für dieses Projekt ist noch keine Pflanzenart gewählt. Die Lastklasse ist dann direkt einzutragen
+            (siehe Anlage A).
+          </div>);
+        return(<>
+          <div style={{border:`1px solid ${RM}`,borderRadius:4,padding:12,background:RL}}>
+            <div style={{fontWeight:700,fontSize:10.5,textTransform:"uppercase",color:R,marginBottom:6}}>Ausgewählte Pflanze</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:"3px 14px"}}>
+              <KV l="Botanisch" v={p.bot} b/><KV l="Deutsch" v={p.de} b/><KV l="Form" v={FORMS[p.form]||p.form} b/>
+              <KV l="Lastklasse" v={p.lk?`LK ${p.lk}`:"–"} b/><KV l="ψ (Durchströmung)" v={p.lk?FLL_LK[p.lk].psi.toFixed(2).replace(".",","):"–"} b/>
+              <KV l="h_max" v={`${p.hMax} m`} b/><KV l="Trieb-Ø" v={`${p.trieb} cm`} b/><KV l="Gesamtgew." v={`${p.gesamt} kg/Pfl`} b/>
+              <KV l="Flächig" v={p.fl?`${p.fl} kg/m²`:"–"} b/><KV l="Schmal" v={p.sm?`${p.sm} kg/m²`:"–"} b/><KV l="Linear" v={p.li?`${p.li} kg/m`:"–"} b/></div>
+            <div style={{fontSize:8.5,color:GL,marginTop:8}}>Gewichts- und Lastklassenangabe nach FLL-Richtlinie Fassadenbegrünung (2018), Tab. 15.</div>
+          </div>
+          {p.lk===null&&<div style={{margin:"12px 0",padding:10,background:"#FFEBEE",borderRadius:4,border:`1px solid ${R}40`}}>
+            <div style={{fontSize:9.5,fontWeight:700,color:R}}>⚠ Für WDVS nicht geeignet</div>
+            <div style={{fontSize:9,color:DK,marginTop:2}}>
+              {p.bot} ist ein Selbstklimmer ({FORMS[p.form]||p.form}) und wird an Wärmedämm-Verbundsystemen nicht eingesetzt.
+            </div></div>}
+        </>);})()}
       <div style={{margin:"12px 0",padding:10,background:"#FFF8E1",borderRadius:4,border:`1px solid ${AM}40`}}>
         <div style={{fontSize:9.5,fontWeight:700,color:AM}}>⚠ Nicht geeignet an WDVS:</div>
-        <div style={{fontSize:9,color:DK,marginTop:2}}>Selbstklimmer (WK/RH): {FLL_PLANTS.filter(p=>p.lk===null).map(p=>p.bot).join(", ")}</div></div></div>
+        <div style={{fontSize:9,color:DK,marginTop:2}}>
+          Selbstklimmer (Wurzelkletterer, Haftscheibenranker) – sie benötigen keine Kletterhilfe und
+          schädigen Putz und Dämmung.
+        </div></div></div>
     <div data-pdf-page="anlage-c" style={{borderTop:`6px solid ${BG}`,padding:"16px 24px"}}>
       <PageHead title="Anlage C – Systemdetail" subtitle="ISO-Bar ECO, Schnittdarstellung"/>
       <div style={{borderTop:`1px solid ${R}`,marginBottom:12}}/>
@@ -1288,7 +1347,7 @@ function MaterialSection({d,setD}){
         <Stat label="Iso-Bar ECO" value={fmtInt(totalAnker)} unit="Stk" accent/>
         <Stat label="Seilkreuze" value={fmtInt(totalSK)} unit="Stk" color="#1565C0"/>
         <Stat label="Seil gesamt" value={fmtLen(totalSeilGes)} hint="inkl. +10 % Verschnitt"/>
-        <Stat label="Endkappen" value={fmtInt(totalEndkappen)} unit="Stk" hint="je Seilende"/>
+        <Stat label="Seilabdeckung-Schrumpfschlauch" value={fmtInt(totalEndkappen)} unit="Stk" hint="je Seilende"/>
         {anyFromPlan&&<Stat label="Quelle" value="aus Plan" valueSize={14} color={R}/>}
       </div>
 
@@ -1940,7 +1999,7 @@ function VorbemessungDE({ d, setD, hasPdf }){
 // → Verformung → Produktwahl.  Quellen je Wert (DIN/ÖNORM/Z-21.8-2083/FLL).
 // ─────────────────────────────────────────────────────────────────
 function StatikSection({ d }){
-  const { res, err, inp, atWind, atStadt, isMW, isLin, isAT, land, untergrund, system } = runVorbemessung(d);
+  const { res, err, fehlt, inp, atWind, atStadt, isMW, isLin, isAT, land, untergrund, system } = runVorbemessung(d);
 
   const Block = ({ title, children, note }) => (
     <div style={{ marginBottom: 11, breakInside: "avoid" }}>
@@ -2001,25 +2060,40 @@ function StatikSection({ d }){
         Berechnung nicht möglich: {err}
       </div>}
 
-      {res && <>
-        {/* 1 – Eingangswerte */}
-        <Block title="1 · Eingangswerte">
-          <Table>
-            <Row l="Gebäudehöhe" f="z / h" v={fm(pf(inp.gebaeudehoehe))} u="m" />
-            <Row l="Gebäudelänge" f="L / d" v={fm(pf(inp.gebaeudelaenge))} u="m" />
-            <Row l="Gebäudebreite" f="B / b" v={fm(pf(inp.gebaeudebreite))} u="m" />
-            <Row l="Lastklasse Bepflanzung" v={inp.lastklasse} u="LK" src="FLL Tab. 15" />
-            {isMW
-              ? <Row l="Steinart (Untergrund)" v={STEINE[inp.steinart]?.label || inp.steinart} src="Z-21.8-2083 Tab. 14" />
-              : <Row l="Betonklasse / Temperatur" v={`${BETON_KLASSEN[inp.betonklasse]?.label || inp.betonklasse} · ${inp.temperatur === "hoch" ? "≤80 °C" : "≤40 °C"}`} src="Z-21.8-2083 Tab. 12" />}
-            <Row l="Dämmdicke / Putzdicke / t_tol" v={`${fm(pf(inp.daemmdicke))} / ${fm(pf(inp.putzdicke))} / ${fm(pf(inp.ttol))}`} u="mm" />
-            {isAT
-              ? <Row l="Standort (ÖNORM)" v={`${atStadt?.name || "–"} · GK ${d.vm_at_gk || "III"}`} src="ÖNORM B 1991-1-4" />
-              : <Row l="Windzone / Geländekategorie" v={`WZ ${inp.windzone} · GK ${inp.gelaendekategorie}`} src="DIN EN 1991-1-4/NA" />}
-            {isLin && <Row l="Seillänge (vertikal)" v={fm(res.linear.seillaenge)} u="m" />}
-          </Table>
-        </Block>
+      {/* Fehlen Pflichtangaben, wird NICHT gerechnet (keine erfundenen Maße).  Der
+          Statik-Teil darf deshalb aber nicht leer aus dem PDF-Export fallen — er
+          benennt hier, was fehlt, und zeigt die bereits erfassten Eingangswerte. */}
+      {fehlt?.length > 0 && (
+        <div style={{ padding: "11px 13px", background: "#FFF8E1", border: "1px solid #FFB30055",
+          borderRadius: 6, color: "#7A5900", fontSize: 12, marginBottom: 12, breakInside: "avoid" }}>
+          <div style={{ fontWeight: 800, marginBottom: 3 }}>Statischer Nachweis noch nicht möglich</div>
+          Es fehlen: <strong>{fehlt.join(" · ")}</strong>
+          <div style={{ fontSize: 10.5, color: GL, marginTop: 4 }}>
+            Diese Angaben im Reiter „Vorbemessung“ eintragen — sie gehen direkt in Windlast,
+            Hebelarm und Bemessung ein und werden bewusst nicht vorbelegt.
+          </div>
+        </div>
+      )}
 
+      {/* 1 – Eingangswerte: immer ausgeben, auch ohne Ergebnis */}
+      <Block title="1 · Eingangswerte">
+        <Table>
+          <Row l="Gebäudehöhe" f="z / h" v={fm(pf(inp.gebaeudehoehe))} u="m" />
+          <Row l="Gebäudelänge" f="L / d" v={fm(pf(inp.gebaeudelaenge))} u="m" />
+          <Row l="Gebäudebreite" f="B / b" v={fm(pf(inp.gebaeudebreite))} u="m" />
+          <Row l="Lastklasse Bepflanzung" v={inp.lastklasse || "–"} u="LK" src="FLL Tab. 15" />
+          {isMW
+            ? <Row l="Steinart (Untergrund)" v={STEINE[inp.steinart]?.label || inp.steinart} src="Z-21.8-2083 Tab. 14" />
+            : <Row l="Betonklasse / Temperatur" v={`${BETON_KLASSEN[inp.betonklasse]?.label || inp.betonklasse} · ${inp.temperatur === "hoch" ? "≤80 °C" : "≤40 °C"}`} src="Z-21.8-2083 Tab. 12" />}
+          <Row l="Dämmdicke / Putzdicke / t_tol" v={`${fm(pf(inp.daemmdicke))} / ${fm(pf(inp.putzdicke))} / ${fm(pf(inp.ttol))}`} u="mm" />
+          {isAT
+            ? <Row l="Standort (ÖNORM)" v={`${atStadt?.name || "–"} · GK ${d.vm_at_gk || "III"}`} src="ÖNORM B 1991-1-4" />
+            : <Row l="Windzone / Geländekategorie" v={`WZ ${inp.windzone || "–"} · GK ${inp.gelaendekategorie || "–"}`} src="DIN EN 1991-1-4/NA" />}
+          {isLin && <Row l="Seillänge (vertikal)" v={fm(res ? res.linear.seillaenge : pf(inp.seillaenge))} u="m" />}
+        </Table>
+      </Block>
+
+      {res && <>
         {/* 2 – Windlast */}
         <Block title="2 · Windlastermittlung" note={isAT ? "ÖNORM B 1991-1-4 – qp = qb · ce(z); cpe als ungünstigster Sog beider Windrichtungen." : "DIN EN 1991-1-4/NA – Böengeschwindigkeitsdruck q(z) nach Windzone & Geländekategorie."}>
           <Table>
@@ -2282,6 +2356,14 @@ export default function App(){
   const setter=k=>v=>setD(x=>({...x,[k]:v}));
   const usable=useMemo(()=>FLL_PLANTS.filter(p=>p.lk!==null),[]);
   const maxNw=Math.max(...[d.nw_zug,d.nw_druck,d.nw_quer,d.nw_kombi].map(v=>pf(v)||0),0);
+  // Nachweis-Ampel fuer Werkleiste + Tab-Punkt: PDF-Werte (maxNw) haben Vorrang,
+  // sonst zaehlt die im Tool gerechnete Vorbemessung.
+  const vmStat=runVorbemessung(d);
+  const nwStatus=(()=>{
+    if(maxNw>0)return maxNw<=1?"ok":"fail";
+    if(vmStat.res)return Object.values(vmStat.res.nachweise).every(n=>n.ok)?"ok":"fail";
+    return vmStat.fehlt?.length?"offen":null;
+  })();
 
   const selectPlant=bot=>{const p=FLL_PLANTS.find(x=>x.bot===bot);
     if(p)setD(x=>({...x,pflanze_botanisch:p.bot,pflanze_deutsch:p.de,lastklasse:p.lk?String(p.lk):x.lastklasse,
@@ -2702,58 +2784,83 @@ export default function App(){
 
   // ─── UPLOAD ─────────────────────────────────────────────
   if(step==="upload")return(
-    <div style={{fontFamily:"'Segoe UI',system-ui,sans-serif",background:`linear-gradient(135deg, ${BG} 0%, #EDE9DD 100%)`,minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
-      <div style={{textAlign:"center",maxWidth:560,width:"100%"}}>
-        <div style={{marginBottom:20,display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
-          <div style={{width:48,height:48,borderRadius:10,background:`linear-gradient(135deg, ${R}, #8E0B22)`,display:"flex",alignItems:"center",justifyContent:"center",color:WH,fontWeight:900,fontSize:18,boxShadow:"0 4px 12px rgba(200,16,46,.25)"}}>E</div>
-          <div style={{textAlign:"left"}}>
-            <div style={{fontWeight:900,fontSize:22,color:R,lineHeight:1}}>EJOT<sup style={{fontSize:9,color:BK}}>®</sup></div>
-            <div style={{fontSize:11,color:GY,fontWeight:600,marginTop:2}}>Iso-Bar ECO · Report Generator</div>
-          </div>
+    <div style={{fontFamily:UI_F,minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",padding:"28px 16px"}}>
+      <div className="stepFade" style={{position:"relative",maxWidth:700,width:"100%",background:WH,border:`1px solid ${BD}`,boxShadow:"0 20px 55px rgba(26,26,26,.15)",padding:"38px 44px 30px"}}>
+        {/* Eckmarken wie auf dem Planblatt */}
+        {[{left:-1,top:-1,borderWidth:"2px 0 0 2px"},{right:-1,top:-1,borderWidth:"2px 2px 0 0"},{left:-1,bottom:-1,borderWidth:"0 0 2px 2px"},{right:-1,bottom:-1,borderWidth:"0 2px 2px 0"}].map((pos,i)=>
+          <span key={i} style={{position:"absolute",width:18,height:18,borderStyle:"solid",borderColor:R,...pos}}/>)}
+        <div style={{display:"flex",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
+          <div style={{fontFamily:MONO_F,fontSize:10,letterSpacing:1.6,color:GY}}>EJOT<span style={{color:R}}>®</span> ISO-BAR ECO · VORBEMESSUNG</div>
+          <div style={{fontFamily:MONO_F,fontSize:10,letterSpacing:1.6,color:GL}}>FASSADENBEGRÜNUNG AN WDVS</div>
         </div>
-        <h1 style={{fontSize:22,fontWeight:700,color:BK,margin:"0 0 6px"}}>Statik-PDF hochladen</h1>
-        <p style={{fontSize:13,color:GY,margin:"0 0 28px",lineHeight:1.5}}>
-          PDF einlesen → Werte automatisch extrahieren → Report exportieren.<br/>
-          <span style={{fontSize:11,color:GL}}>Unterstützt Vorbemessungs-PDFs und Statik-Ausgaben.</span>
+        <h1 style={{fontSize:31,fontWeight:800,letterSpacing:-.4,color:BK,margin:"16px 0 8px",lineHeight:1.12}}>
+          Vom Statik-PDF zum fertigen<br/><span style={{color:R}}>Begrünungs-Report</span>.
+        </h1>
+        <p style={{fontSize:13,color:GY,margin:"0 0 18px",lineHeight:1.55,maxWidth:480}}>
+          PDF einlesen, Werte prüfen, Nachweise rechnen — und als sauberes Report-Paket
+          exportieren. Alle Daten bleiben lokal in deinem Browser.
         </p>
+        {/* Systemskizze Wand → Dämmung → Iso-Bar → Seil → Bewuchs, zeichnet sich beim Laden */}
+        <svg viewBox="0 0 640 96" width="100%" height="76" style={{display:"block",marginBottom:20}} aria-hidden="true">
+          <g fill="none" strokeLinecap="round">
+            <rect x="8" y="10" width="96" height="76" stroke="#9A968F" strokeWidth="1.2" style={{strokeDasharray:344,strokeDashoffset:344,animation:"zeichnen .9s .1s ease-out forwards"}}/>
+            {[0,1,2,3,4].map(i=><line key={i} x1={16+i*18} y1="82" x2={32+i*18} y2="14" stroke="#C6C2BB" strokeWidth="1" style={{strokeDasharray:80,strokeDashoffset:80,animation:`zeichnen .6s ${.25+i*.06}s ease-out forwards`}}/>)}
+            <rect x="112" y="10" width="72" height="76" stroke="#C9A86A" strokeWidth="1.2" style={{strokeDasharray:296,strokeDashoffset:296,animation:"zeichnen .9s .45s ease-out forwards"}}/>
+            <line x1="56" y1="48" x2="302" y2="48" stroke="#1A1A1A" strokeWidth="2.2" style={{strokeDasharray:246,strokeDashoffset:246,animation:"zeichnen .8s .75s ease-out forwards"}}/>
+            <circle cx="314" cy="48" r="9" stroke={R} strokeWidth="2" style={{strokeDasharray:57,strokeDashoffset:57,animation:"zeichnen .5s 1.15s ease-out forwards"}}/>
+            <line x1="314" y1="12" x2="314" y2="86" stroke="#8B939C" strokeWidth="1.4" style={{strokeDasharray:74,strokeDashoffset:74,animation:"zeichnen .6s 1.3s ease-out forwards"}}/>
+            <path d="M 314 86 C 360 70 380 34 428 44 C 470 52 490 20 548 26 C 570 28 592 18 620 22" stroke={GN} strokeWidth="1.8" style={{strokeDasharray:340,strokeDashoffset:340,animation:"zeichnen 1.1s 1.5s ease-out forwards"}}/>
+            {[[430,40],[500,32],[560,22]].map(([cx,cy],i)=><circle key={i} cx={cx} cy={cy} r="3.2" stroke={GN} strokeWidth="1.4" style={{strokeDasharray:21,strokeDashoffset:21,animation:`zeichnen .4s ${1.9+i*.15}s ease-out forwards`}}/>)}
+          </g>
+          <text x="56" y="8" fontSize="7" fill="#8B939C" fontFamily="IBM Plex Mono,monospace">WAND</text>
+          <text x="130" y="8" fontSize="7" fill="#8B939C" fontFamily="IBM Plex Mono,monospace">WDVS</text>
+          <text x="252" y="42" fontSize="7" fill="#8B939C" fontFamily="IBM Plex Mono,monospace">ISO-BAR</text>
+          <text x="322" y="10" fontSize="7" fill="#8B939C" fontFamily="IBM Plex Mono,monospace">SEIL</text>
+          <text x="596" y="40" fontSize="7" fill={GN} fontFamily="IBM Plex Mono,monospace">BEWUCHS</text>
+        </svg>
         <div
           onClick={()=>fRef.current?.click()}
           onDragOver={e=>{e.preventDefault();setDragOver(true);}}
           onDragLeave={()=>setDragOver(false)}
           onDrop={handleDrop}
-          style={{border:`2px dashed ${dragOver?R:BD}`,borderRadius:14,padding:"44px 24px",cursor:"pointer",background:dragOver?RL:WH,transition:"all .2s",boxShadow:dragOver?"0 8px 24px rgba(200,16,46,.12)":"0 2px 8px rgba(0,0,0,.04)"}}>
+          style={{border:`2px dashed ${dragOver?R:"#C6C2BB"}`,padding:"30px 24px",cursor:"pointer",textAlign:"center",
+            background:dragOver?RL:"repeating-linear-gradient(45deg, rgba(26,26,26,.03) 0 1px, transparent 1px 9px), #FCFBFA",
+            transition:"all .2s"}}>
           {parsing?(<>
-            <div style={{display:"inline-block",width:36,height:36,border:`3px solid ${BD}`,borderTopColor:R,borderRadius:"50%",animation:"spin 1s linear infinite",marginBottom:10}}/>
-            <div style={{fontSize:14,fontWeight:600,color:BK}}>PDF wird analysiert …</div>
-            <div style={{fontSize:11,color:GL,marginTop:4}}>{pdfN}</div>
+            <div style={{display:"inline-block",width:34,height:34,border:`3px solid ${BD}`,borderTopColor:R,borderRadius:"50%",animation:"spin 1s linear infinite",marginBottom:10}}/>
+            <div style={{fontSize:14,fontWeight:700,color:BK}}>PDF wird analysiert …</div>
+            <div style={{fontFamily:MONO_F,fontSize:10.5,color:GL,marginTop:4}}>{pdfN}</div>
           </>):(<>
-            <div style={{fontSize:42,marginBottom:8}}>📄</div>
-            <div style={{fontSize:14,fontWeight:600,color:BK}}>PDF hier ablegen oder klicken</div>
-            <div style={{fontSize:11,color:GL,marginTop:4}}>Vorbemessungs-PDF, Statik-Ausgabe oder .txt</div>
+            <div style={{fontSize:15,fontWeight:800,color:BK,letterSpacing:-.2}}>Statik-PDF hier ablegen <span style={{color:GL,fontWeight:500}}>oder klicken</span></div>
+            <div style={{fontFamily:MONO_F,fontSize:10,color:GL,marginTop:5,letterSpacing:.4}}>VORBEMESSUNGS-PDF · STATIK-AUSGABE · .TXT</div>
           </>)}
           <input ref={fRef} type="file" accept=".pdf,.txt,application/pdf,text/plain" onChange={handleFile} style={{display:"none"}}/>
         </div>
-        {parseErr&&<div style={{marginTop:12,padding:"10px 14px",background:"#FFEBEE",border:`1px solid ${R}40`,borderRadius:8,fontSize:12,color:R}}>
+        {parseErr&&<div style={{marginTop:12,padding:"10px 14px",background:"#FFEBEE",border:`1px solid ${R}40`,fontSize:12,color:R}}>
           <strong>Fehler beim Lesen:</strong> {parseErr}
         </div>}
-        <div style={{marginTop:18,display:"flex",gap:10,justifyContent:"center",flexWrap:"wrap"}}>
+        <div style={{marginTop:16,display:"flex",gap:10,flexWrap:"wrap"}}>
           <button onClick={()=>{setD({...leeresDokument(),vm_modus:"rechnen"});setStep("edit");}}
-            style={{padding:"8px 18px",fontSize:11,color:R,background:WH,border:`1px solid ${R}`,borderRadius:6,cursor:"pointer",fontWeight:700}}>
-            🧮 Ohne PDF – Vorbemessung im Tool berechnen →
+            onMouseEnter={e=>e.currentTarget.style.background="#A40C24"} onMouseLeave={e=>e.currentTarget.style.background=R}
+            style={{padding:"10px 18px",fontSize:12,color:WH,background:R,border:"none",cursor:"pointer",fontWeight:700,transition:"background .15s"}}>
+            Ohne PDF – Vorbemessung im Tool berechnen →
           </button>
           <button onClick={()=>projectInRef.current?.click()}
-            style={{padding:"8px 18px",fontSize:11,color:DK,background:WH,border:`1px solid ${BD}`,borderRadius:6,cursor:"pointer",fontWeight:600}}>
+            onMouseEnter={e=>e.currentTarget.style.borderColor=GY} onMouseLeave={e=>e.currentTarget.style.borderColor=BD}
+            style={{padding:"10px 18px",fontSize:12,color:DK,background:WH,border:`1px solid ${BD}`,cursor:"pointer",fontWeight:600,transition:"border-color .15s"}}>
             📂 Gespeichertes Projekt laden
           </button>
         </div>
         <input ref={projectInRef} type="file" accept=".json,.ejot.json,application/json" onChange={handleProjectFile} style={{display:"none"}}/>
-        <div style={{marginTop:24,display:"flex",justifyContent:"center",gap:18,fontSize:10,color:GL}}>
-          <span>● Z-21.8-2083</span><span>● FLL Tab. 15</span><span>● DIN 1991-1-4</span>
+        <div style={{marginTop:26,paddingTop:14,borderTop:`1px solid ${BD}`,display:"flex",gap:8,flexWrap:"wrap",fontFamily:MONO_F,fontSize:9,letterSpacing:1,color:GY}}>
+          {["Z-21.8-2083","FLL TAB. 15","DIN EN 1991-1-4","ÖNORM B 1991-1-4"].map(n=><span key={n} style={{border:`1px solid ${BD}`,padding:"3px 8px"}}>{n}</span>)}
+          <span style={{marginLeft:"auto",color:GL}}>LOKAL · KEIN UPLOAD</span>
         </div>
       </div></div>);
 
   const tabs=[
     {id:"edit",l:"Bearbeiten",icon:"✎"},
+    {id:"modell",l:"3D-Modell",icon:"◈"},
     {id:"preview",l:"Vorschau",icon:"◐"},
     {id:"statik",l:"Statik",icon:"∑"},
     {id:"anlagen",l:"Anlagen",icon:"☰"},
@@ -2762,18 +2869,24 @@ export default function App(){
 
   // ─── MAIN ─────────────────────────────────────────────
   return(
-    <div style={{fontFamily:"'Segoe UI',system-ui,sans-serif",background:BG,minHeight:"100vh"}}>
+    <div style={{fontFamily:UI_F,minHeight:"100vh"}}>
       {/* Top bar */}
-      <div style={{background:WH,borderBottom:`1px solid ${BD}`,boxShadow:"0 2px 8px rgba(0,0,0,.05)",padding:"10px 18px 0",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:100}}>
+      <div style={{background:ZK,borderBottom:`1px solid ${ZH}`,boxShadow:"0 3px 14px rgba(0,0,0,.28)",padding:"10px 18px 0",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:100,flexWrap:"wrap",gap:6}}>
         {/* tiny brand accent line at the very top of the page */}
         <div style={{position:"absolute",top:0,left:0,right:0,height:3,background:`linear-gradient(90deg, ${R}, #8E0B22 60%, ${R})`}}/>
         <div style={{display:"flex",alignItems:"center",gap:12,paddingBottom:10}}>
           <div style={{width:34,height:34,borderRadius:8,background:`linear-gradient(135deg, ${R}, #8E0B22)`,display:"flex",alignItems:"center",justifyContent:"center",color:WH,fontWeight:900,fontSize:15,boxShadow:"0 2px 6px rgba(200,16,46,.30)"}}>E</div>
           <div>
-            <div style={{fontWeight:900,fontSize:14,color:R,lineHeight:1}}>EJOT<sup style={{fontSize:6,color:BK}}>®</sup> Iso-Bar ECO</div>
-            <div style={{fontSize:10,color:GY,marginTop:2,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
-              <span>{d.bauvorhaben||"Neues Projekt"} {d.ort_plz&&<>· {d.ort_plz}</>}</span>
-              {pdfN&&<span style={{color:GL}}>← {pdfN}</span>}
+            <div style={{fontWeight:900,fontSize:14,lineHeight:1,letterSpacing:.2}}><span style={{color:R}}>EJOT</span><sup style={{fontSize:6,color:ZG}}>®</sup> <span style={{color:WH}}>Iso-Bar ECO</span></div>
+            <div style={{fontSize:10,color:ZG,marginTop:3,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+              <span style={{fontWeight:600,color:ZT}}>{d.bauvorhaben||"Neues Projekt"} {d.ort_plz&&<>· {d.ort_plz}</>}</span>
+              {pdfN&&<span style={{color:"#7B838C"}}>← {pdfN}</span>}
+              {nwStatus&&<span title={nwStatus==="offen"?"Pflichtangaben der Vorbemessung fehlen noch":"Stand der Nachweise (Ausnutzung ≤ 1,0)"}
+                style={{fontFamily:MONO_F,fontSize:8.5,fontWeight:600,letterSpacing:.6,padding:"1px 7px",borderRadius:9,
+                border:`1px solid ${nwStatus==="ok"?"#2E7D32":nwStatus==="fail"?R:"#5A626B"}`,
+                color:nwStatus==="ok"?"#7DD489":nwStatus==="fail"?"#FF8A9A":ZG}}>
+                {nwStatus==="ok"?"NACHWEISE ✓":nwStatus==="fail"?"NACHWEISE ✗":"NACHWEISE OFFEN"}{maxNw>0?` · MAX ${maxNw.toFixed(2).replace(".",",")}`:""}
+              </span>}
               {(saving||lastSaved||saveErr||dateiName)&&<span title={saveErr||"Wird lokal in deinem Browser gespeichert (IndexedDB). Nichts wird hochgeladen."}
                 style={{display:"inline-flex",alignItems:"center",gap:4,padding:"1px 7px",borderRadius:10,background:saving?"#E3F2FD":saveErr?"#FFEBEE":"#E8F5E9",color:saving?"#1565C0":saveErr?R:"#1B5E20",border:`1px solid ${saving?"#90CAF9":saveErr?R+"60":"#A5D6A7"}`,fontWeight:600,fontSize:9.5}}>
                 <span style={{width:6,height:6,borderRadius:"50%",background:saving?"#1565C0":"#2E7D32",boxShadow:saving?"":""}}/>
@@ -2786,17 +2899,17 @@ export default function App(){
         {/* Tab strip + actions */}
         <div style={{display:"flex",gap:6,alignItems:"center",paddingBottom:10}}>
           <button onClick={startNew} title="Neues Projekt starten (aktuelles wird zurückgesetzt)"
-            onMouseEnter={e=>{e.currentTarget.style.background=BG;e.currentTarget.style.borderColor=GL;}}
-            onMouseLeave={e=>{e.currentTarget.style.background=WH;e.currentTarget.style.borderColor=BD;}}
-            style={{padding:"6px 10px",fontSize:11,border:`1px solid ${BD}`,borderRadius:6,background:WH,cursor:"pointer",color:DK,fontWeight:600,display:"flex",alignItems:"center",gap:4,transition:"all .15s"}}>
+            onMouseEnter={e=>{e.currentTarget.style.background="#232930";e.currentTarget.style.borderColor="#4A525B";}}
+            onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.borderColor=ZH;}}
+            style={{padding:"6px 10px",fontSize:11,border:`1px solid ${ZH}`,borderRadius:6,background:"transparent",cursor:"pointer",color:ZT,fontWeight:600,display:"flex",alignItems:"center",gap:4,transition:"all .15s"}}>
             ↩ Neu
           </button>
           {/* Speichern/Öffnen gehören sichtbar in die Leiste — vorher lagen sie
               im Menü hinter "PDF Export", wo sie niemand vermutet. */}
-          {(()=>{const btn={padding:"6px 10px",fontSize:11,border:`1px solid ${BD}`,borderRadius:6,background:WH,
-                            cursor:"pointer",color:DK,fontWeight:600,display:"flex",alignItems:"center",gap:4,transition:"all .15s"};
-            const hov=e=>{e.currentTarget.style.background=BG;e.currentTarget.style.borderColor=GL;};
-            const out=e=>{e.currentTarget.style.background=WH;e.currentTarget.style.borderColor=BD;};
+          {(()=>{const btn={padding:"6px 10px",fontSize:11,border:`1px solid ${ZH}`,borderRadius:6,background:"transparent",
+                            cursor:"pointer",color:ZT,fontWeight:600,display:"flex",alignItems:"center",gap:4,transition:"all .15s"};
+            const hov=e=>{e.currentTarget.style.background="#232930";e.currentTarget.style.borderColor="#4A525B";};
+            const out=e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.borderColor=ZH;};
             return(<>
               <button onClick={()=>saveProject()} onMouseEnter={hov} onMouseLeave={out} style={btn}
                 title={dateiName?`Speichern in „${dateiName}" (Strg+S)`:"Projekt als Datei speichern (Strg+S)"}>
@@ -2811,14 +2924,17 @@ export default function App(){
                 📂 Öffnen
               </button>
             </>);})()}
-          <div style={{display:"flex",gap:2,background:BG,padding:3,borderRadius:8,border:`1px solid ${BD}`}}>
-            {tabs.map(t=>{const active=step===t.id;return(<button key={t.id} onClick={()=>setStep(t.id)}
-              onMouseEnter={e=>{if(!active)e.currentTarget.style.background=`${R}08`;}}
+          <div style={{display:"flex",gap:2,background:"rgba(255,255,255,.05)",padding:3,borderRadius:8,border:`1px solid ${ZH}`}}>
+            {tabs.map(t=>{const active=step===t.id;
+              const dot=t.id==="statik"&&nwStatus?{ok:"#66BB6A",fail:"#FF5C74",offen:"#E68A00"}[nwStatus]:null;
+              return(<button key={t.id} onClick={()=>setStep(t.id)}
+              onMouseEnter={e=>{if(!active)e.currentTarget.style.background="rgba(255,255,255,.07)";}}
               onMouseLeave={e=>{if(!active)e.currentTarget.style.background="transparent";}}
               style={{padding:"6px 12px",fontSize:11,borderRadius:6,cursor:"pointer",fontWeight:active?700:600,
-                border:"none",background:active?WH:"transparent",color:active?R:DK,boxShadow:active?"0 1px 3px rgba(0,0,0,.08)":"none",display:"flex",alignItems:"center",gap:5,transition:"all .15s",position:"relative"}}>
+                border:"none",background:active?"rgba(255,255,255,.12)":"transparent",color:active?WH:ZG,display:"flex",alignItems:"center",gap:5,transition:"all .15s",position:"relative"}}>
               <span style={{fontSize:11,opacity:.7}}>{t.icon}</span>{t.l}
-              {active&&<span style={{position:"absolute",bottom:-2,left:"50%",transform:"translateX(-50%)",width:14,height:2,background:R,borderRadius:1}}/>}
+              {dot&&<span title={nwStatus==="ok"?"Alle Nachweise erfüllt":nwStatus==="fail"?"Nachweis überschritten":"Eingaben unvollständig"} style={{width:6,height:6,borderRadius:"50%",background:dot,marginLeft:1}}/>}
+              {active&&<span style={{position:"absolute",bottom:-3,left:"50%",transform:"translateX(-50%)",width:16,height:2,background:R,borderRadius:1}}/>}
             </button>);})}
           </div>
           <div style={{position:"relative",marginLeft:6}}>
@@ -2827,10 +2943,10 @@ export default function App(){
                 border:`1px solid ${R}`,background:exporting?"#EEE":`linear-gradient(135deg, ${R}, #A40C24)`,color:exporting?GY:WH,display:"flex",alignItems:"center",gap:6,boxShadow:exporting?"none":"0 1px 3px rgba(200,16,46,.25)"}}>
               {exporting?<><span style={{display:"inline-block",width:10,height:10,border:"2px solid #CCC",borderTopColor:R,borderRadius:"50%",animation:"spin 1s linear infinite"}}/>Exportiert …</>:<>⬇ PDF Export</>}
             </button>
-            {showExportMenu&&!exporting&&<div style={{position:"absolute",right:0,top:"100%",marginTop:6,background:WH,border:`1px solid ${BD}`,borderRadius:8,
+            {showExportMenu&&!exporting&&<div className="menuPop" style={{position:"absolute",right:0,top:"100%",marginTop:6,background:WH,border:`1px solid ${BD}`,borderRadius:8,
               boxShadow:"0 8px 24px rgba(0,0,0,.14)",zIndex:200,minWidth:240,padding:5,fontSize:11}} onClick={e=>e.stopPropagation()}>
               <div style={{padding:"7px 11px",fontWeight:700,fontSize:9.5,color:GL,textTransform:"uppercase",letterSpacing:.5}}>Einzeln exportieren</div>
-              {[["preview","Vorbemessung (Seite 1+2)"],["statik","Statik – Detailberechnung"],["anlagen","Anlagen (FLL, Pflanzen, System)"],["material","Materialbedarfsermittlung"]].map(([id,label])=>
+              {[["preview","Vorbemessung (Seite 1+2)"],["statik","Statik – Detailberechnung"],["anlagen","Anlagen (Lastklassen, Pflanze, System)"],["material","Materialbedarfsermittlung"]].map(([id,label])=>
                 <button key={id} onClick={()=>handleExport(id)} style={{display:"block",width:"100%",padding:"8px 11px",background:"none",border:"none",
                   textAlign:"left",cursor:"pointer",borderRadius:5,fontSize:11.5,color:DK}}
                   onMouseEnter={e=>e.currentTarget.style.background=BG}
@@ -2903,7 +3019,7 @@ export default function App(){
       {/* Parse-feedback banner (after upload) */}
       {parseInfo&&step==="edit"&&<ParseFeedbackBanner info={parseInfo} onClose={()=>setParseInfo(null)}/>}
 
-      <div style={{maxWidth:980,margin:"0 auto",padding:"14px"}}>
+      <div style={{maxWidth:1010,margin:"0 auto",padding:"16px 14px 44px"}}><div className="stepFade" key={step}>
 
 {/* ═══ EDIT ═══ */}
 {step==="edit"&&<>
@@ -3089,26 +3205,21 @@ export default function App(){
       style={{padding:"8px 16px",fontSize:11,border:`1px dashed ${BD}`,borderRadius:6,background:WH,cursor:"pointer",color:GY,marginTop:6,fontWeight:600}}>+ weitere Fassade</button></Sec>
 </>}
 
+{/* ═══ 3D-MODELL (nur Bildschirm, kein PDF-Export) ═══ */}
+{step==="modell"&&<Facade3D d={d}/>}
+
 {/* ═══ PREVIEW ═══ */}
-{step==="preview"&&<div style={{borderRadius:8,boxShadow:"0 2px 12px rgba(0,0,0,.08)",overflow:"hidden"}}>
-  <PreviewSection d={d} maxNw={maxNw}/>
-</div>}
+{step==="preview"&&<PaperView label="VORBEMESSUNG"><PreviewSection d={d} maxNw={maxNw}/></PaperView>}
 
 {/* ═══ STATIK ═══ */}
-{step==="statik"&&<div style={{borderRadius:8,boxShadow:"0 2px 12px rgba(0,0,0,.08)",overflow:"hidden"}}>
-  <StatikSection d={d}/>
-</div>}
+{step==="statik"&&<PaperView label="STATIK"><StatikSection d={d}/></PaperView>}
 
 {/* ═══ ANLAGEN ═══ */}
-{step==="anlagen"&&<div style={{borderRadius:8,boxShadow:"0 2px 12px rgba(0,0,0,.08)",overflow:"hidden"}}>
-  <AnlagenSection d={d} usable={usable}/>
-</div>}
+{step==="anlagen"&&<PaperView label="ANLAGEN"><AnlagenSection d={d}/></PaperView>}
 
 {/* ═══ MATERIAL ═══ */}
-{step==="material"&&<div style={{borderRadius:8,boxShadow:"0 2px 12px rgba(0,0,0,.08)",overflow:"hidden"}}>
-  <MaterialSection d={d} setD={setD}/>
-</div>}
-      </div>
+{step==="material"&&<PaperView label="MATERIAL"><MaterialSection d={d} setD={setD}/></PaperView>}
+      </div></div>
 
 {/* ═══ OFF-SCREEN PDF RENDER CONTAINERS ═══ */}
 <div data-pdf-offscreen="true" style={{position:"absolute",left:"-9999px",top:0,overflow:"visible",pointerEvents:"none"}}>
@@ -3119,7 +3230,7 @@ export default function App(){
     <div ref={statikRef} style={{background:WH,width:880,padding:0}}><StatikSection d={d}/></div>
   </div>
   <div style={{width:880,background:WH,fontFamily:"'Segoe UI',system-ui,sans-serif"}}>
-    <div ref={anlagenRef} style={{background:WH,width:880,padding:0}}><AnlagenSection d={d} usable={usable}/></div>
+    <div ref={anlagenRef} style={{background:WH,width:880,padding:0}}><AnlagenSection d={d}/></div>
   </div>
   <div style={{width:880,background:WH,fontFamily:"'Segoe UI',system-ui,sans-serif"}}>
     <div ref={materialRef} style={{background:WH,width:880,padding:0}}><MaterialSection d={d}/></div>
