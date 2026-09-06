@@ -79,13 +79,31 @@ const pf = parseNum;
 // with subtle texture against a sky/ground gradient.  Real windows come from
 // the user's plan annotations in plan mode.
 function ProceduralBackdrop({ facadeBox, vbW, vbH }) {
+  const groundY = facadeBox.y + facadeBox.h;
+  // Deterministische Grasbüschel entlang der Geländeoberkante
+  const tufts = [];
+  for (let i = 0; i * 26 < vbW; i++) {
+    const x = i * 26 + 8 + Math.abs(Math.sin(i * 3.7)) * 12;
+    const hgt = 5 + Math.abs(Math.sin(i * 1.9)) * 6;
+    tufts.push(
+      <path key={i} d={`M${x - 3},${groundY + 4} Q${x - 2},${groundY - hgt} ${x - 1},${groundY + 3}
+        M${x},${groundY + 4} Q${x + 0.5},${groundY - hgt - 2} ${x + 1.5},${groundY + 3}
+        M${x + 3},${groundY + 4} Q${x + 3.5},${groundY - hgt + 1} ${x + 4.5},${groundY + 3}`}
+        stroke={i % 2 ? "#5E8140" : "#4C6C33"} strokeWidth="1.1" fill="none" strokeLinecap="round" />
+    );
+  }
   return (<>
     <rect x="0" y="0" width={vbW} height={vbH} fill="url(#fc-sky)" />
-    <rect x="0" y={facadeBox.y + facadeBox.h} width={vbW} height={vbH - (facadeBox.y + facadeBox.h)} fill="url(#fc-ground)" />
+    <rect x="0" y={groundY} width={vbW} height={vbH - groundY} fill="url(#fc-ground)" />
+    {/* Wand mit Putzstruktur, Mauerkrone und weichem Schattenwurf */}
+    <rect x={facadeBox.x - 6} y={groundY} width={facadeBox.w + 24} height={12} fill="url(#fc-wallShadow)" />
     <rect x={facadeBox.x} y={facadeBox.y} width={facadeBox.w} height={facadeBox.h} fill="url(#fc-plaster)" />
     <rect x={facadeBox.x} y={facadeBox.y} width={facadeBox.w} height={facadeBox.h} fill="url(#fc-plasterTex)" />
-    <rect x={facadeBox.x} y={facadeBox.y} width={facadeBox.w} height={facadeBox.h} fill="none" stroke="#9C8C6E" strokeWidth="1.2" />
     <rect x={facadeBox.x} y={facadeBox.y} width={Math.min(40, facadeBox.w * 0.06)} height={facadeBox.h} fill="#000" opacity="0.05" />
+    <rect x={facadeBox.x + facadeBox.w - Math.min(26, facadeBox.w * 0.04)} y={facadeBox.y} width={Math.min(26, facadeBox.w * 0.04)} height={facadeBox.h} fill="#FFF" opacity="0.10" />
+    <rect x={facadeBox.x} y={facadeBox.y} width={facadeBox.w} height={facadeBox.h} fill="none" stroke="#9C8C6E" strokeWidth="1.2" />
+    <rect x={facadeBox.x - 5} y={facadeBox.y - 7} width={facadeBox.w + 10} height={8} rx="1.5" fill="url(#fc-attika)" stroke="#8F846C" strokeWidth="0.8" />
+    {tufts}
   </>);
 }
 
@@ -289,7 +307,7 @@ export default function RealisticFacade({
   const maskId = useMemo(() => `fc-mask-${Math.random().toString(36).slice(2, 9)}`, []);
   const shadowFilterId = useMemo(() => `fc-shadow-${Math.random().toString(36).slice(2, 9)}`, []);
 
-  const anchorR = Math.max(2.8, Math.min(facadeBox.w, facadeBox.h) * 0.009);
+  const anchorR = Math.max(3.2, Math.min(facadeBox.w, facadeBox.h) * 0.011);
   // Cables drawn AFTER foliage so the raster type stays readable at any coverage
   const cableMain = Math.max(0.9, anchorR * 0.28);
   const cableSub  = Math.max(0.5, anchorR * 0.18);
@@ -336,10 +354,17 @@ export default function RealisticFacade({
           <circle cx="4" cy="5" r="0.4" fill="#A99877" opacity="0.30" />
         </pattern>
         <linearGradient id="fc-sky" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor="#CFE4F2" /><stop offset="1" stopColor="#EAF2F8" />
+          <stop offset="0" stopColor="#BEDBEE" /><stop offset="0.7" stopColor="#E6F0F7" /><stop offset="1" stopColor="#F2EEE2" />
         </linearGradient>
         <linearGradient id="fc-ground" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor="#5C4A33" /><stop offset="1" stopColor="#3D2F1F" />
+          <stop offset="0" stopColor="#7FA05B" /><stop offset="0.22" stopColor="#5F8443" />
+          <stop offset="0.6" stopColor="#4A6A35" /><stop offset="1" stopColor="#39511F" />
+        </linearGradient>
+        <linearGradient id="fc-wallShadow" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#000" stopOpacity="0.28" /><stop offset="1" stopColor="#000" stopOpacity="0" />
+        </linearGradient>
+        <linearGradient id="fc-attika" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#DDD6C2" /><stop offset="1" stopColor="#B4A98C" />
         </linearGradient>
         <linearGradient id="fc-glass" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0" stopColor="#5B7C90" />
@@ -350,10 +375,11 @@ export default function RealisticFacade({
           <stop offset="0" stopColor="#000" stopOpacity="0.35" />
           <stop offset="1" stopColor="#000" stopOpacity="0" />
         </radialGradient>
-        <radialGradient id="fc-anchorFace" cx="0.35" cy="0.35" r="0.7">
-          <stop offset="0" stopColor="#E94B65" />
-          <stop offset="0.65" stopColor="#C8102E" />
-          <stop offset="1" stopColor="#7C0A1D" />
+        {/* Draufsicht Iso-Bar-ECO-Adapter: Edelstahl mit Innensechskant-Senkung */}
+        <radialGradient id="fc-anchorFace" cx="0.35" cy="0.3" r="0.78">
+          <stop offset="0" stopColor="#F2F4F6" />
+          <stop offset="0.55" stopColor="#C9CED3" />
+          <stop offset="1" stopColor="#82898F" />
         </radialGradient>
       </defs>
 
@@ -381,19 +407,21 @@ export default function RealisticFacade({
             <line x1={ln.x1} y1={ln.y1} x2={ln.x2} y2={ln.y2}
               stroke="#000" strokeWidth={cableMain * 1.6} opacity="0.18" strokeLinecap="round" />
             <line x1={ln.x1} y1={ln.y1} x2={ln.x2} y2={ln.y2}
-              stroke="#1F1F1F" strokeWidth={cableMain} opacity="0.75" strokeLinecap="round" />
+              stroke="#3A4148" strokeWidth={cableMain} opacity="0.85" strokeLinecap="round" />
           </g>
         ))}
       </g>
 
-      {/* Anchors on top of everything */}
+      {/* Anchors on top of everything — realistische Adapter-Draufsicht */}
       {showAnchors && anchors.map((p, i) => (
         <g key={`a${i}`}>
-          <ellipse cx={p.x + anchorR * 0.18} cy={p.y + anchorR * 0.25}
-            rx={anchorR * 1.15} ry={anchorR * 0.7} fill="url(#fc-anchorShade)" />
-          <circle cx={p.x} cy={p.y} r={anchorR} fill="url(#fc-anchorFace)" />
-          <circle cx={p.x - anchorR * 0.3} cy={p.y - anchorR * 0.3}
-            r={anchorR * 0.32} fill="#FFF" opacity="0.55" />
+          <ellipse cx={p.x + anchorR * 0.18} cy={p.y + anchorR * 0.28}
+            rx={anchorR * 1.2} ry={anchorR * 0.75} fill="url(#fc-anchorShade)" />
+          <circle cx={p.x} cy={p.y} r={anchorR} fill="url(#fc-anchorFace)"
+            stroke="#5A6067" strokeWidth={Math.max(0.4, anchorR * 0.13)} />
+          <circle cx={p.x} cy={p.y} r={anchorR * 0.62} fill="none"
+            stroke="#8B9199" strokeWidth={Math.max(0.35, anchorR * 0.1)} />
+          <circle cx={p.x} cy={p.y} r={anchorR * 0.3} fill="#26292D" />
         </g>
       ))}
 
