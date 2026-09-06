@@ -1152,64 +1152,77 @@ function PreviewSection({d,maxNw,withRealistic=true}){
 // Ankerachse (Schraffur = Schnittflaeche), Iso-Bar ECO nach Produktfoto,
 // Schichtdicken skalieren mit den Projektwerten.
 function SystemIso({ d }){
+  // Gleiche Ansicht wie das interaktive 3D-Modell (fast frontal, Schichten
+  // als getrennte Platten in Explosionsdarstellung, Anker senkrecht aus der
+  // Wand mit kurzer perspektivischer Verkuerzung) — als reines SVG, damit es
+  // unveraendert in die PDF kommt.
   const wdvsMm=pf(d.vm_daemm)||pf(d.wdvs_dicke)||200;
   const tolMm=pf(d.dicke_klebschicht)||10;
   const putzMm=pf(d.vm_putz)||10;
   const isMW=d.vm_untergrund?d.vm_untergrund==="mauerwerk":!/beton/i.test(String(d.verankerungsgrund||"stein"));
   const S=0.24;
-  const T={wand:28,tol:Math.max(3,Math.min(20,tolMm*S)),daemm:Math.max(20,Math.min(80,wdvsMm*S)),putz:Math.max(3,Math.min(10,putzMm*S)),luft:40};
-  const zTol=T.tol,zDae=zTol+T.daemm,zPutz=zDae+T.putz,zSeil=zPutz+T.luft;
-  const W=240,H=130,ox=282,oy=165,kx=0.9,ky=0.33;
-  const P=(x,y,z)=>[ox-x*kx+z*kx, oy+x*ky+z*ky-y];
-  const q=(pts,fill,extra)=>{const dd="M"+pts.map(p=>p[0].toFixed(1)+","+p[1].toFixed(1)).join("L")+"Z";
+  const T={wand:26,tol:Math.max(3,Math.min(18,tolMm*S)),daemm:Math.max(18,Math.min(70,wdvsMm*S)),putz:Math.max(3,Math.min(9,putzMm*S)),luft:34};
+  const G=12;                                     // Explosionsspalt zwischen den Schichten
+  const zTolIn=G, zTolOut=G+T.tol;
+  const zDaeIn=zTolOut+G, zDaeOut=zDaeIn+T.daemm;
+  const zPutzIn=zDaeOut+G, zPutzOut=zPutzIn+T.putz;
+  const zSeil=zPutzOut+T.luft;
+  // Projektion: Breite fast frontal (exx/exy), Tiefe kurz nach rechts unten.
+  const exx=0.985,exy=0.06,ezx=0.55,ezy=0.28;
+  const W=280,H=200,ox=340,oy=232;
+  const P=(x,y,z)=>[ox-x*exx+z*ezx, oy+x*exy+z*ezy-y];
+  const angZ=Math.atan2(ezy,ezx)*180/Math.PI, sclZ=Math.hypot(ezx,ezy);
+  const q=(pts,fill,extra)=>{const dd="M"+pts.map(pt=>pt[0].toFixed(1)+","+pt[1].toFixed(1)).join("L")+"Z";
     return <path d={dd} fill={fill} stroke="rgba(20,25,30,.28)" strokeWidth=".6" {...(extra||{})}/>;};
-  // Schicht als Iso-Block: Front, Deckflaeche (Schnitt, schraffiert), rechte Seite
+  // Schichtplatte: Front, linke Seitenflaeche (Dicke), schmale Deckflaeche mit Schraffur
   const slab=(z0,z1,front,top,side,key)=>(<g key={key}>
-    {/* Reihenfolge: Front, dann LINKE Seitenflaeche (x=W, aus diesem Blick-
-        winkel sichtbar — ohne sie schienen die inneren Schichtfronten durch
-        und der Aufbau wirkte auseinandergerissen), dann Deckflaeche+Schraffur. */}
-    {q([P(0,0,z1),P(W,0,z1),P(W,H,z1),P(0,H,z1)],front)}
     {q([P(W,0,z0),P(W,H,z0),P(W,H,z1),P(W,0,z1)],side)}
     {q([P(0,H,z0),P(W,H,z0),P(W,H,z1),P(0,H,z1)],top)}
     {q([P(0,H,z0),P(W,H,z0),P(W,H,z1),P(0,H,z1)],"url(#siHatch)",{stroke:"none"})}
+    {q([P(0,0,z1),P(W,0,z1),P(W,H,z1),P(0,H,z1)],front)}
   </g>);
-  // Iso-Bar entlang der Tiefenachse (30 Grad): Rippenstab, Dichtscheibe,
-  // Edelstahl-Scheibe, Gewindestift, Sechskant, Adapterzylinder mit Bohrung.
-  // Achsrichtung der Tiefe exakt aus der Projektion ableiten, damit
-  //   Dichtscheibe auf der Putzflaeche und Bohrung auf der Seilebene liegen.
-  const angZ=Math.atan2(ky,kx)*180/Math.PI, sclZ=Math.hypot(kx,ky);
-  const Anker=({ax,ay,mitStab})=>{
-    const [px,py]=P(ax,ay,-16); const z0=16;
-    const xP=z0+zPutz, xS=z0+zSeil, xHex=xS-26, xStift0=xP+8;
-    return(<g transform={`translate(${px.toFixed(1)},${py.toFixed(1)}) rotate(${angZ.toFixed(2)}) scale(${sclZ.toFixed(4)},1)`}>
-      {mitStab
-        ? <><rect x="0" y="-4.5" width={xP+1} height="9" rx="4.5" fill="url(#siRod)"/>
-            <rect x="4" y="-4.5" width={xP-6} height="9" fill="url(#siRibs)"/></>
-        : <rect x={xP-6} y="-4.5" width="7" height="9" rx="3.5" fill="url(#siRod)"/>}
-      <rect x={xP+0.5} y="-7.5" width="4.5" height="15" rx="2" fill="url(#siDark)"/>
-      <rect x={xP+5.2} y="-5.5" width="2.6" height="11" rx="1.3" fill="url(#siSteel)"/>
-      <rect x={xStift0} y="-2.4" width={xHex-xStift0} height="4.8" rx="2" fill="url(#siSteel)"/>
-      <rect x={xStift0} y="-2.4" width={xHex-xStift0} height="4.8" fill="url(#siThread)"/>
-      <rect x={xHex} y="-7.5" width="10" height="15" rx="1.5" fill="url(#siSteel)"/>
-      <line x1={xHex+1} y1="-2.6" x2={xHex+9} y2="-2.6" stroke="rgba(255,255,255,.55)" strokeWidth="1"/>
-      <rect x={xS-16} y="-5.8" width="24" height="11.6" rx="4.6" fill="url(#siSteel)"/>
-      <ellipse cx={xS+7.6} cy="0" rx="1.7" ry="5.4" fill="#AEB4BB" stroke="rgba(20,25,30,.3)" strokeWidth=".5"/>
-      <ellipse cx={xS+7.6} cy="0" rx="0.8" ry="2.4" fill="#26292D"/>
-      <circle cx={xS} cy="0" r="3" fill="#26292D"/>
-      <circle cx={xS-1} cy="-1.1" r="1.1" fill="#5A6067"/>
+  // Bauteil entlang der Ankerachse: Rechteck im gedrehten Rahmen ab z0
+  const Teil=({ax,ay,z0,z1,dia,fill,rx=null,kinder=null})=>{
+    const [px,py]=P(ax,ay,z0);
+    const len=(z1-z0)*sclZ;
+    return(<g transform={`translate(${px.toFixed(1)},${py.toFixed(1)}) rotate(${angZ.toFixed(2)})`}>
+      <rect x="0" y={-dia/2} width={len.toFixed(1)} height={dia} rx={rx===null?dia/2:rx} fill={fill}/>
+      {kinder}
     </g>);
   };
-  const ax1=W*0.30, ax2=W*0.70, ay2=H*0.42;
+  // Ankerraster wie im 3D-Modell: 3 x 2 auf der Flaeche
+  const axs=[W*0.82,W*0.5,W*0.18], ays=[H*0.72,H*0.26];
   const seil="#79828B";
-  // Nummerierte Positionsmarken (wie im Detailblatt) statt langer, sich
-  //   kreuzender Hinweislinien; die Legende steht unter der Zeichnung.
+  // Rippenstab-Segmente in den Explosionsspalten (Stab "durchstoesst" die Platten)
+  const gaps=[[-4,zTolIn+3],[zTolOut-3,zDaeIn+3],[zDaeOut-3,zPutzIn+3]];
+  const RodSeg=({ax,ay,z0,z1})=>(<g>
+    <Teil ax={ax} ay={ay} z0={z0} z1={z1} dia={7} fill="url(#siRod)"/>
+    <Teil ax={ax} ay={ay} z0={z0} z1={z1} dia={7} fill="url(#siRibs)" rx={3.5}/>
+  </g>);
+  // Sichtbarer Anker ab Putzoberflaeche: Dichtscheibe, Scheibe, Gewinde, Adapter
+  const Kopf=({ax,ay})=>(<g>
+    <ellipse cx={P(ax,ay,zPutzOut)[0]+5} cy={P(ax,ay,zPutzOut)[1]+7} rx="10" ry="4.5" fill="rgba(20,25,30,.13)"/>
+    <Teil ax={ax} ay={ay} z0={zPutzOut+0.5} z1={zPutzOut+6} dia={14} fill="url(#siDark)" rx={3}/>
+    <Teil ax={ax} ay={ay} z0={zPutzOut+6} z1={zPutzOut+9.5} dia={10} fill="url(#siSteel)" rx={2.5}/>
+    <Teil ax={ax} ay={ay} z0={zPutzOut+9.5} z1={zSeil-20} dia={4} fill="url(#siSteel)" rx={2}/>
+    <Teil ax={ax} ay={ay} z0={zPutzOut+9.5} z1={zSeil-20} dia={4} fill="url(#siThread)" rx={2}/>
+    <Teil ax={ax} ay={ay} z0={zSeil-20} z1={zSeil-11} dia={13} fill="url(#siSteel)" rx={1.5}/>
+    <Teil ax={ax} ay={ay} z0={zSeil-11} z1={zSeil+7} dia={10} fill="url(#siSteel)" rx={4}
+      kinder={<>
+        <ellipse cx={((zSeil+7)-(zSeil-11))*sclZ} cy="0" rx="1.5" ry="4.6" fill="#AEB4BB" stroke="rgba(20,25,30,.3)" strokeWidth=".5"/>
+        <circle cx={(11)*sclZ} cy="0" r="2.6" fill="#26292D"/>
+        <circle cx={(11)*sclZ-0.8} cy="-0.9" r="1" fill="#5A6067"/>
+      </>}/>
+  </g>);
+  // Nummerierte Positionsmarken + Legende
   const Num=({n,x,y,tx,ty})=>(<g>
     <line x1={tx} y1={ty} x2={x} y2={y} stroke="#9C978F" strokeWidth=".8"/>
     <circle cx={x} cy={y} r="8" fill={WH} stroke="#8B939C" strokeWidth=".9"/>
     <text x={x} y={y+2.8} textAnchor="middle" fontFamily={MONO_F} fontSize="8.5" fontWeight="700" fill="#333">{n}</text>
   </g>);
+  const wandFront=isMW?"#C08A7D":"#B8B4AD";
   return(
-    <svg viewBox="0 0 560 312" width="100%" style={{display:"block",maxWidth:660,margin:"0 auto"}} aria-label="Isometrischer Systemschnitt">
+    <svg viewBox="0 0 560 312" width="100%" style={{display:"block",maxWidth:660,margin:"0 auto"}} aria-label="Systemdarstellung wie im 3D-Modell">
       <defs>
         <linearGradient id="siSteel" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0" stopColor="#7E858D"/><stop offset=".45" stopColor="#E6EAED"/>
@@ -1222,47 +1235,46 @@ function SystemIso({ d }){
         <linearGradient id="siDark" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0" stopColor="#17181A"/><stop offset=".5" stopColor="#3E4044"/><stop offset="1" stopColor="#141517"/>
         </linearGradient>
-        <pattern id="siRibs" width="5" height="60" patternUnits="userSpaceOnUse">
-          <rect width="2" height="60" fill="rgba(96,86,60,.32)"/>
+        <pattern id="siRibs" width="4.5" height="60" patternUnits="userSpaceOnUse">
+          <rect width="1.8" height="60" fill="rgba(96,86,60,.32)"/>
         </pattern>
-        <pattern id="siThread" width="3" height="30" patternUnits="userSpaceOnUse" patternTransform="rotate(8)">
+        <pattern id="siThread" width="3" height="30" patternUnits="userSpaceOnUse" patternTransform="rotate(10)">
           <rect width="1" height="30" fill="rgba(20,25,30,.32)"/>
         </pattern>
         <pattern id="siHatch" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-          <line x1="0" y1="0" x2="0" y2="7" stroke="rgba(20,25,30,.32)" strokeWidth=".8"/>
+          <line x1="0" y1="0" x2="0" y2="7" stroke="rgba(20,25,30,.3)" strokeWidth=".8"/>
+        </pattern>
+        <pattern id="siZiegel" width="30" height="16" patternUnits="userSpaceOnUse">
+          <rect width="30" height="16" fill="#C08A7D"/>
+          <line x1="0" y1="8" x2="30" y2="8" stroke="#EDE6DE" strokeWidth="1.4"/>
+          <line x1="0" y1="16" x2="30" y2="16" stroke="#EDE6DE" strokeWidth="1.4"/>
+          <line x1="8" y1="0" x2="8" y2="8" stroke="#EDE6DE" strokeWidth="1.2"/>
+          <line x1="22" y1="8" x2="22" y2="16" stroke="#EDE6DE" strokeWidth="1.2"/>
         </pattern>
       </defs>
-      {/* Schichten von innen nach aussen */}
-      {slab(-T.wand,0,isMW?"#C3897B":"#B8B4AD",
-        isMW?"#D5A79A":"#C6C2BA", isMW?"#A87A6E":"#9A958D","wand")}
-      {slab(0,zTol,"#C9A86A","#DCBE86","#B39355","tol")}
-      {slab(zTol,zDae,"#EFE8D8","#F2ECDC","#CFC6AC","dae")}
-      {slab(zDae,zPutz,"#F6F3EC","#FBF9F4","#DDD8CC","putz")}
-      {/* Seilebene: je Anker eine vertikale + horizontale Seillinie */}
+      {/* Schichten von hinten nach vorn, dazwischen die Rippenstab-Segmente */}
+      {slab(-T.wand,0,isMW?"url(#siZiegel)":wandFront,isMW?"#D5A79A":"#C6C2BA",isMW?"#A87A6E":"#9A958D","wand")}
+      {axs.map(ax=>ays.map(ay=><RodSeg key={`r0-${ax}-${ay}`} ax={ax} ay={ay} z0={gaps[0][0]} z1={gaps[0][1]}/>))}
+      {slab(zTolIn,zTolOut,"#C9A86A","#DCBE86","#B39355","tol")}
+      {axs.map(ax=>ays.map(ay=><RodSeg key={`r1-${ax}-${ay}`} ax={ax} ay={ay} z0={gaps[1][0]} z1={gaps[1][1]}/>))}
+      {slab(zDaeIn,zDaeOut,"#EFE8D8","#F2ECDC","#CFC6AC","dae")}
+      {axs.map(ax=>ays.map(ay=><RodSeg key={`r2-${ax}-${ay}`} ax={ax} ay={ay} z0={gaps[2][0]} z1={gaps[2][1]}/>))}
+      {slab(zPutzIn,zPutzOut,"#F6F3EC","#FBF9F4","#DDD8CC","putz")}
+      {/* Seilnetz auf der Seilebene */}
       <g stroke={seil} strokeWidth="2" strokeLinecap="round">
-        <line x1={P(ax1,-8,zSeil)[0]} y1={P(ax1,-8,zSeil)[1]} x2={P(ax1,H+16,zSeil)[0]} y2={P(ax1,H+16,zSeil)[1]}/>
-        <line x1={P(ax2,-8,zSeil)[0]} y1={P(ax2,-8,zSeil)[1]} x2={P(ax2,H+16,zSeil)[0]} y2={P(ax2,H+16,zSeil)[1]}/>
-        <line x1={P(-10,ay2,zSeil)[0]} y1={P(-10,ay2,zSeil)[1]} x2={P(W+10,ay2,zSeil)[0]} y2={P(W+10,ay2,zSeil)[1]}/>
-        <line x1={P(-10,H,zSeil)[0]} y1={P(-10,H,zSeil)[1]} x2={P(W+10,H,zSeil)[0]} y2={P(W+10,H,zSeil)[1]}/>
+        {axs.map(ax=><line key={`sv${ax}`} x1={P(ax,-8,zSeil)[0]} y1={P(ax,-8,zSeil)[1]} x2={P(ax,H+8,zSeil)[0]} y2={P(ax,H+8,zSeil)[1]}/>)}
+        {ays.map(ay=><line key={`sh${ay}`} x1={P(-12,ay,zSeil)[0]} y1={P(-12,ay,zSeil)[1]} x2={P(W+12,ay,zSeil)[0]} y2={P(W+12,ay,zSeil)[1]}/>)}
       </g>
-      {/* Bohrkanal des oberen Ankers auf der Schnittflaeche — bindet den
-          Rippenstab sichtbar in den Wandaufbau ein */}
-      {q([P(ax1-5,H,-16),P(ax1+5,H,-16),P(ax1+5,H,zPutz),P(ax1-5,H,zPutz)],"rgba(96,86,60,.18)",{stroke:"rgba(96,86,60,.35)",strokeWidth:.5})}
-      {/* Schattenwurf des vorderen Adapters auf der Putzflaeche */}
-      <ellipse cx={P(ax2,ay2,zPutz)[0]+7} cy={P(ax2,ay2,zPutz)[1]+9} rx="13" ry="5.5" fill="rgba(20,25,30,.13)"/>
-      {/* Anker: oben im Schnitt (mit sichtbarem Rippenstab), vorne auf der Flaeche */}
-      <Anker ax={ax1} ay={H} mitStab/>
-      <Anker ax={ax2} ay={ay2}/>
-      {/* Beschriftung */}
-      {/* Spalte links, von oben nach unten in Schichtreihenfolge — die
-          Hinweislinien fächern ohne Überschneidung zu den Dickenbändern. */}
-      {[[1,-T.wand/2],[2,zTol/2],[3,(zTol+zDae)/2],[4,(zDae+zPutz)/2]].map(([n,zm],i)=>{
-        const t=P(W,H*0.5,zm);
-        return <Num key={n} n={n} x={22} y={116+i*26} tx={t[0]} ty={t[1]}/>;
+      {/* Anker (Dichtscheibe bis Adapter) ueber dem Seilnetz */}
+      {axs.map(ax=>ays.map(ay=><Kopf key={`k-${ax}-${ay}`} ax={ax} ay={ay}/>))}
+      {/* Positionsmarken */}
+      {[[1,(-T.wand)/2],[2,(zTolIn+zTolOut)/2],[3,(zDaeIn+zDaeOut)/2],[4,(zPutzIn+zPutzOut)/2]].map(([n,zm],i)=>{
+        const t=P(W,H*0.55,zm);
+        return <Num key={n} n={n} x={26} y={104+i*26} tx={t[0]} ty={t[1]}/>;
       })}
-      {(()=>{const t=P(ax1,H,4);return <Num n={5} x={t[0]+34} y={t[1]-30} tx={t[0]} ty={t[1]}/>;})()}
-      {(()=>{const t=P(ax1,H+14,zSeil);return <Num n={6} x={t[0]+36} y={t[1]-20} tx={t[0]} ty={t[1]}/>;})()}
-      <text x="270" y="300" textAnchor="middle" fontFamily={MONO_F} fontSize="7.5" fill={GY} letterSpacing=".6">
+      {(()=>{const t=P(axs[0],ays[1],zSeil-16);return <Num n={5} x={t[0]+34} y={t[1]-26} tx={t[0]+4} ty={t[1]-4}/>;})()}
+      {(()=>{const t=P(axs[0],-4,zSeil);return <Num n={6} x={t[0]+30} y={t[1]-14} tx={t[0]} ty={t[1]}/>;})()}
+      <text x="280" y="306" textAnchor="middle" fontFamily={MONO_F} fontSize="7.5" fill={GY} letterSpacing=".6">
         1 VERANKERUNGSGRUND · 2 KLEBER + ALTPUTZ · 3 DÄMMUNG (WDVS) · 4 PUTZ · 5 ISO-BAR ECO · 6 SEILEBENE
       </text>
     </svg>
@@ -1317,7 +1329,7 @@ function AnlagenSection({d}){
           schädigen Putz und Dämmung.
         </div></div></div>
     <div data-pdf-page="anlage-c" style={{borderTop:`6px solid ${BG}`,padding:"16px 24px"}}>
-      <PageHead title="Anlage C – Systemdetail" subtitle="Isometrischer Systemschnitt mit EJOT Iso-Bar ECO"/>
+      <PageHead title="Anlage C – Systemdetail" subtitle="Systemaufbau in Explosionsdarstellung mit EJOT Iso-Bar ECO"/>
       <div style={{borderTop:`1px solid ${R}`,marginBottom:12}}/>
       <div style={{border:`1px solid ${BD}`,borderRadius:4,padding:16}}>
         <SystemIso d={d}/>
