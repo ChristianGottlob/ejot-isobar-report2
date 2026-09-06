@@ -122,7 +122,7 @@ export default function Facade3D({ d }) {
   const f0 = (d.fassaden || [])[0] || {};
   const lh = pf(f0.lh) || pf(d.LH) || 0.9;
   const lv = pf(f0.lv) || pf(d.LV) || 0.9;
-  const fuehrung = f0.seilfuehrung || d.seilfuehrung || "gitter";
+  const projFuehrung = f0.seilfuehrung || d.seilfuehrung || "gitter";
   const isMW = d.vm_untergrund ? d.vm_untergrund === "mauerwerk" : !/beton/i.test(String(d.verankerungsgrund || "stein"));
   const produkt = String(d.produkt || "").replace(/\D/g, "");
 
@@ -143,6 +143,9 @@ export default function Facade3D({ d }) {
   const [zoom, setZoom] = useState(1);
   const [explode, setExplode] = useState(0);
   const [hi, setHi] = useState(null);
+  // Seilfuehrung im Modell umschaltbar; null = Wert aus dem Projekt.
+  const [fWahl, setFWahl] = useState(null);
+  const fuehrung = fWahl || projFuehrung;
   const drag = useRef(null);
   const idle = useRef(true);
 
@@ -254,6 +257,21 @@ export default function Facade3D({ d }) {
               </span>
             </div>
           ))}
+        </div>
+
+        <div>
+          <div style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: 1.2, color: "#8B939C", marginBottom: 5 }}>SEILFÜHRUNG</div>
+          <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+            {[["gitter","Gitter"],["vertikal","Vertikal"],["horizontal","Horizontal"],["diagonal","Raute"]].map(([id,l])=>{
+              const akt = fuehrung === id;
+              return (<button key={id} onClick={()=>setFWahl(id)}
+                style={{ ...btn, padding: "4px 9px", borderColor: akt ? "#C8102E" : "#3A424B",
+                  background: akt ? "rgba(200,16,46,.18)" : "transparent", color: akt ? "#FFB3BF" : "#C9CFD6" }}>{l}</button>);
+            })}
+          </div>
+          {fWahl && fWahl !== projFuehrung && <div style={{ fontSize: 9, color: "#8B939C", marginTop: 4 }}>
+            Nur Ansicht — im Projekt eingestellt: {projFuehrung}.
+          </div>}
         </div>
 
         <label style={{ display: "block" }}>

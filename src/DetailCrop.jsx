@@ -46,7 +46,7 @@ export default function DetailCrop({
   const NC = Math.max(tH, tV) >= 4 ? 1 : 2, NR = NC;
   const cell = 132;                       // plan-pixels per cell — large & legible
   const gridW = NC * cell, gridH = NR * cell;
-  const ML = 96, MR = 34, MT = hasSK ? 64 : 34, MB = 92;
+  const ML = 112, MR = 34, MT = hasSK ? 64 : 34, MB = 104;
   const vbW = ML + gridW + MR;
   const vbH = MT + gridH + MB;
   const gx = ML, gy = MT;
@@ -159,7 +159,7 @@ export default function DetailCrop({
         <text x={gx + cell / 2} y={dimBY + fs + 4} textAnchor="middle" fontSize={fs} fontWeight="800" fill={dimCol}>
           L<tspan baselineShift="sub" fontSize={fs * 0.7}>H</tspan> = {fm(lh)} m
         </text>
-        <text x={gx + cell / 2} y={dimBY + fs + fsSub + 6} textAnchor="middle" fontSize={fsSub} fontWeight="600" fill={GY}>
+        <text x={gx + cell / 2} y={dimBY + fs + fsSub + 16} textAnchor="middle" fontSize={fsSub} fontWeight="600" fill={GY}>
           max. Abstand horizontal
         </text>
       </g>
@@ -174,8 +174,8 @@ export default function DetailCrop({
           transform={`rotate(-90 ${dimLX - 8} ${gy + cell / 2})`}>
           L<tspan baselineShift="sub" fontSize={fs * 0.7}>V</tspan> = {fm(lv)} m
         </text>
-        <text x={dimLX - fs - 6} y={gy + cell / 2} textAnchor="middle" fontSize={fsSub} fontWeight="600" fill={GY}
-          transform={`rotate(-90 ${dimLX - fs - 6} ${gy + cell / 2})`}>
+        <text x={dimLX - fs - 16} y={gy + cell / 2} textAnchor="middle" fontSize={fsSub} fontWeight="600" fill={GY}
+          transform={`rotate(-90 ${dimLX - fs - 16} ${gy + cell / 2})`}>
           max. Abstand vertikal
         </text>
       </g>

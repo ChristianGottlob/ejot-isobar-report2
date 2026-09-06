@@ -1165,10 +1165,13 @@ function SystemIso({ d }){
     return <path d={dd} fill={fill} stroke="rgba(20,25,30,.28)" strokeWidth=".6" {...(extra||{})}/>;};
   // Schicht als Iso-Block: Front, Deckflaeche (Schnitt, schraffiert), rechte Seite
   const slab=(z0,z1,front,top,side,key)=>(<g key={key}>
+    {/* Reihenfolge: Front, dann LINKE Seitenflaeche (x=W, aus diesem Blick-
+        winkel sichtbar — ohne sie schienen die inneren Schichtfronten durch
+        und der Aufbau wirkte auseinandergerissen), dann Deckflaeche+Schraffur. */}
     {q([P(0,0,z1),P(W,0,z1),P(W,H,z1),P(0,H,z1)],front)}
+    {q([P(W,0,z0),P(W,H,z0),P(W,H,z1),P(W,0,z1)],side)}
     {q([P(0,H,z0),P(W,H,z0),P(W,H,z1),P(0,H,z1)],top)}
     {q([P(0,H,z0),P(W,H,z0),P(W,H,z1),P(0,H,z1)],"url(#siHatch)",{stroke:"none"})}
-    {q([P(0,0,z0),P(0,H,z0),P(0,H,z1),P(0,0,z1)],side)}
   </g>);
   // Iso-Bar entlang der Tiefenachse (30 Grad): Rippenstab, Dichtscheibe,
   // Edelstahl-Scheibe, Gewindestift, Sechskant, Adapterzylinder mit Bohrung.
@@ -1197,7 +1200,7 @@ function SystemIso({ d }){
   const seil="#79828B";
   const lbl={fontFamily:MONO_F,fontSize:7,fill:GY,letterSpacing:.8};
   const leader="#B5B1AA";
-  const mitte=(z0,z1)=>P(W*0.86,H,(z0+z1)/2);
+  const mitte=(z0,z1)=>P(W,H*0.78,(z0+z1)/2);
   const L=(tx,ty,anchor,pt,text)=>(<g>
     <text x={tx} y={ty} textAnchor={anchor} style={lbl}>{text}</text>
     <line x1={anchor==="end"?tx+3:tx-3} y1={ty+2} x2={pt[0]} y2={pt[1]} stroke={leader} strokeWidth=".7"/>
