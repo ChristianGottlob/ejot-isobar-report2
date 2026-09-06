@@ -21,6 +21,8 @@ export const FIELD_LABELS = {
   dicke_klebschicht:  "Klebschicht-Dicke",
   verankerungstiefe:  "Verankerungstiefe",
   gebaeudehoehe:      "Gebäudehöhe",
+  vm_geb_laenge:      "Gebäudelänge",
+  vm_geb_breite:      "Gebäudebreite",
   druckfestigkeit:    "Druckfestigkeit",
   rohdichte:          "Rohdichte",
   windlastzone:       "Windlastzone",
@@ -106,6 +108,15 @@ const PATTERNS = {
   gebaeudehoehe: [
     new RegExp(`(?:Geb[aä]udeh[oö]he|Bauwerksh[oö]he|H[oö]he\\s+(?:Geb|Bauwerk))${GAP(20)}${NUM}`, "im"),
     new RegExp(`\\bh[_\\s]?Geb${GAP(12)}${NUM}`, "im"),
+  ],
+  // Gebäudelänge/-breite gehen über cpe direkt in die Windlast ein.  Ohne sie
+  // ist keine Vorbemessung möglich (siehe fehlendeEingaben in App.jsx) — sie
+  // werden deshalb aus dem PDF gelesen statt angenommen.
+  vm_geb_laenge: [
+    new RegExp(`(?:Geb[aä]udel[aä]nge|Bauwerksl[aä]nge|Bauk[oö]rperl[aä]nge)${GAP(20)}${NUM}`, "im"),
+  ],
+  vm_geb_breite: [
+    new RegExp(`(?:Geb[aä]udebreite|Bauwerksbreite|Bauk[oö]rperbreite)${GAP(20)}${NUM}`, "im"),
   ],
   druckfestigkeit: [
     new RegExp(`(?:Druckfestigkeit|f[_\\s]?ck|Festigkeit)${GAP(20)}${NUM}`, "im"),
@@ -284,6 +295,8 @@ export const PLAUSIBEL = {
   dicke_klebschicht: { min: 0,  max: 100, einheit: "mm" },
   verankerungstiefe: { min: 20, max: 300, einheit: "mm" },
   gebaeudehoehe:     { min: 1,  max: 300, einheit: "m" },
+  vm_geb_laenge:     { min: 1,  max: 500, einheit: "m" },
+  vm_geb_breite:     { min: 1,  max: 500, einheit: "m" },
   druckfestigkeit:   { min: 1,  max: 150, einheit: "N/mm²" },
   windlastzone:      { min: 1,  max: 4,   einheit: "" },
 };

@@ -46,6 +46,21 @@ test("deutsche Tausendertrenner überstehen die Prüfung", () => {
   assert.equal(istPlausibel("wdvs_dicke", "205,0"), true);
 });
 
+test("Gebäudelänge und -breite werden aus dem PDF gelesen", () => {
+  // Ohne diese beiden Maße rechnet die Vorbemessung nicht (cpe) — der
+  // Statik-Teil des Reports bliebe dann ohne Nachweis.
+  const r = parseFields("Gebäudehöhe: 12,0 m\nGebäudelänge: 30,0 m\nGebäudebreite: 15,0 m");
+  assert.equal(String(r.values.vm_geb_laenge).trim(), "30,0");
+  assert.equal(String(r.values.vm_geb_breite).trim(), "15,0");
+  assert.ok(r.hits.includes("vm_geb_laenge") && r.hits.includes("vm_geb_breite"));
+});
+
+test("unplausible Gebäudemaße werden nicht übernommen", () => {
+  const r = parseFields("Gebäudelänge: 0 m");
+  assert.equal(r.values.vm_geb_laenge, undefined);
+  assert.ok(r.unplausibel.some((u) => u.key === "vm_geb_laenge"));
+});
+
 test("jedes geprüfte Feld hat sinnvolle Grenzen", () => {
   for (const [k, g] of Object.entries(PLAUSIBEL)) {
     assert.ok(g.min < g.max, `${k}: min < max`);
