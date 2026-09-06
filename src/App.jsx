@@ -2851,9 +2851,8 @@ export default function App(){
             <line x1="443" y1="42" x2="469" y2="42" stroke="rgba(255,255,255,.55)" strokeWidth="1"/>
             <line x1="443" y1="55" x2="469" y2="55" stroke="rgba(20,25,30,.22)" strokeWidth="1"/>
             <rect x="469" y="36" width="64" height="25" rx="9" fill="url(#ibSteel)"/>
-            <circle cx="509" cy="48.5" r="5.5" fill="#2E3237"/>
-            <circle cx="507.5" cy="47" r="2" fill="#5A6067"/>
-            <rect x="522" y="44" width="4.5" height="9" rx="2" fill="#3A3F44"/>
+            <circle cx="518" cy="48.5" r="5.5" fill="#2E3237"/>
+            <circle cx="516.5" cy="47" r="2" fill="#5A6067"/>
           </g>
           {/* Maßlinie mit den Set-Längen */}
           <g style={{animation:"fadeUp .5s .85s both"}} stroke="#1A1A1A" strokeWidth=".8">

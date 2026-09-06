@@ -58,11 +58,12 @@ function Seil({ x = 0, y = 0, z = 0, len, vertikal = true, rotZ = 0, dim = false
 // Zylindrischer Stab entlang der z-Achse: zwei gekreuzte Streifen mit
 // Längsschattierung + runden Enden — liest sich aus jedem Winkel als Zylinder.
 // Optional eine Kreis-Kappe am äußeren Ende (endKappe = Hintergrund).
-function Stab({ x = 0, y = 0, z = 0, len, dia, grad, endKappe = null, loch = false, dim = false }) {
+function Stab({ x = 0, y = 0, z = 0, len, dia, grad, endKappe = null, loch = null, dim = false }) {
+  // loch: Position der Querbohrung in % der Länge (0 = innen, 100 = außen).
   const strip = (rot) => (
     <div style={{ position: "absolute", left: -dia / 2, top: -len / 2, width: dia, height: len,
-      transform: rot, background: loch
-        ? `radial-gradient(circle at 50% 50%, #33383D 0 2px, rgba(0,0,0,0) 2.6px), ${grad}`
+      transform: rot, background: loch != null
+        ? `radial-gradient(circle at 50% ${loch}%, #2E3237 0 2.6px, rgba(0,0,0,.35) 2.6px 3.4px, rgba(0,0,0,0) 3.6px), ${grad}`
         : grad,
       borderRadius: dia / 2 }} />
   );
@@ -86,7 +87,8 @@ const MAT = {
   gewinde:"repeating-linear-gradient(180deg, rgba(0,0,0,.28) 0 1px, rgba(255,255,255,0) 1px 2.5px), linear-gradient(90deg,#7E858D,#E0E4E8 45%,#959CA3)",
   hex:    "linear-gradient(90deg,#A9AFB6 0 25%,#DFE3E7 25% 50%,#969DA4 50% 75%,#C9CED3 75% 100%)",
   kopf:   "linear-gradient(90deg,#8F969E,#E9ECEF 42%,#C2C7CC 60%,#868D95)",
-  kopfEnde:"linear-gradient(0deg, rgba(0,0,0,0) 44%, #4A4F54 44% 56%, rgba(0,0,0,0) 56%), radial-gradient(circle,#DADEE2 0 55%, #A5ABB2)",
+  // Stirnfläche des Adapters: umlaufender Stahlrand, Senkung, dunkler Innensechskant
+  kopfEnde:"radial-gradient(circle, #26292D 0 26%, #4E545B 26% 38%, #D7DBDF 38% 58%, #AEB4BB 58% 78%, #C9CED3 78% 100%)",
 };
 
 const SCHICHT_INFO = [
@@ -117,7 +119,7 @@ export default function Facade3D({ d }) {
     tol: Math.max(3, Math.min(40, (tolMm || 10) * S)),
     daemm: Math.max(30, Math.min(150, (wdvsMm || 200) * S)),
     putz: Math.max(3, Math.min(16, (putzMm || 10) * S)),
-    luft: 34,
+    luft: 46,
   };
   const cols = Math.max(2, Math.min(5, Math.round(3.4 / lh) + 1));
   const rows = Math.max(2, Math.min(4, Math.round(2.6 / lv) + 1));
@@ -166,7 +168,7 @@ export default function Facade3D({ d }) {
   // dort Dichtscheibe, dann Gewindestift bis zum Seilhalterkopf am Seil.
   const zPutzAussen = zPutz + g.putz / 2;
   const rodLen = zPutzAussen + 25;                 // von −24 (im Grund) bis +1 hinter dem Putz
-  const stiftLen = (zSeil - 17) - (zPutzAussen + 5);
+  const stiftLen = (zSeil - 28) - (zPutzAussen + 5);
   const hatV = fuehrung === "gitter" || fuehrung === "vertikal";
   const hatH = fuehrung === "gitter" || fuehrung === "horizontal";
   const hatD = fuehrung === "diagonal";
@@ -199,8 +201,8 @@ export default function Facade3D({ d }) {
                 <Stab x={x} y={y} z={zPutzAussen + 2} len={4} dia={13} grad={MAT.dicht} dim={dim} />
                 <Stab x={x} y={y} z={zPutzAussen + 4.5} len={2} dia={10} grad={MAT.kopf} endKappe="radial-gradient(circle,#DCE0E4 0 55%,#A9AFB6)" dim={dim} />
                 <Stab x={x} y={y} z={zPutzAussen + 5 + stiftLen / 2} len={stiftLen} dia={3.5} grad={MAT.gewinde} dim={dim} />
-                <Stab x={x} y={y} z={zSeil - 12.5} len={9} dia={14} grad={MAT.hex} dim={dim} />
-                <Stab x={x} y={y} z={zSeil} len={16} dia={11} grad={MAT.kopf} loch endKappe={MAT.kopfEnde} dim={dim} />
+                <Stab x={x} y={y} z={zSeil - 23} len={10} dia={15.5} grad={MAT.hex} dim={dim} />
+                <Stab x={x} y={y} z={zSeil - 6} len={24} dia={11.5} grad={MAT.kopf} loch={77} endKappe={MAT.kopfEnde} dim={dim} />
               </Fragment>
             );}))}
             {/* Seilebene */}
