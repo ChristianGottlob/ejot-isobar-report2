@@ -55,12 +55,46 @@ function Seil({ x = 0, y = 0, z = 0, len, vertikal = true, rotZ = 0, dim = false
   );
 }
 
+// Zylindrischer Stab entlang der z-Achse: zwei gekreuzte Streifen mit
+// Längsschattierung + runden Enden — liest sich aus jedem Winkel als Zylinder.
+// Optional eine Kreis-Kappe am äußeren Ende (endKappe = Hintergrund).
+function Stab({ x = 0, y = 0, z = 0, len, dia, grad, endKappe = null, loch = false, dim = false }) {
+  const strip = (rot) => (
+    <div style={{ position: "absolute", left: -dia / 2, top: -len / 2, width: dia, height: len,
+      transform: rot, background: loch
+        ? `radial-gradient(circle at 50% 50%, #33383D 0 2px, rgba(0,0,0,0) 2.6px), ${grad}`
+        : grad,
+      borderRadius: dia / 2 }} />
+  );
+  return (
+    <div style={{ position: "absolute", transformStyle: "preserve-3d",
+      transform: `translate3d(${x}px,${y}px,${z}px) rotateX(90deg)`, opacity: dim ? 0.25 : 1,
+      transition: "opacity .2s, transform .25s ease-out" }}>
+      {strip("")}
+      {strip("rotateY(90deg)")}
+      {endKappe && <div style={{ position: "absolute", left: -dia / 2, top: -dia / 2, width: dia, height: dia,
+        borderRadius: "50%", background: endKappe, transform: `rotateX(90deg) translateZ(${-len / 2}px)` }} />}
+    </div>
+  );
+}
+
+// Materialien des Iso-Bar ECO (nach Produktfoto): cremefarbener Rippenstab,
+// schwarze Dichtscheibe, Edelstahl-Gewindestift und -Seilhalterkopf.
+const MAT = {
+  rippen: "repeating-linear-gradient(180deg, rgba(120,110,80,.38) 0 2px, rgba(255,255,255,0) 2px 5px), linear-gradient(90deg,#C6BEA2,#F6F2E3 42%,#DAD3BA 70%,#B4AB8F)",
+  dicht:  "linear-gradient(90deg,#17181A,#3A3C3F 45%,#1C1D1F)",
+  gewinde:"repeating-linear-gradient(180deg, rgba(0,0,0,.28) 0 1px, rgba(255,255,255,0) 1px 2.5px), linear-gradient(90deg,#7E858D,#E0E4E8 45%,#959CA3)",
+  hex:    "linear-gradient(90deg,#A9AFB6 0 25%,#DFE3E7 25% 50%,#969DA4 50% 75%,#C9CED3 75% 100%)",
+  kopf:   "linear-gradient(90deg,#8F969E,#E9ECEF 42%,#C2C7CC 60%,#868D95)",
+  kopfEnde:"linear-gradient(0deg, rgba(0,0,0,0) 44%, #4A4F54 44% 56%, rgba(0,0,0,0) 56%), radial-gradient(circle,#DADEE2 0 55%, #A5ABB2)",
+};
+
 const SCHICHT_INFO = [
   { key: "wand",  l: "Verankerungsgrund", farbe: "#B8B4AD" },
   { key: "tol",   l: "Kleber + Altputz",  farbe: "#C9A86A" },
   { key: "daemm", l: "Dämmung (WDVS)",    farbe: "#EFE8D8" },
   { key: "putz",  l: "Putzschicht",       farbe: "#F4F1EA" },
-  { key: "anker", l: "Iso-Bar ECO",       farbe: "#B9BEC4" },
+  { key: "anker", l: "Iso-Bar ECO",       farbe: "#EDE7D6" },
   { key: "seil",  l: "Seilebene",         farbe: "#7A828A" },
 ];
 
@@ -128,7 +162,11 @@ export default function Facade3D({ d }) {
   // Ankerraster auf der Fläche (Rand 34 px)
   const xs = Array.from({ length: cols }, (_, i) => -g.W / 2 + 34 + (i * (g.W - 68)) / (cols - 1));
   const ys = Array.from({ length: rows }, (_, i) => -g.H / 2 + 30 + (i * (g.H - 60)) / (rows - 1));
-  const rodLen = zSeil + 26;
+  // Anker-Geometrie (nach Produktfoto): Rippenstab bis Putzoberfläche,
+  // dort Dichtscheibe, dann Gewindestift bis zum Seilhalterkopf am Seil.
+  const zPutzAussen = zPutz + g.putz / 2;
+  const rodLen = zPutzAussen + 25;                 // von −24 (im Grund) bis +1 hinter dem Putz
+  const stiftLen = (zSeil - 17) - (zPutzAussen + 5);
   const hatV = fuehrung === "gitter" || fuehrung === "vertikal";
   const hatH = fuehrung === "gitter" || fuehrung === "horizontal";
   const hatD = fuehrung === "diagonal";
@@ -152,13 +190,19 @@ export default function Facade3D({ d }) {
             <Quader w={g.W} h={g.H} t={g.tol} z={zTol} color="#C9A86A" cut dim={dimOf("tol")} />
             <Quader w={g.W} h={g.H} t={g.daemm} z={zDaemm} color="repeating-linear-gradient(180deg,#EFE8D8 0 11px,#E5DCC6 11px 13px), #EFE8D8" cut dim={dimOf("daemm")} />
             <Quader w={g.W} h={g.H} t={g.putz} z={zPutz} color="#F4F1EA" cut dim={dimOf("putz")} />
-            {/* Anker: Stab + Seilhalter-Kopf an jedem Rasterpunkt */}
-            {xs.map((x) => ys.map((y) => (
+            {/* Anker an jedem Rasterpunkt: Rippenstab → Dichtscheibe → Gewindestift → Seilhalterkopf */}
+            {xs.map((x) => ys.map((y) => {
+              const dim = dimOf("anker");
+              return (
               <Fragment key={`${x}${y}`}>
-                <Quader x={x} y={y} z={rodLen / 2 - 26} w={6} h={6} t={rodLen} color="linear-gradient(180deg,#D5DAE0,#9AA1A8)" dim={dimOf("anker")} edge="rgba(20,25,30,.14)" />
-                <Quader x={x} y={y} z={zSeil} w={15} h={15} t={9} color="linear-gradient(180deg,#C3C9CF,#868D95)" dim={dimOf("anker")} edge="rgba(20,25,30,.18)" />
+                <Stab x={x} y={y} z={rodLen / 2 - 24} len={rodLen} dia={8} grad={MAT.rippen} dim={dim} />
+                <Stab x={x} y={y} z={zPutzAussen + 2} len={4} dia={13} grad={MAT.dicht} dim={dim} />
+                <Stab x={x} y={y} z={zPutzAussen + 4.5} len={2} dia={10} grad={MAT.kopf} endKappe="radial-gradient(circle,#DCE0E4 0 55%,#A9AFB6)" dim={dim} />
+                <Stab x={x} y={y} z={zPutzAussen + 5 + stiftLen / 2} len={stiftLen} dia={3.5} grad={MAT.gewinde} dim={dim} />
+                <Stab x={x} y={y} z={zSeil - 12.5} len={9} dia={14} grad={MAT.hex} dim={dim} />
+                <Stab x={x} y={y} z={zSeil} len={16} dia={11} grad={MAT.kopf} loch endKappe={MAT.kopfEnde} dim={dim} />
               </Fragment>
-            )))}
+            );}))}
             {/* Seilebene */}
             {hatV && xs.map((x) => <Seil key={`v${x}`} x={x} z={zSeil} len={g.H - 24} vertikal dim={dimOf("seil")} />)}
             {hatH && ys.map((y) => <Seil key={`h${y}`} y={y} z={zSeil} len={g.W - 24} vertikal={false} dim={dimOf("seil")} />)}
