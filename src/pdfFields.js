@@ -46,7 +46,6 @@ export const FIELD_LABELS = {
   nw_kombi:           "Nachweis Quer/Zug",
   fassadenlaenge:     "Fassadenlänge",
   fassadenhoehe:      "Fassadenhöhe",
-  geometrie_art:      "Geometrie / Begrünungsart",
 };
 
 // ── Pattern building blocks ─────────────────────────────────────────
@@ -237,10 +236,6 @@ const PATTERNS = {
   fassadenhoehe: [
     new RegExp(`(?:Fassadenh[oö]he|Wandh[oö]he|H[oö]he\\s+Fassade)${GAP(15)}${NUM}`, "im"),
   ],
-  geometrie_art: [
-    /Geometrie\s*\/?\s*Begr[uü]nungsart[\s\t]*[:\-=]\s*([^\n\t]{2,60}?)(?:\t|\s{3,}|$)/im,
-    /Begr[uü]nungsart[\s\t]*[:\-=]\s*([^\n\t]{2,60}?)(?:\t|\s{3,}|$)/im,
-  ],
 };
 
 // ── Product / underground heuristics ────────────────────────────────
@@ -412,7 +407,7 @@ export function leeresDokument() {
     ws: "", nek: "", ned_z: "", ned_d: "", ved: "", vrd: "",
     LH: "", LV: "", stk_m2: "",
     nw_zug: "", nw_druck: "", nw_quer: "", nw_kombi: "",
-    fassadenlaenge: "", fassadenhoehe: "", geometrie_art: "",
+    fassadenlaenge: "", fassadenhoehe: "",
     fassaden: [{ name: "Fassade 1", breite: "", hoehe: "" }],
   };
 }
@@ -459,7 +454,6 @@ export function buildDocument(rawText) {
     fassadenlaenge: "10",
     fassadenhoehe: "",
     windlastzone: "2",
-    geometrie_art: "",
     fassaden: [{ name: "Fassade 1", breite: "10", hoehe: "6" }],
   };
 
