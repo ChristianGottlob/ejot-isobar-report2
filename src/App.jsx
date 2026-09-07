@@ -1397,7 +1397,7 @@ function AnlagenSection({d}){
             <div key={i} style={{border:`1px solid ${BD}`,borderRadius:4,padding:"8px 8px 4px",breakInside:"avoid"}}>
               <svg viewBox={rr.vb} width="100%" style={{display:"block"}} dangerouslySetInnerHTML={{__html:rr.inner}}/>
               <div style={{fontSize:9,color:GL,marginTop:4}}>
-                Ansicht {i+1} · Seilführung {FUEHRUNG_L[sh.fuehrung]||sh.fuehrung}{sh.explode>0.05?" · Explosionsansicht":""}
+                Ansicht {i+1} · Seilführung {FUEHRUNG_L[sh.fuehrung]||sh.fuehrung}{sh.explode>0.05?" · Explosionsansicht":""}{sh.oberflaeche&&sh.oberflaeche!=="putz"?` · Oberfläche Klinker (${sh.oberflaeche.split("_")[1]})`:""}
               </div>
             </div>);})}
         </div>

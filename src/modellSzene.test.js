@@ -25,3 +25,10 @@ test("szeneSVGInner rendert Polygone mit gültiger viewBox", () => {
   assert.equal(teile.length, 4);
   assert.ok(teile[2] > 100 && teile[3] > 100, "viewBox hat plausible Größe");
 });
+
+test("Oberflaechen-Vorschau faerbt die Aussenschicht", () => {
+  const rot = bauSzene(doc, { oberflaeche: "klinker_rot" });
+  assert.ok(rot.some((p) => p.q && p.farbe === "#B5766A"), "Klinker rot vorhanden");
+  const putz = bauSzene(doc, {});
+  assert.ok(putz.some((p) => p.q && p.farbe === "#F4F1EA"), "Putz als Standard");
+});

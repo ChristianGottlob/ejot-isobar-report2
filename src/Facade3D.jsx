@@ -106,6 +106,13 @@ const MAT = {
   kopfEnde: "radial-gradient(circle, #26292D 0 26%, #4E545B 26% 38%, #D7DBDF 38% 58%, #AEB4BB 58% 78%, #C9CED3 78% 100%)",
 };
 
+// Aussenschicht-Vorschau: Putz oder Klinkerriemchen in drei Farbwelten.
+const KLINKER = {
+  klinker_rot:   { l: "Klinker rot",   base: "#B5766A", fuge: "#E8E2D8", chip: "#B5766A" },
+  klinker_grau:  { l: "Klinker grau",  base: "#9B9FA3", fuge: "#E6E6E4", chip: "#9B9FA3" },
+  klinker_beige: { l: "Klinker beige", base: "#CDBEA3", fuge: "#F0EADE", chip: "#CDBEA3" },
+};
+
 const SCHICHT_INFO = [
   { key: "wand",  l: "Verankerungsgrund", farbe: "#B8B4AD" },
   { key: "tol",   l: "Kleber + Altputz",  farbe: "#C9A86A" },
@@ -125,6 +132,7 @@ export default function Facade3D({ d, setD }) {
   const lv = pf(f0.lv) || pf(d.LV) || 0.9;
   const projFuehrung = f0.seilfuehrung || d.seilfuehrung || "gitter";
   const isMW = d.vm_untergrund ? d.vm_untergrund === "mauerwerk" : !/beton/i.test(String(d.verankerungsgrund || "stein"));
+  const oberflaeche = KLINKER[d.modell_oberflaeche] ? d.modell_oberflaeche : "putz";
   const produkt = String(d.produkt || "").replace(/\D/g, "");
 
   // ── Geometrie in Pixeln (Maßstab 0,42 px/mm; Anzeige gedeckelt) ──
@@ -152,13 +160,21 @@ export default function Facade3D({ d, setD }) {
 
   // ── Ansicht exportieren: Shots fuer Anlage D im Report + PNG-Download ──
   const shots = Array.isArray(d.modell_shots) ? d.modell_shots : [];
-  const shotJetzt = () => ({ rx: Math.round(rot.x), ry: Math.round(rot.y % 360), explode: +explode.toFixed(2), fuehrung });
+  const shotJetzt = () => ({ rx: Math.round(rot.x), ry: Math.round(rot.y % 360), explode: +explode.toFixed(2), fuehrung, oberflaeche });
+  // Chip-Klick: gespeicherte Ansicht im Modell zeigen (Winkel, Explosion, Seile, Oberflaeche)
+  const shotZeigen = (sh) => {
+    idle.current = false;
+    setRot({ x: sh.rx ?? -16, y: sh.ry ?? -32 });
+    setExplode(sh.explode || 0);
+    if (sh.fuehrung) setFWahl(sh.fuehrung);
+    if (setD) setD((x) => ({ ...x, modell_oberflaeche: sh.oberflaeche || "putz" }));
+  };
   const shotAdd = () => setD && setD((x) => ({ ...x, modell_shots: [...(Array.isArray(x.modell_shots) ? x.modell_shots : []).slice(-3), shotJetzt()] }));
   const shotDel = (i) => setD && setD((x) => ({ ...x, modell_shots: (x.modell_shots || []).filter((_, j) => j !== i) }));
   const shotStandard = () => setD && setD((x) => ({ ...x, modell_shots: [
-    { rx: -16, ry: -32, explode: 0, fuehrung },
-    { rx: -2, ry: 0, explode: 0, fuehrung },
-    { rx: -14, ry: -28, explode: 0.85, fuehrung },
+    { rx: -16, ry: -32, explode: 0, fuehrung, oberflaeche },
+    { rx: -2, ry: 0, explode: 0, fuehrung, oberflaeche },
+    { rx: -14, ry: -28, explode: 0.85, fuehrung, oberflaeche },
   ] }));
   const pngDownload = () => {
     const { inner, vb } = szeneSVGInner(d, shotJetzt());
@@ -242,7 +258,10 @@ export default function Facade3D({ d, setD }) {
             <Quader w={g.W} h={g.H} t={g.wand} z={-g.wand / 2} color={wandFarbe} cut dim={dimOf("wand")} />
             <Quader w={g.W} h={g.H} t={g.tol} z={zTol} color="#C9A86A" cut dim={dimOf("tol")} />
             <Quader w={g.W} h={g.H} t={g.daemm} z={zDaemm} color="repeating-linear-gradient(180deg,#EFE8D8 0 11px,#E5DCC6 11px 13px), #EFE8D8" cut dim={dimOf("daemm")} />
-            <Quader w={g.W} h={g.H} t={g.putz} z={zPutz} color="#F4F1EA" cut dim={dimOf("putz")} />
+            <Quader w={g.W} h={g.H} t={g.putz} z={zPutz}
+              color={oberflaeche === "putz" ? "#F4F1EA"
+                : `repeating-linear-gradient(180deg, ${KLINKER[oberflaeche].base} 0 10px, ${KLINKER[oberflaeche].fuge} 10px 11.5px), ${KLINKER[oberflaeche].base}`}
+              cut dim={dimOf("putz")} />
             {/* Anker an jedem Rasterpunkt: Rippenstab → Dichtscheibe → Gewindestift → Adapter */}
             {xs.map((x) => ys.map((y) => {
               const dim = dimOf("anker");
@@ -288,8 +307,8 @@ export default function Facade3D({ d, setD }) {
           {SCHICHT_INFO.map((s) => (
             <div key={s.key} onMouseEnter={() => setHi(s.key)} onMouseLeave={() => setHi(null)}
               style={{ display: "flex", alignItems: "center", gap: 9, padding: "5px 7px", borderRadius: 5, cursor: "default", background: hi === s.key ? "rgba(200,16,46,.14)" : "transparent" }}>
-              <span style={{ width: 11, height: 11, borderRadius: 2, background: s.farbe, boxShadow: "inset 0 0 0 1px rgba(0,0,0,.25)" }} />
-              <span style={{ flex: 1, fontSize: 11.5 }}>{s.l}</span>
+              <span style={{ width: 11, height: 11, borderRadius: 2, background: s.key === "putz" && oberflaeche !== "putz" ? KLINKER[oberflaeche].chip : s.farbe, boxShadow: "inset 0 0 0 1px rgba(0,0,0,.25)" }} />
+              <span style={{ flex: 1, fontSize: 11.5 }}>{s.key === "putz" && oberflaeche !== "putz" ? KLINKER[oberflaeche].l : s.l}</span>
               <span style={{ fontFamily: MONO, fontSize: 10.5, color: "#B7BEC6" }}>
                 {s.key === "wand" ? (isMW ? "Mauerwerk" : "Beton")
                   : s.key === "tol" ? mm(tolMm)
@@ -317,6 +336,22 @@ export default function Facade3D({ d, setD }) {
           </div>}
         </div>
 
+        <div>
+          <div style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: 1.2, color: "#8B939C", marginBottom: 5 }}>OBERFLÄCHE</div>
+          <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+            {[["putz","Putz",null],["klinker_rot","Rot","#B5766A"],["klinker_grau","Grau","#9B9FA3"],["klinker_beige","Beige","#CDBEA3"]].map(([id,l,farbe])=>{
+              const akt = oberflaeche === id;
+              return (<button key={id} onClick={()=>setD&&setD((x)=>({...x,modell_oberflaeche:id}))}
+                title={id==="putz"?"Putzoberfläche":"Vorschau mit Klinkerriemchen"}
+                style={{ ...btn, padding: "4px 9px", display: "inline-flex", alignItems: "center", gap: 5,
+                  borderColor: akt ? "#C8102E" : "#3A424B", background: akt ? "rgba(200,16,46,.18)" : "transparent",
+                  color: akt ? "#FFB3BF" : "#C9CFD6" }}>
+                {farbe && <span style={{ width: 9, height: 9, borderRadius: 2, background: farbe, boxShadow: "inset 0 0 0 1px rgba(0,0,0,.3)" }}/>}{l}
+              </button>);
+            })}
+          </div>
+        </div>
+
         <label style={{ display: "block" }}>
           <div style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: 1.2, color: "#8B939C", marginBottom: 5 }}>EXPLOSIONSANSICHT</div>
           <input type="range" min="0" max="1" step="0.01" value={explode} onChange={(e) => setExplode(Number(e.target.value))}
@@ -342,7 +377,10 @@ export default function Facade3D({ d, setD }) {
             {shots.map((sh, i) => (
               <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontFamily: MONO, fontSize: 9,
                 padding: "2px 7px", borderRadius: 9, border: "1px solid #3A424B", color: "#B7BEC6" }}>
-                Ansicht {i + 1}{sh.explode > 0.05 ? " · Expl." : ""}
+                <button onClick={() => shotZeigen(sh)} title="Diese Ansicht im Modell zeigen"
+                  style={{ border: "none", background: "none", color: "inherit", cursor: "pointer", font: "inherit", padding: 0 }}>
+                  Ansicht {i + 1}{sh.explode > 0.05 ? " · Expl." : ""}
+                </button>
                 <button onClick={() => shotDel(i)} title="Ansicht entfernen"
                   style={{ border: "none", background: "none", color: "#8B939C", cursor: "pointer", fontSize: 11, padding: 0, lineHeight: 1 }}>×</button>
               </span>

@@ -17,6 +17,13 @@ const F = {
   tol: "#C9A86A", daemm: "#EDE5D2", putz: "#F4F1EA",
   rod: "#EFE8D5", dicht: "#26282B", stahl: "#C9CED3", seil: "#79828B",
 };
+// Aussenschicht-Varianten (Vorschau): Putz oder Klinker in drei Farbwelten
+export const OBERFLAECHEN = {
+  putz: { l: "Putz", farbe: F.putz },
+  klinker_rot: { l: "Klinker rot", farbe: "#B5766A" },
+  klinker_grau: { l: "Klinker grau", farbe: "#9B9FA3" },
+  klinker_beige: { l: "Klinker beige", farbe: "#CDBEA3" },
+};
 
 // Hexfarbe × Faktor (0..~1.3)
 function shade(hex, f) {
@@ -26,7 +33,7 @@ function shade(hex, f) {
 }
 
 // ── Szene: Liste aus Quads {q:[p×4], farbe} und Segmenten {s:[a,b], farbe, w} ──
-export function bauSzene(d, { fuehrung = "gitter", explode = 0 } = {}) {
+export function bauSzene(d, { fuehrung = "gitter", explode = 0, oberflaeche = "putz" } = {}) {
   const wdvsMm = pf(d.vm_daemm) || pf(d.wdvs_dicke) || 0;
   const tolMm = pf(d.dicke_klebschicht) || 0;
   const putzMm = pf(d.vm_putz) || 0;
@@ -83,7 +90,7 @@ export function bauSzene(d, { fuehrung = "gitter", explode = 0 } = {}) {
   quader(0, 0, -g.wand / 2, g.W, g.H, g.wand, isMW ? F.wandMW : F.wandBeton);
   quader(0, 0, zTol, g.W, g.H, g.tol, F.tol);
   quader(0, 0, zDaemm, g.W, g.H, g.daemm, F.daemm);
-  quader(0, 0, zPutz, g.W, g.H, g.putz, F.putz);
+  quader(0, 0, zPutz, g.W, g.H, g.putz, (OBERFLAECHEN[oberflaeche] || OBERFLAECHEN.putz).farbe);
 
   // Ankerraster
   const xs = Array.from({ length: cols }, (_, i) => -g.W / 2 + 34 + (i * (g.W - 68)) / (cols - 1));
@@ -114,8 +121,8 @@ export function bauSzene(d, { fuehrung = "gitter", explode = 0 } = {}) {
 }
 
 // ── Rendern: SVG-Innencode + passende viewBox ──
-export function szeneSVGInner(d, { rx = -16, ry = -32, explode = 0, fuehrung = "gitter" } = {}) {
-  const prim = bauSzene(d, { fuehrung, explode });
+export function szeneSVGInner(d, { rx = -16, ry = -32, explode = 0, fuehrung = "gitter", oberflaeche = "putz" } = {}) {
+  const prim = bauSzene(d, { fuehrung, explode, oberflaeche });
   const a = rx * Math.PI / 180, b = ry * Math.PI / 180;
   const ca = Math.cos(a), sa = Math.sin(a), cb = Math.cos(b), sb = Math.sin(b);
   // CSS `rotateX(rx) rotateY(ry)`: erst Ry, dann Rx auf den Punkt
