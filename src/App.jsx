@@ -2976,12 +2976,19 @@ export default function App(){
         {/* Eckmarken wie auf dem Planblatt */}
         {[{left:-1,top:-1,borderWidth:"2px 0 0 2px"},{right:-1,top:-1,borderWidth:"2px 2px 0 0"},{left:-1,bottom:-1,borderWidth:"0 0 2px 2px"},{right:-1,bottom:-1,borderWidth:"0 2px 2px 0"}].map((pos,i)=>
           <span key={i} style={{position:"absolute",width:18,height:18,borderStyle:"solid",borderColor:R,...pos}}/>)}
-        <div style={{display:"flex",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
-          <div style={{fontFamily:MONO_F,fontSize:10,letterSpacing:1.6,color:GY}}>EJOT<span style={{color:R}}>®</span> ISO-BAR ECO · VORBEMESSUNG</div>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+          {/* EJOT-Logo wie in der Werkleiste */}
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <div style={{width:44,height:44,borderRadius:9,background:`linear-gradient(135deg, ${R}, #8E0B22)`,display:"flex",alignItems:"center",justifyContent:"center",color:WH,fontWeight:900,fontSize:19,boxShadow:"0 3px 10px rgba(200,16,46,.28)"}}>E</div>
+            <div>
+              <div style={{fontWeight:900,fontSize:22,color:R,lineHeight:1}}>EJOT<sup style={{fontSize:9,color:GY}}>®</sup></div>
+              <div style={{fontFamily:MONO_F,fontSize:9,letterSpacing:1.4,color:GY,marginTop:2}}>ISO-BAR ECO · VORBEMESSUNG</div>
+            </div>
+          </div>
           <div style={{fontFamily:MONO_F,fontSize:10,letterSpacing:1.6,color:GL}}>FASSADENBEGRÜNUNG AN WDVS</div>
         </div>
-        <h1 style={{fontSize:31,fontWeight:800,letterSpacing:-.4,color:BK,margin:"16px 0 8px",lineHeight:1.12}}>
-          Vom Statik-PDF zum fertigen<br/><span style={{color:R}}>Begrünungs-Report</span>.
+        <h1 style={{fontSize:31,fontWeight:800,letterSpacing:-.4,color:BK,margin:"18px 0 8px",lineHeight:1.12}}>
+          Bemessungstool – <span style={{color:R}}>ISO Bar ECO</span>
         </h1>
         <p style={{fontSize:13,color:GY,margin:"0 0 18px",lineHeight:1.55,maxWidth:480}}>
           PDF einlesen, Werte prüfen, Nachweise rechnen — und als sauberes Report-Paket
