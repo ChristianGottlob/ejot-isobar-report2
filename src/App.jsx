@@ -607,6 +607,18 @@ function facadeSpacing(f, d) {
   };
 }
 
+// Gemessene Maße der im Plan markierten Begrünungsfläche(n) in Metern
+// (Bounding-Box).  kalibriert=true nur bei explizitem Maßstab — dann sind die
+// Werte belastbar und dürfen automatisch in Breite/Höhe übernommen werden.
+function planMasse(f){
+  const ann=normalizeAnnotations(f?.annotations);
+  if(!(f?.plan&&ann.facades.length>0))return null;
+  const bbox=unionBBox(ann.facades);
+  const pxM=pxPerMeter(ann,bbox,pf(f.breite)||0,pf(f.hoehe)||0);
+  if(!pxM||pxM<=0)return null;
+  return {b:bbox.w/pxM,h:bbox.h/pxM,kalibriert:!!ann.scale};
+}
+
 // Pick the governing (maßgebliche) facade — the one with the LARGEST tributary
 // area LH·LV per anchor, i.e. the worst case for load per Halterung.  Used to
 // draw a single representative detail crop when facades/areas have differing
@@ -3393,6 +3405,26 @@ export default function App(){
             <span><strong>{fmtArea(st.area)}</strong> netto</span>
             {st.sk>0&&<span><strong>{fmtInt(st.sk)}</strong> Seilkreuze</span>}
             <span style={{color:GY}}>Raster {fm(pf(fLH))} × {fm(pf(fLV))} m{off>0?` · 1. Lage ${fm(off,2)} m`:""}</span>
+            {(()=>{
+              const m=planMasse(f);
+              if(!m)return null;
+              const b=+m.b.toFixed(1),h=+m.h.toFixed(1);
+              const abw=Math.abs(b-(pf(f.breite)||0))>0.05||Math.abs(h-(pf(f.hoehe)||0))>0.05;
+              return(<span style={{color:GY}}>
+                Fläche im Plan: <strong style={{color:BK}}>{fm(b,1)} × {fm(h,1)} m</strong>
+                {m.kalibriert&&abw&&<button
+                  onClick={()=>{
+                    const fa=[...(d.fassaden||[])];
+                    fa[i]={...fa[i],breite:b.toFixed(1).replace(".",","),hoehe:h.toFixed(1).replace(".",",")};
+                    setD(x=>({...x,fassaden:fa,
+                      ...(i===0?{fassadenlaenge:fa[0].breite,fassadenhoehe:fa[0].hoehe}:{})}));
+                  }}
+                  title="Gemessene Planmaße in Breite/Höhe der Fassade übernehmen — die schematische Darstellung zeigt dann dieselbe Fläche"
+                  style={{marginLeft:8,padding:"2px 8px",fontSize:10,fontWeight:700,border:`1px solid ${R}`,borderRadius:4,background:WH,color:R,cursor:"pointer"}}>
+                  → in Breite/Höhe übernehmen
+                </button>}
+                {!m.kalibriert&&<span style={{color:GL,fontSize:10}}> (aus getippten Maßen abgeleitet — für exakte Werte Maßstab kalibrieren)</span>}
+              </span>);})()}
             <span style={{flexBasis:"100%",fontSize:10,color:GL}}>
               LH/LV, Seilführung und „1. Lage" oben ändern dieses Plan-Raster live — bitte KEINE zusätzliche schematische Fassade für dieselbe Fläche anlegen, sonst zählt das Material doppelt.
             </span>
@@ -3401,7 +3433,17 @@ export default function App(){
         {/* Plan/Annotator in voller Kartenbreite */}
         <div style={{marginTop:4}}>
           <FacadePlanPanel facade={f} onUpdate={patch=>{
-            const fa=[...(d.fassaden||[])];fa[i]={...fa[i],...patch};setD(x=>({...x,fassaden:fa}));
+            const fa=[...(d.fassaden||[])];fa[i]={...fa[i],...patch};
+            // Markierte Fläche automatisch in die (schematischen) Fassadenmaße
+            // überführen — nur bei kalibriertem Maßstab und nur in LEERE Felder,
+            // getippte Werte werden nicht überschrieben.
+            const m=planMasse(fa[i]);
+            if(m&&m.kalibriert){
+              if(!pf(fa[i].breite))fa[i].breite=m.b.toFixed(1).replace(".",",");
+              if(!pf(fa[i].hoehe)) fa[i].hoehe =m.h.toFixed(1).replace(".",",");
+            }
+            setD(x=>({...x,fassaden:fa,
+              ...(i===0?{fassadenlaenge:fa[0].breite,fassadenhoehe:fa[0].hoehe}:{})}));
           }} onMehrere={plaene=>{
             // Erster Plan auf diese Fassade, weitere auf die nächsten Fassaden
             // ohne Plan; reicht das nicht, werden neue Fassaden angelegt.
