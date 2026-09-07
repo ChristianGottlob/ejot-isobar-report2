@@ -803,6 +803,22 @@ function ParseFeedbackBanner({info,onClose}){
   </div>);
 }
 
+// Einklappbare Vorschau-Kachel im Bearbeiten-Tab.  `key` von außen steuern,
+// damit sie beim Wechsel des Plan-Status neu mit passendem Zustand startet.
+function Klappbar({titel,untertitel,startOffen=true,children}){
+  const[offen,setOffen]=useState(startOffen);
+  return(<div style={{background:BG,borderRadius:8,padding:10,textAlign:"center"}}>
+    <button onClick={()=>setOffen(o=>!o)}
+      style={{display:"flex",alignItems:"center",gap:6,width:"100%",border:"none",background:"none",cursor:"pointer",padding:0,
+        fontSize:9.5,fontWeight:700,color:GY,textTransform:"uppercase",letterSpacing:.4,textAlign:"left",fontFamily:"inherit"}}>
+      <span style={{fontSize:9,color:GL,width:10}}>{offen?"▼":"►"}</span>
+      {titel}
+      {untertitel&&<span style={{fontWeight:500,color:GL,textTransform:"none",letterSpacing:0}}>· {untertitel}</span>}
+    </button>
+    {offen&&<div style={{marginTop:6}}>{children}</div>}
+  </div>);
+}
+
 // Big-number stat tile for the headline summary card in MaterialSection
 function Stat({label,value,unit,hint,accent,color,valueSize=22}){
   const c=color||(accent?R:BK);
@@ -949,7 +965,9 @@ function FacadeReportCard({d,facade,index,total,formCode,coverage,maturity}){
           plan={facade.plan} annotations={facade.annotations}/>
       </div>
     </div>}
-    <div>
+    {/* Schema nur ohne annotierten Plan — mit Plan zeigt die Plan-Vorschau
+        bereits Bewuchs und Raster auf der echten Fassade. */}
+    {!havePlan&&<div>
       <div style={labelStyle}>
         <span>🌿 Schematische Bewuchs-Vorschau</span>
         <span style={{fontWeight:500,color:GL,letterSpacing:0,textTransform:"none"}}>wie die Fassade aussehen kann</span>
@@ -959,7 +977,7 @@ function FacadeReportCard({d,facade,index,total,formCode,coverage,maturity}){
           lage1={fLage1} seilkreuztyp={fSK} coverage={coverage} maturity={maturity}
           formCode={formCode} size={520} maxHeight={520} forceProcedural/>
       </div>
-    </div>
+    </div>}
     {/* Per-facade stat row */}
     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(110px,1fr))",gap:8,marginTop:12,paddingTop:10,borderTop:`1px solid ${BD}`,fontSize:11}}>
       <div><span style={{color:GY,fontWeight:600,fontSize:9.5,textTransform:"uppercase",letterSpacing:.4,display:"block",marginBottom:1}}>Netto-Fläche</span><span style={{fontWeight:700,color:BK,fontSize:12}}>{fmtArea(stats.area)}</span></div>
@@ -3407,50 +3425,31 @@ export default function App(){
           </button>
         </div>
 
-        <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:6}}>
-          <div style={{flex:1,minWidth:240,display:"flex",flexDirection:"column",gap:8}}>
+        {/* Formular kompakt in einer Zeile — der Plan bekommt die volle Breite */}
+        <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:4,alignItems:"flex-start"}}>
+          <div style={{flex:"1 1 230px",minWidth:200}}>
             <Field label="Seilführung" value={fRaster} onChange={v=>updateF("seilfuehrung",v)} sel
               opts={RASTER.map(r=>({v:r.id,l:`${r.l} – ${r.d}`}))}/>
+          </div>
+          <div style={{flex:"1 1 230px",minWidth:200}}>
             <Field label="Seilkreuztyp" value={fSK} onChange={v=>updateF("seilkreuztyp",v)} sel
               opts={SEILKREUZE.map(sk=>({v:sk.id,l:sk.art?`${sk.l} (${sk.art})`:sk.l}))}/>
-            {fSK!=="ohne"&&<StrukturPanel f={f} d={d} updateF={updateF}/>}
-            <div style={{display:"flex",gap:10}}>
-              <Field label="LH" value={f.lh ?? d.LH ?? "0.9"} onChange={v=>updateF("lh",v)} unit="m" half/>
-              <Field label="LV" value={f.lv ?? d.LV ?? "0.9"} onChange={v=>updateF("lv",v)} unit="m" half/>
-            </div>
-            <Field label="Höhe 1. Lage (Startversatz unten)" value={f.lage1??d.Lage1??"0"} onChange={v=>updateF("lage1",v)} sel
-              opts={LAGE1_HOEHEN} hint="Unterste Ankerreihe sitzt auf dieser Höhe; das Raster läuft im LV-Abstand nach oben."/>
           </div>
-          <div style={{flex:1,minWidth:300,display:"flex",flexDirection:"column",gap:8}}>
-            {/* Plan-based preview (when plan + annotations) — shows anchors/cables on the real plan */}
-            {f.plan&&f.annotations&&(f.annotations.facades||[]).length>0&&<div style={{background:BG,borderRadius:8,padding:10,textAlign:"center"}}>
-              <div style={{fontSize:9.5,fontWeight:700,color:GY,textTransform:"uppercase",letterSpacing:.4,marginBottom:4,textAlign:"left"}}>Live im Plan</div>
-              <RasterOverlay LH={fLH} LV={fLV} fW={f.breite||"3"} fH={f.hoehe||"3"} rasterType={fRaster}
-                lage1={f.lage1??d.Lage1??"0"} seilkreuztyp={fSK} nH={fStruk.nH} nV={fStruk.nV} size={340} plan={f.plan} annotations={f.annotations}/>
-            </div>}
-            {/* Schematic raster (always shown) — clear cable pattern + Seilkreuze, independent of plan */}
-            <div style={{background:BG,borderRadius:8,padding:10,textAlign:"center"}}>
-              <div style={{fontSize:9.5,fontWeight:700,color:GY,textTransform:"uppercase",letterSpacing:.4,marginBottom:4,textAlign:"left"}}>
-                Schematische Rasterdarstellung
-                <span style={{fontWeight:500,color:GL,marginLeft:6,textTransform:"none",letterSpacing:0}}>· {RASTER.find(rr=>rr.id===fRaster)?.l}{fSK!=="ohne"?` + ${SEILKREUZE.find(s=>s.id===fSK)?.l}`:""}</span>
-              </div>
-              <RasterOverlay LH={fLH} LV={fLV} fW={f.breite||"3"} fH={f.hoehe||"3"} rasterType={fRaster}
-                lage1={f.lage1??d.Lage1??"0"} seilkreuztyp={fSK} nH={fStruk.nH} nV={fStruk.nV} size={340} forceProcedural/>
-              <div style={{fontSize:10,color:DK,fontWeight:600,marginTop:4}}>{f.name}: {f.breite||"–"} × {f.hoehe||"–"} m = {((pf(f.breite)||0)*(pf(f.hoehe)||0)).toFixed(1)} m²</div>
-            </div>
-            {/* Detailausschnitt — Maximalabstände eindeutig bemaßt */}
-            <div style={{background:BG,borderRadius:8,padding:10,textAlign:"center"}}>
-              <div style={{fontSize:9.5,fontWeight:700,color:GY,textTransform:"uppercase",letterSpacing:.4,marginBottom:4,textAlign:"left"}}>
-                Detailausschnitt
-                <span style={{fontWeight:500,color:GL,marginLeft:6,textTransform:"none",letterSpacing:0}}>· Maximalabstände</span>
-              </div>
-              <DetailCrop LH={fLH} LV={fLV} rasterType={fRaster} seilkreuztyp={fSK} nH={fStruk.nH} nV={fStruk.nV} size={320}/>
-            </div>
+          <div style={{flex:"1 1 100px",minWidth:90}}>
+            <Field label="LH" value={f.lh ?? d.LH ?? "0.9"} onChange={v=>updateF("lh",v)} unit="m"/>
+          </div>
+          <div style={{flex:"1 1 100px",minWidth:90}}>
+            <Field label="LV" value={f.lv ?? d.LV ?? "0.9"} onChange={v=>updateF("lv",v)} unit="m"/>
+          </div>
+          <div style={{flex:"1 1 240px",minWidth:210}}>
+            <Field label="Höhe 1. Lage (Startversatz unten)" value={f.lage1??d.Lage1??"0"} onChange={v=>updateF("lage1",v)} sel
+              opts={LAGE1_HOEHEN} hint="Unterste Ankerreihe sitzt auf dieser Höhe."/>
           </div>
         </div>
+        {fSK!=="ohne"&&<div style={{marginBottom:8}}><StrukturPanel f={f} d={d} updateF={updateF}/></div>}
 
-        {/* Plan upload + annotator */}
-        <div style={{marginTop:12}}>
+        {/* Plan/Annotator in voller Kartenbreite */}
+        <div style={{marginTop:4}}>
           <FacadePlanPanel facade={f} onUpdate={patch=>{
             const fa=[...(d.fassaden||[])];fa[i]={...fa[i],...patch};setD(x=>({...x,fassaden:fa}));
           }} onMehrere={plaene=>{
@@ -3470,8 +3469,58 @@ export default function App(){
             });
           }}/>
         </div>
+
+        {/* Vorschau unter dem Plan: Live-Raster (bei annotiertem Plan) +
+            einklappbares Schema (zugeklappt, sobald der Plan es ersetzt).
+            Detailausschnitt nur hier, wenn diese Fassade vom maßgebenden
+            Raster abweicht — sonst steht er einmal zentral unter der Liste. */}
+        {(()=>{
+          const planAnnotiert=!!(f.plan&&f.annotations&&(f.annotations.facades||[]).length>0);
+          const gov=governingFacade(d.fassaden||[],d);
+          const spF=facadeSpacing(f,d);
+          const weichtAb=!!(gov&&gov.varies&&(spF.lh!==gov.spacing.lh||spF.lv!==gov.spacing.lv||spF.raster!==gov.spacing.raster||spF.sk!==gov.spacing.sk));
+          return(
+          <div style={{display:"flex",gap:10,flexWrap:"wrap",marginTop:10,alignItems:"flex-start"}}>
+            {planAnnotiert&&<div style={{flex:"1 1 340px",minWidth:300,background:BG,borderRadius:8,padding:10,textAlign:"center"}}>
+              <div style={{fontSize:9.5,fontWeight:700,color:GY,textTransform:"uppercase",letterSpacing:.4,marginBottom:4,textAlign:"left"}}>Live im Plan</div>
+              <RasterOverlay LH={fLH} LV={fLV} fW={f.breite||"3"} fH={f.hoehe||"3"} rasterType={fRaster}
+                lage1={f.lage1??d.Lage1??"0"} seilkreuztyp={fSK} nH={fStruk.nH} nV={fStruk.nV} size={380} plan={f.plan} annotations={f.annotations}/>
+            </div>}
+            <div style={{flex:"1 1 340px",minWidth:300}}>
+              <Klappbar key={planAnnotiert?"zu":"auf"} startOffen={!planAnnotiert}
+                titel="Schematische Rasterdarstellung"
+                untertitel={`${RASTER.find(rr=>rr.id===fRaster)?.l}${fSK!=="ohne"?` + ${SEILKREUZE.find(sk2=>sk2.id===fSK)?.l}`:""}`}>
+                <RasterOverlay LH={fLH} LV={fLV} fW={f.breite||"3"} fH={f.hoehe||"3"} rasterType={fRaster}
+                  lage1={f.lage1??d.Lage1??"0"} seilkreuztyp={fSK} nH={fStruk.nH} nV={fStruk.nV} size={380} forceProcedural/>
+                <div style={{fontSize:10,color:DK,fontWeight:600,marginTop:4}}>{f.name}: {f.breite||"–"} × {f.hoehe||"–"} m = {((pf(f.breite)||0)*(pf(f.hoehe)||0)).toFixed(1)} m²</div>
+              </Klappbar>
+            </div>
+            {weichtAb&&<div style={{flex:"1 1 300px",minWidth:280,background:BG,borderRadius:8,padding:10,textAlign:"center"}}>
+              <div style={{fontSize:9.5,fontWeight:700,color:GY,textTransform:"uppercase",letterSpacing:.4,marginBottom:4,textAlign:"left"}}>
+                Detailausschnitt
+                <span style={{fontWeight:500,color:GL,marginLeft:6,textTransform:"none",letterSpacing:0}}>· weicht vom maßgebenden Raster ab</span>
+              </div>
+              <DetailCrop LH={spF.lh} LV={spF.lv} rasterType={spF.raster} seilkreuztyp={spF.sk} nH={fStruk.nH} nV={fStruk.nV} size={300}/>
+            </div>}
+          </div>);})()}
       </div>);
     })}
+    {/* EIN zentraler Detailausschnitt für alle Fassaden — maßgebende
+        (größte) Abstände; abweichende Fassaden zeigen ihren eigenen oben. */}
+    {(()=>{
+      const gov=governingFacade(d.fassaden||[],d);
+      if(!gov)return null;
+      const st=facadeStruktur(gov.facade||{},d);
+      return(<div style={{background:BG,borderRadius:8,padding:10,textAlign:"center",marginTop:12}}>
+        <div style={{fontSize:9.5,fontWeight:700,color:GY,textTransform:"uppercase",letterSpacing:.4,marginBottom:4,textAlign:"left"}}>
+          Detailausschnitt
+          <span style={{fontWeight:500,color:GL,marginLeft:6,textTransform:"none",letterSpacing:0}}>
+            · Maximalabstände{gov.varies?` — maßgebend: ${gov.facade.name||`Fassade ${gov.index+1}`}`:""}
+          </span>
+        </div>
+        <DetailCrop LH={gov.spacing.lh} LV={gov.spacing.lv} rasterType={gov.spacing.raster} seilkreuztyp={gov.spacing.sk}
+          nH={st.nH} nV={st.nV} size={420} areaLabel={gov.varies?(gov.facade.name||`Fassade ${gov.index+1}`):null} governing={gov.varies}/>
+      </div>);})()}
     <button onClick={()=>setD(x=>({...x,fassaden:[...(x.fassaden||[]),{name:`Fassade ${(x.fassaden||[]).length+1}`,breite:"10",hoehe:"6",seilfuehrung:x.seilfuehrung||"gitter",seilkreuztyp:x.seilkreuztyp||"ohne"}]}))}
       style={{padding:"8px 16px",fontSize:11,border:`1px dashed ${BD}`,borderRadius:6,background:WH,cursor:"pointer",color:GY,marginTop:6,fontWeight:600}}>+ weitere Fassade</button></Sec>
 </>}
