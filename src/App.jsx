@@ -1199,21 +1199,24 @@ function SystemIso({ d }){
     <Teil ax={ax} ay={ay} z0={z0} z1={z1} dia={7} fill="url(#siRod)"/>
     <Teil ax={ax} ay={ay} z0={z0} z1={z1} dia={7} fill="url(#siRibs)" rx={3.5}/>
   </g>);
-  // Sichtbarer Anker ab Putzoberflaeche: Dichtscheibe, Scheibe, Gewinde, Adapter
-  const Kopf=({ax,ay})=>(<g>
-    <ellipse cx={P(ax,ay,zPutzOut)[0]+5} cy={P(ax,ay,zPutzOut)[1]+7} rx="10" ry="4.5" fill="rgba(20,25,30,.13)"/>
-    <Teil ax={ax} ay={ay} z0={zPutzOut+0.5} z1={zPutzOut+6} dia={14} fill="url(#siDark)" rx={3}/>
-    <Teil ax={ax} ay={ay} z0={zPutzOut+6} z1={zPutzOut+9.5} dia={10} fill="url(#siSteel)" rx={2.5}/>
-    <Teil ax={ax} ay={ay} z0={zPutzOut+9.5} z1={zSeil-20} dia={4} fill="url(#siSteel)" rx={2}/>
-    <Teil ax={ax} ay={ay} z0={zPutzOut+9.5} z1={zSeil-20} dia={4} fill="url(#siThread)" rx={2}/>
-    <Teil ax={ax} ay={ay} z0={zSeil-20} z1={zSeil-11} dia={13} fill="url(#siSteel)" rx={1.5}/>
-    <Teil ax={ax} ay={ay} z0={zSeil-11} z1={zSeil+7} dia={10} fill="url(#siSteel)" rx={4}
-      kinder={<>
-        <ellipse cx={((zSeil+7)-(zSeil-11))*sclZ} cy="0" rx="1.5" ry="4.6" fill="#AEB4BB" stroke="rgba(20,25,30,.3)" strokeWidth=".5"/>
-        <circle cx={(11)*sclZ} cy="0" r="2.6" fill="#26292D"/>
-        <circle cx={(11)*sclZ-0.8} cy="-0.9" r="1" fill="#5A6067"/>
-      </>}/>
-  </g>);
+  // Sichtbarer Anker ab Putzoberflaeche — bei der fast frontalen Ansicht
+  // werden Dichtscheibe, Edelstahl-Scheibe und Stirnflaeche als Kreisscheiben
+  // auf der Achse gezeichnet (gedrehte Rechtecke wirkten wie schwebende Balken).
+  const Kopf=({ax,ay})=>{
+    const at=(dz)=>{const c=P(ax,ay,zPutzOut+dz);return c;};
+    const c0=at(0), cW=at(2.6), cLoch=at(zSeil-zPutzOut), cEnde=at(zSeil-zPutzOut+7.5);
+    return(<g>
+      <ellipse cx={c0[0]+5} cy={c0[1]+7} rx="10" ry="4.5" fill="rgba(20,25,30,.13)"/>
+      <ellipse cx={c0[0]} cy={c0[1]} rx="7.4" ry="6.8" fill="url(#siDarkR)" stroke="rgba(0,0,0,.4)" strokeWidth=".5"/>
+      <ellipse cx={cW[0]} cy={cW[1]} rx="5.2" ry="4.8" fill="url(#siSteelR)" stroke="rgba(20,25,30,.25)" strokeWidth=".5"/>
+      <Teil ax={ax} ay={ay} z0={zPutzOut+3} z1={zSeil-15} dia={4.6} fill="url(#siSteel)" rx={2.3}/>
+      <Teil ax={ax} ay={ay} z0={zPutzOut+3} z1={zSeil-15} dia={4.6} fill="url(#siThread)" rx={2.3}/>
+      <Teil ax={ax} ay={ay} z0={zSeil-15} z1={zSeil-7} dia={12} fill="url(#siSteel)" rx={1.5}/>
+      <Teil ax={ax} ay={ay} z0={zSeil-7} z1={zSeil+7.5} dia={9.5} fill="url(#siSteel)" rx={4.5}/>
+      <circle cx={cLoch[0]} cy={cLoch[1]} r="2.3" fill="#26292D"/>
+      <ellipse cx={cEnde[0]} cy={cEnde[1]} rx="4.9" ry="4.5" fill="url(#siKopfR)" stroke="rgba(20,25,30,.3)" strokeWidth=".5"/>
+    </g>);
+  };
   // Nummerierte Positionsmarken + Legende
   const Num=({n,x,y,tx,ty})=>(<g>
     <line x1={tx} y1={ty} x2={x} y2={y} stroke="#9C978F" strokeWidth=".8"/>
@@ -1244,6 +1247,17 @@ function SystemIso({ d }){
         <pattern id="siHatch" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
           <line x1="0" y1="0" x2="0" y2="7" stroke="rgba(20,25,30,.3)" strokeWidth=".8"/>
         </pattern>
+        <radialGradient id="siDarkR" cx="38%" cy="32%" r="75%">
+          <stop offset="0" stopColor="#3E4145"/><stop offset="1" stopColor="#141517"/>
+        </radialGradient>
+        <radialGradient id="siSteelR" cx="35%" cy="30%" r="80%">
+          <stop offset="0" stopColor="#F2F4F6"/><stop offset=".55" stopColor="#C9CED3"/><stop offset="1" stopColor="#82898F"/>
+        </radialGradient>
+        <radialGradient id="siKopfR" cx="42%" cy="38%" r="75%">
+          <stop offset="0" stopColor="#26292D"/><stop offset=".3" stopColor="#26292D"/>
+          <stop offset=".42" stopColor="#4E545B"/><stop offset=".62" stopColor="#D7DBDF"/>
+          <stop offset=".82" stopColor="#AEB4BB"/><stop offset="1" stopColor="#C9CED3"/>
+        </radialGradient>
         <pattern id="siZiegel" width="30" height="16" patternUnits="userSpaceOnUse">
           <rect width="30" height="16" fill="#C08A7D"/>
           <line x1="0" y1="8" x2="30" y2="8" stroke="#EDE6DE" strokeWidth="1.4"/>
