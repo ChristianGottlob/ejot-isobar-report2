@@ -223,6 +223,12 @@ export default function RealisticFacade({
   const leafBase = Math.max(4, Math.min(facadeBox.w, facadeBox.h) *
     (maturity === "dense" ? 0.018 : maturity === "young" ? 0.012 : 0.015));
 
+  // Reifegrad wirkt auf ALLES: dichter Bewuchs = mehr Cluster, mehr Blätter
+  // je Cluster, größere Cluster; junger Bewuchs entsprechend spärlicher.
+  const matC = useMemo(() => maturity === "dense" ? { p: 1.35, n: 1.8, r: 1.4, step: 0.22 }
+    : maturity === "young" ? { p: 0.7, n: 0.55, r: 0.8, step: 0.36 }
+    : { p: 1, n: 1, r: 1, step: 0.3 }, [maturity]);
+
   const leaves = useMemo(() => {
     if (coverage <= 0) return [];
     const seed = hashStr(`${facadeBox.x}-${facadeBox.y}-${facadeBox.w}-${facadeBox.h}-${cables.length}-${anchors.length}-${rasterType}-${coverage}-${maturity}-${formCode}-${greeningRects.length}-${exclusionRects.length}`);
@@ -251,11 +257,11 @@ export default function RealisticFacade({
       if (!rect) return 0;
       const climbFrac = (y - rect.y) / Math.max(1, rect.h); // 0 at top, 1 at bottom
       const weight = 0.55 + 0.45 * climbFrac;               // dense near ground
-      return Math.min(1, (coverage / 100) * weight);
+      return Math.min(1, (coverage / 100) * weight * matC.p);
     };
 
     // Walk cables and drop clusters of leaves at each step
-    const step = Math.max(8, Math.min(cellW, cellH) * 0.30);
+    const step = Math.max(8, Math.min(cellW, cellH) * matC.step);
     for (const ln of cables) {
       const dx = ln.x2 - ln.x1, dy = ln.y2 - ln.y1;
       const len = Math.hypot(dx, dy);
@@ -267,19 +273,21 @@ export default function RealisticFacade({
         const cy = ln.y1 + dy * t;
         if (rng() > pAt(cx, cy)) continue;
 
-        // Cluster: 4 dark (shadow), 6 mid, 3 light (highlight)
-        const clusterRadius = leafBase * 1.4;
+        // Cluster: Schatten → Mittelton → Licht; Anzahl skaliert mit dem
+        // Reifegrad.  Blühende Arten bekommen vereinzelt Blütentupfer.
+        const clusterRadius = leafBase * 1.4 * matC.r;
         const place = (count, tone, layer, mulMin, mulMax) => {
           for (let k = 0; k < count; k++) {
             const ang = rng() * Math.PI * 2;
             const rr = rng() * clusterRadius;
+            const blueht = tone === "light" && palette.flower && rng() < 0.14;
             pushLeaf(cx + Math.cos(ang) * rr, cy + Math.sin(ang) * rr,
-              mulMin + rng() * (mulMax - mulMin), tone, layer);
+              (blueht ? 0.5 : mulMin) + rng() * (mulMax - mulMin), blueht ? "flower" : tone, layer);
           }
         };
-        place(4, "dark", 0, 1.05, 1.4);
-        place(6, "mid",  1, 0.85, 1.15);
-        place(3, "light", 2, 0.65, 0.95);
+        place(Math.max(2, Math.round(4 * matC.n)), "dark", 0, 1.05, 1.4);
+        place(Math.max(3, Math.round(6 * matC.n)), "mid",  1, 0.85, 1.15);
+        place(Math.max(2, Math.round(3 * matC.n)), "light", 2, 0.65, 0.95);
       }
     }
 
@@ -302,7 +310,37 @@ export default function RealisticFacade({
     }
 
     return out;
-  }, [coverage, maturity, formCode, palette, shapeKeys, leafBase, facadeBox.x, facadeBox.y, facadeBox.w, facadeBox.h, cables, anchors, cellW, cellH, greeningRects, exclusionRects, rasterType]);
+  }, [coverage, maturity, matC, formCode, palette, shapeKeys, leafBase, facadeBox.x, facadeBox.y, facadeBox.w, facadeBox.h, cables, anchors, cellW, cellH, greeningRects, exclusionRects, rasterType]);
+
+  // Ranken entlang der Seile: leicht gewellte Triebe in Stammfarbe, unter dem
+  // Laub gezeichnet — der Bewuchs wirkt dadurch am Seil "festgewachsen".
+  const vines = useMemo(() => {
+    if (coverage <= 0) return [];
+    const seed = hashStr(`vine-${cables.length}-${coverage}-${maturity}-${formCode}-${facadeBox.w}-${facadeBox.h}`);
+    const rng = mulberry32(seed);
+    const out = [];
+    for (const ln of cables) {
+      const dx = ln.x2 - ln.x1, dy = ln.y2 - ln.y1;
+      const len = Math.hypot(dx, dy);
+      if (len < 24) continue;
+      const vertical = Math.abs(dy) >= Math.abs(dx);
+      if (!vertical && rng() < 0.45) continue;      // nicht jedes Querseil berankt
+      const px = -dy / len, py = dx / len;
+      const amp = leafBase * (0.5 + rng() * 0.8);
+      const freq = 1.4 + rng() * 1.4;
+      const phase = rng() * Math.PI * 2;
+      const segs = Math.max(5, Math.floor(len / 16));
+      let dd = "";
+      for (let i = 0; i <= segs; i++) {
+        const t = i / segs;
+        const off = Math.sin(phase + t * Math.PI * 2 * freq) * amp;
+        const x = ln.x1 + dx * t + px * off, y = ln.y1 + dy * t + py * off;
+        dd += (i === 0 ? "M" : "L") + x.toFixed(1) + "," + y.toFixed(1);
+      }
+      out.push({ d: dd, w: Math.max(1, leafBase * (vertical ? 0.22 : 0.15)) });
+    }
+    return out;
+  }, [cables, coverage, maturity, formCode, leafBase, facadeBox.w, facadeBox.h]);
 
   const maskId = useMemo(() => `fc-mask-${Math.random().toString(36).slice(2, 9)}`, []);
   const shadowFilterId = useMemo(() => `fc-shadow-${Math.random().toString(36).slice(2, 9)}`, []);
@@ -385,8 +423,12 @@ export default function RealisticFacade({
 
       {backdrop}
 
-      {/* Foliage (masked + drop-shadowed) */}
+      {/* Ranken + Laub (maskiert + weicher Schatten) */}
       <g mask={`url(#${maskId})`} filter={`url(#${shadowFilterId})`}>
+        {vines.map((v, i) => (
+          <path key={`vine${i}`} d={v.d} fill="none" stroke={palette.stem}
+            strokeWidth={v.w} opacity="0.85" strokeLinecap="round" />
+        ))}
         {sortedLeaves.map((lf, i) => (
           <path key={i}
             d={LEAF_SHAPES[lf.shape] || LEAF_SHAPES.teardrop}

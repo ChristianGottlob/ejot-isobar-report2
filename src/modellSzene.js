@@ -60,10 +60,24 @@ export function bauSzene(d, { fuehrung = "gitter", explode = 0, oberflaeche = "p
   const zPutzAussen = zPutz + g.putz / 2;
 
   const prim = [];
+  // Grosse Flaechen in Kacheln unterteilen: der Maler-Algorithmus sortiert
+  // pro Polygon-Mittelpunkt — eine ungeteilte Wandfront verdeckte sonst die
+  // Anker nahe der zum Betrachter gedrehten Kante (abgeschnittene Iso-Bars).
+  const lerp = (A, B, t) => [A[0] + (B[0] - A[0]) * t, A[1] + (B[1] - A[1]) * t, A[2] + (B[2] - A[2]) * t];
+  const quadSub = (p00, p10, p11, p01, farbe) => {
+    const du = Math.hypot(p10[0] - p00[0], p10[1] - p00[1], p10[2] - p00[2]);
+    const dv = Math.hypot(p01[0] - p00[0], p01[1] - p00[1], p01[2] - p00[2]);
+    const nu = Math.max(1, Math.min(6, Math.round(du / 70)));
+    const nv = Math.max(1, Math.min(6, Math.round(dv / 70)));
+    const pt = (u, v) => lerp(lerp(p00, p10, u), lerp(p01, p11, u), v);
+    for (let i = 0; i < nu; i++) for (let j = 0; j < nv; j++) {
+      prim.push({ q: [pt(i / nu, j / nv), pt((i + 1) / nu, j / nv), pt((i + 1) / nu, (j + 1) / nv), pt(i / nu, (j + 1) / nv)], farbe });
+    }
+  };
   // Quader: Zentrum (x,y,z), Maße w×h×t
   const quader = (x, y, z, w, h, t, farbe) => {
     const p = (dx, dy, dz) => [x + dx * w / 2, y + dy * h / 2, z + dz * t / 2];
-    const q = (a, b, c2, e) => prim.push({ q: [a, b, c2, e], farbe });
+    const q = (a, b, c2, e) => quadSub(a, b, c2, e, farbe);
     q(p(-1,-1, 1), p(1,-1, 1), p(1,1, 1), p(-1,1, 1));
     q(p(-1,-1,-1), p(1,-1,-1), p(1,1,-1), p(-1,1,-1));
     q(p(-1,-1,-1), p(-1,-1,1), p(-1,1,1), p(-1,1,-1));
@@ -148,7 +162,10 @@ export function szeneSVGInner(d, { rx = -16, ry = -32, explode = 0, fuehrung = "
       const dot = Math.abs((n[0] * L[0] + n[1] * L[1] + n[2] * L[2]) / nl);
       const lum = 0.62 + 0.42 * dot;
       const pts = v.map((q) => { merk(q[0], q[1]); return q[0].toFixed(1) + "," + q[1].toFixed(1); }).join(" ");
-      items.push({ depth, str: `<polygon points="${pts}" fill="${shade(p.farbe, lum)}" stroke="rgba(20,25,30,.18)" stroke-width="0.5"/>` });
+      // Strich in Flaechenfarbe: versiegelt Antialiasing-Naehte der Kacheln,
+      // ohne ein sichtbares Gitter auf die Flaechen zu zeichnen.
+      const fillCol = shade(p.farbe, lum);
+      items.push({ depth, str: `<polygon points="${pts}" fill="${fillCol}" stroke="${fillCol}" stroke-width="0.6"/>` });
     } else if (p.s) {
       const A = rot(p.s[0]), B = rot(p.s[1]);
       merk(A[0], A[1]); merk(B[0], B[1]);
