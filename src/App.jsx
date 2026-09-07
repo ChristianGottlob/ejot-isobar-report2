@@ -2636,31 +2636,41 @@ export default function App(){
       const mmPerPx=contentW/rootWpx;
       const pageHpx=pageContentH/mmPerPx;
 
-      // Schnittpunkte an Blockgrenzen (nie mitten durch Zeile/Überschrift/Grafik).
-      const cuts=pdfPageCuts(root,pageHpx);
-
-      // Einmal die komplette Sektion rendern, danach an den Schnittpunkten trennen.
-      const canvas=await snapdom.toCanvas(root,{scale:SCALE,backgroundColor:"#FFFFFF"});
-      const pxScale=canvas.width/rootWpx;         // Canvas-Pixel je DOM-Pixel (≈ SCALE)
-
-      for(let i=0;i<cuts.length-1;i++){
-        const y0=cuts[i],y1=cuts[i+1];
-        const hPx=y1-y0;
-        if(hPx<=1) continue;
-        if(i>0) pdf.addPage();
-        const sy=Math.round(y0*pxScale);
-        const sh=Math.min(Math.round(hPx*pxScale),canvas.height-sy);
-        if(sh<=0) continue;
-        const tmp=document.createElement("canvas");
-        tmp.width=canvas.width;tmp.height=sh;
-        const ctx=tmp.getContext("2d");
-        ctx.fillStyle="#FFFFFF";ctx.fillRect(0,0,tmp.width,tmp.height);
-        ctx.drawImage(canvas,0,sy,canvas.width,sh,0,0,canvas.width,sh);
-        pdf.addImage(tmp,"PNG",margin,margin,contentW,(sh/pxScale)*mmPerPx,"","FAST");
-        tmp.width=tmp.height=0;                   // Slice-Leinwand freigeben
-        await new Promise(r=>setTimeout(r,0));    // Event-Loop atmen lassen
+      // WICHTIG: jede data-pdf-page-Gruppe wird EINZELN gerendert.  Eine
+      // Gesamtaufnahme der Sektion sprengte bei großen Projekten (z. B.
+      // 27 Fassaden-Seiten mit Plänen) die Canvas-Höhengrenze des Browsers
+      // — der Export brach dann kommentarlos ab.  Ohne Gruppen (Statik)
+      // fällt der Export auf die Gesamtaufnahme zurück.
+      const gruppen=[...root.querySelectorAll("[data-pdf-page]")];
+      const teile=gruppen.length?gruppen:[root];
+      let erstesBlatt=true;
+      for(const el of teile){
+        // Schnittpunkte an Blockgrenzen (nie mitten durch Zeile/Grafik).
+        const cuts=pdfPageCuts(el,pageHpx);
+        const canvas=await snapdom.toCanvas(el,{scale:SCALE,backgroundColor:"#FFFFFF"});
+        const elWpx=el.getBoundingClientRect().width||rootWpx;
+        const pxScale=canvas.width/elWpx;         // Canvas-Pixel je DOM-Pixel (≈ SCALE)
+        for(let i=0;i<cuts.length-1;i++){
+          const y0=cuts[i],y1=cuts[i+1];
+          const hPx=y1-y0;
+          if(hPx<=1) continue;
+          if(!erstesBlatt) pdf.addPage();
+          erstesBlatt=false;
+          const sy=Math.round(y0*pxScale);
+          const sh=Math.min(Math.round(hPx*pxScale),canvas.height-sy);
+          if(sh<=0) continue;
+          const tmp=document.createElement("canvas");
+          tmp.width=canvas.width;tmp.height=sh;
+          const ctx=tmp.getContext("2d");
+          ctx.fillStyle="#FFFFFF";ctx.fillRect(0,0,tmp.width,tmp.height);
+          ctx.drawImage(canvas,0,sy,canvas.width,sh,0,0,canvas.width,sh);
+          pdf.addImage(tmp,"PNG",margin,margin,contentW,(sh/pxScale)*mmPerPx,"","FAST");
+          tmp.width=tmp.height=0;                 // Slice-Leinwand freigeben
+          await new Promise(r=>setTimeout(r,0));  // Event-Loop atmen lassen
+        }
+        canvas.width=canvas.height=0;             // Capture-Leinwand freigeben
+        await new Promise(r=>setTimeout(r,0));
       }
-      canvas.width=canvas.height=0;               // Capture-Leinwand freigeben
 
       pdf.save(filename);
     }catch(err){console.error("PDF export error:",err);alert("PDF-Export fehlgeschlagen: "+err.message);}
@@ -3460,6 +3470,18 @@ export default function App(){
 {/* ═══ MATERIAL ═══ */}
 {step==="material"&&<PaperView label="MATERIAL"><MaterialSection d={d} setD={setD}/></PaperView>}
       </div></div>
+
+{/* Export-Overlay: liegt ÜBER dem für die Aufnahme eingeblendeten
+    Offscreen-Render (z-index 9999) — sonst flackert der Report sichtbar
+    über die Oberfläche. */}
+{exporting&&<div style={{position:"fixed",inset:0,zIndex:10000,background:"#15191E",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:14,color:"#E7EAEE"}}>
+  <span style={{width:38,height:38,border:"4px solid #3A424B",borderTopColor:R,borderRadius:"50%",animation:"spin 1s linear infinite"}}/>
+  <div style={{fontSize:15,fontWeight:800}}>PDF wird erstellt …</div>
+  <div style={{fontFamily:MONO_F,fontSize:10,letterSpacing:1,color:"#8B939C",textTransform:"uppercase"}}>{String(exporting)}</div>
+  <div style={{fontSize:11,color:"#8B939C",maxWidth:360,textAlign:"center"}}>
+    Bei vielen Fassaden mit Plänen kann das einen Moment dauern — Seite für Seite wird gerendert.
+  </div>
+</div>}
 
 {/* ═══ OFF-SCREEN PDF RENDER CONTAINERS ═══ */}
 <div data-pdf-offscreen="true" style={{position:"absolute",left:"-9999px",top:0,overflow:"visible",pointerEvents:"none"}}>
