@@ -824,22 +824,34 @@ function PageHead({title,subtitle}){
 }
 
 // ─── Per-facade plan upload + annotator ─────────────────
-function FacadePlanPanel({facade,onUpdate}){
+// Mehrfachauswahl: die erste Datei landet auf DIESER Fassade, weitere gibt
+// der Panel über onMehrere an den Aufrufer, der sie auf die folgenden
+// Fassaden verteilt (bzw. neue anlegt) — statt jeden Plan einzeln zu laden.
+function FacadePlanPanel({facade,onUpdate,onMehrere}){
   const[loading,setLoading]=useState(false);
   const[err,setErr]=useState("");
   const inRef=useRef(null);
 
   const handle=useCallback(async e=>{
-    const file=e.target.files?.[0];
-    if(!file)return;
+    const files=Array.from(e.target.files||[]);
+    if(!files.length)return;
     setLoading(true);setErr("");
     try{
       const { loadPlanImage }=await import("./pdfExtract");
-      const plan=await loadPlanImage(file);
-      onUpdate({plan,annotations:{facades:[],windows:[],doors:[]}});
-    }catch(er){console.error(er);setErr(er.message||String(er));}
-    finally{setLoading(false);if(inRef.current)inRef.current.value="";}
-  },[onUpdate]);
+      const plaene=[];const fehler=[];
+      for(const file of files){
+        try{plaene.push(await loadPlanImage(file));}
+        catch(er){console.error(er);fehler.push(`${file.name}: ${er.message||String(er)}`);}
+      }
+      if(plaene.length===1){
+        onUpdate({plan:plaene[0],annotations:{facades:[],windows:[],doors:[]}});
+      }else if(plaene.length>1){
+        if(onMehrere)onMehrere(plaene);
+        else onUpdate({plan:plaene[0],annotations:{facades:[],windows:[],doors:[]}});
+      }
+      if(fehler.length)setErr(fehler.join(" · "));
+    }finally{setLoading(false);if(inRef.current)inRef.current.value="";}
+  },[onUpdate,onMehrere]);
 
   if(!facade.plan){
     return(<div style={{border:`1.5px dashed ${BD}`,borderRadius:8,padding:14,background:WH,textAlign:"center"}}>
@@ -847,16 +859,16 @@ function FacadePlanPanel({facade,onUpdate}){
         Fassadenplan hochladen (optional)
       </div>
       <div style={{fontSize:10,color:GL,marginBottom:10}}>
-        PDF (1 Seite) oder Bild · wird als Hintergrund für Vorschau & Rasterdarstellung verwendet
+        PDF (1 Seite) oder Bild · mehrere Dateien möglich — je Datei eine Fassade · Hintergrund für Vorschau & Rasterdarstellung
       </div>
-      <input ref={inRef} type="file" accept="image/*,application/pdf" onChange={handle} style={{display:"none"}}/>
+      <input ref={inRef} type="file" accept="image/*,application/pdf" multiple onChange={handle} style={{display:"none"}}/>
       <button onClick={()=>inRef.current?.click()} disabled={loading}
         style={{padding:"7px 16px",fontSize:11,fontWeight:700,border:`1px solid ${R}`,borderRadius:6,
           background:loading?BG:`linear-gradient(135deg, ${R}, #A40C24)`,color:loading?GY:WH,cursor:loading?"wait":"pointer",
           display:"inline-flex",alignItems:"center",gap:6}}>
         {loading
           ?<><span style={{display:"inline-block",width:10,height:10,border:`2px solid ${BD}`,borderTopColor:R,borderRadius:"50%",animation:"spin 1s linear infinite"}}/>Plan wird geladen …</>
-          :<>📐 Plan auswählen</>}
+          :<>📐 Plan auswählen (mehrere möglich)</>}
       </button>
       {err&&<div style={{marginTop:10,fontSize:11,color:R,background:"#FFEBEE",padding:"6px 10px",borderRadius:5,border:`1px solid ${R}40`}}>
         Fehler: {err}
@@ -873,7 +885,7 @@ function FacadePlanPanel({facade,onUpdate}){
           :<span style={{color:AM,fontSize:10,fontWeight:600}}>⚠ Begrünungsfläche fehlt noch</span>}
       </div>
       <div style={{display:"flex",gap:6}}>
-        <input ref={inRef} type="file" accept="image/*,application/pdf" onChange={handle} style={{display:"none"}}/>
+        <input ref={inRef} type="file" accept="image/*,application/pdf" multiple onChange={handle} style={{display:"none"}}/>
         <button onClick={()=>inRef.current?.click()} disabled={loading}
           style={{padding:"5px 10px",fontSize:10,fontWeight:600,border:`1px solid ${BD}`,borderRadius:5,background:WH,color:DK,cursor:"pointer"}}>
           ↺ Plan ersetzen
@@ -3416,6 +3428,21 @@ export default function App(){
         <div style={{marginTop:12}}>
           <FacadePlanPanel facade={f} onUpdate={patch=>{
             const fa=[...(d.fassaden||[])];fa[i]={...fa[i],...patch};setD(x=>({...x,fassaden:fa}));
+          }} onMehrere={plaene=>{
+            // Erster Plan auf diese Fassade, weitere auf die nächsten Fassaden
+            // ohne Plan; reicht das nicht, werden neue Fassaden angelegt.
+            setD(x=>{
+              const fa=[...(x.fassaden||[])];
+              const ziele=[i];
+              for(let k=i+1;k<fa.length&&ziele.length<plaene.length;k++) if(!fa[k]?.plan) ziele.push(k);
+              while(ziele.length<plaene.length){
+                fa.push({name:`Fassade ${fa.length+1}`,breite:"10",hoehe:"6",
+                  seilfuehrung:x.seilfuehrung||"gitter",seilkreuztyp:x.seilkreuztyp||"ohne"});
+                ziele.push(fa.length-1);
+              }
+              plaene.forEach((plan,k)=>{fa[ziele[k]]={...fa[ziele[k]],plan,annotations:{facades:[],windows:[],doors:[]}};});
+              return {...x,fassaden:fa};
+            });
           }}/>
         </div>
       </div>);
