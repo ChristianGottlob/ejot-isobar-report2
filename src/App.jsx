@@ -5,6 +5,7 @@ import { useState, useRef, useCallback, useMemo, useEffect } from "react";
 // einliest — nicht beim Öffnen der Seite.
 import { buildDocument, leeresDokument, FIELD_LABELS } from "./pdfFields.js";
 import { baueProjektPayload, leseProjektdatei, projektDateiname } from "./projektdatei.js";
+import { szeneSVGInner } from "./modellSzene.js";
 import RealisticFacade from "./RealisticFacade";
 import Facade3D from "./Facade3D";
 import RasterOverlay from "./RasterOverlay";
@@ -1207,6 +1208,16 @@ function SystemIso({ d }){
     const c0=at(0), cW=at(2.6), cLoch=at(zSeil-zPutzOut), cEnde=at(zSeil-zPutzOut+8);
     return(<g>
       <ellipse cx={c0[0]+5} cy={c0[1]+7} rx="10" ry="4.5" fill="rgba(20,25,30,.13)"/>
+      {/* Geschlossene Silhouette als Unterlage: durchgehender Kern von der
+          Dichtscheibe bis zur Stirn — zwischen den Teilen scheint nichts durch. */}
+      <g fill="#4A5057">
+        <ellipse cx={c0[0]} cy={c0[1]} rx="7.9" ry="7.3"/>
+        <ellipse cx={cW[0]} cy={cW[1]} rx="5.7" ry="5.3"/>
+        <ellipse cx={cEnde[0]} cy={cEnde[1]} rx="5.4" ry="5"/>
+      </g>
+      <Teil ax={ax} ay={ay} z0={zPutzOut+1} z1={zSeil+8} dia={6.4} fill="#4A5057" rx={3.2}/>
+      <Teil ax={ax} ay={ay} z0={zSeil-26.6} z1={zSeil-15.4} dia={14.2} fill="#4A5057" rx={1.2}/>
+      <Teil ax={ax} ay={ay} z0={zSeil-16.6} z1={zSeil+8.2} dia={10.8} fill="#4A5057" rx={4}/>
       <ellipse cx={c0[0]} cy={c0[1]} rx="7.4" ry="6.8" fill="url(#siDarkR)" stroke="rgba(0,0,0,.4)" strokeWidth=".5"/>
       <ellipse cx={cW[0]} cy={cW[1]} rx="5.2" ry="4.8" fill="url(#siSteelR)" stroke="rgba(20,25,30,.25)" strokeWidth=".5"/>
       {/* Gewindestift */}
@@ -1261,7 +1272,7 @@ function SystemIso({ d }){
           <line x1="0" y1="0" x2="0" y2="7" stroke="rgba(20,25,30,.3)" strokeWidth=".8"/>
         </pattern>
         <radialGradient id="siDarkR" cx="38%" cy="32%" r="75%">
-          <stop offset="0" stopColor="#3E4145"/><stop offset="1" stopColor="#141517"/>
+          <stop offset="0" stopColor="#33363A"/><stop offset=".7" stopColor="#1B1D1F"/><stop offset="1" stopColor="#101113"/>
         </radialGradient>
         <radialGradient id="siSteelR" cx="35%" cy="30%" r="80%">
           <stop offset="0" stopColor="#F2F4F6"/><stop offset=".55" stopColor="#C9CED3"/><stop offset="1" stopColor="#82898F"/>
@@ -1375,6 +1386,25 @@ function AnlagenSection({d}){
       <div style={{borderTop:`1px solid ${BD}`,marginTop:14,padding:"6px 0 0",display:"flex",justifyContent:"space-between",fontSize:9,color:GL}}>
         <span>EJOT · ISO-Bar ECO · Anlagen</span><span>{d.dokNr}</span></div>
     </div>
+    {/* Anlage D: im 3D-Tab aufgenommene Modell-Ansichten (Snapshot-Renderer) */}
+    {Array.isArray(d.modell_shots)&&d.modell_shots.length>0&&(()=>{
+      const FUEHRUNG_L={gitter:"Gitter (H+V)",vertikal:"Vertikal",horizontal:"Horizontal",diagonal:"Raute"};
+      return(<div data-pdf-page="anlage-d" style={{borderTop:`6px solid ${BG}`,padding:"16px 24px"}}>
+        <PageHead title="Anlage D – Systemmodell" subtitle="Ansichten des 3D-Systemmodells (schematisch, mit Projektwerten)"/>
+        <div style={{borderTop:`1px solid ${R}`,marginBottom:12}}/>
+        <div style={{display:"grid",gridTemplateColumns:d.modell_shots.length>1?"1fr 1fr":"1fr",gap:10}}>
+          {d.modell_shots.map((sh,i)=>{const rr=szeneSVGInner(d,sh);return(
+            <div key={i} style={{border:`1px solid ${BD}`,borderRadius:4,padding:"8px 8px 4px",breakInside:"avoid"}}>
+              <svg viewBox={rr.vb} width="100%" style={{display:"block"}} dangerouslySetInnerHTML={{__html:rr.inner}}/>
+              <div style={{fontSize:9,color:GL,marginTop:4}}>
+                Ansicht {i+1} · Seilführung {FUEHRUNG_L[sh.fuehrung]||sh.fuehrung}{sh.explode>0.05?" · Explosionsansicht":""}
+              </div>
+            </div>);})}
+        </div>
+        <div style={{fontSize:8.5,color:GL,marginTop:8}}>Aufgenommen im 3D-Modell des Tools. Schematische Darstellung — ersetzt keine Ausführungsplanung.</div>
+        <div style={{borderTop:`1px solid ${BD}`,marginTop:14,padding:"6px 0 0",display:"flex",justifyContent:"space-between",fontSize:9,color:GL}}>
+          <span>EJOT · ISO-Bar ECO · Anlagen</span><span>{d.dokNr}</span></div>
+      </div>);})()}
   </div>);
 }
 
@@ -3401,7 +3431,7 @@ export default function App(){
 </>}
 
 {/* ═══ 3D-MODELL (nur Bildschirm, kein PDF-Export) ═══ */}
-{step==="modell"&&<Facade3D d={d}/>}
+{step==="modell"&&<Facade3D d={d} setD={setD}/>}
 
 {/* ═══ PREVIEW ═══ */}
 {step==="preview"&&<PaperView label="VORBEMESSUNG"><PreviewSection d={d} maxNw={maxNw}/></PaperView>}

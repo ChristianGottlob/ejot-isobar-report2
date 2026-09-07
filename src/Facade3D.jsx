@@ -14,6 +14,7 @@
 // ─────────────────────────────────────────────────────────────────
 import { Fragment, useEffect, useRef, useState } from "react";
 import { parseNum } from "./num.js";
+import { szeneSVGInner } from "./modellSzene.js";
 
 const pf = parseNum;
 const MONO = "'IBM Plex Mono',ui-monospace,Consolas,monospace";
@@ -114,7 +115,7 @@ const SCHICHT_INFO = [
   { key: "seil",  l: "Seilebene",         farbe: "#7A828A" },
 ];
 
-export default function Facade3D({ d }) {
+export default function Facade3D({ d, setD }) {
   // ── Projektwerte (Darstellungs-Fallbacks nur fürs Modell) ──
   const wdvsMm = pf(d.vm_daemm) || pf(d.wdvs_dicke) || 0;
   const tolMm = pf(d.dicke_klebschicht) || 0;
@@ -148,6 +149,38 @@ export default function Facade3D({ d }) {
   const fuehrung = fWahl || projFuehrung;
   const drag = useRef(null);
   const idle = useRef(true);
+
+  // ── Ansicht exportieren: Shots fuer Anlage D im Report + PNG-Download ──
+  const shots = Array.isArray(d.modell_shots) ? d.modell_shots : [];
+  const shotJetzt = () => ({ rx: Math.round(rot.x), ry: Math.round(rot.y % 360), explode: +explode.toFixed(2), fuehrung });
+  const shotAdd = () => setD && setD((x) => ({ ...x, modell_shots: [...(Array.isArray(x.modell_shots) ? x.modell_shots : []).slice(-3), shotJetzt()] }));
+  const shotDel = (i) => setD && setD((x) => ({ ...x, modell_shots: (x.modell_shots || []).filter((_, j) => j !== i) }));
+  const shotStandard = () => setD && setD((x) => ({ ...x, modell_shots: [
+    { rx: -16, ry: -32, explode: 0, fuehrung },
+    { rx: -2, ry: 0, explode: 0, fuehrung },
+    { rx: -14, ry: -28, explode: 0.85, fuehrung },
+  ] }));
+  const pngDownload = () => {
+    const { inner, vb } = szeneSVGInner(d, shotJetzt());
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vb}" width="1600" height="1200">${inner}</svg>`;
+    const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
+    const img = new Image();
+    img.onload = () => {
+      const c = document.createElement("canvas"); c.width = 1600; c.height = 1200;
+      const ctx = c.getContext("2d");
+      ctx.fillStyle = "#FFFFFF"; ctx.fillRect(0, 0, 1600, 1200);
+      ctx.drawImage(img, 0, 0, 1600, 1200);
+      URL.revokeObjectURL(url);
+      c.toBlob((blob) => {
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = `EJOT_IsoBar_3D_${d.dokNr || "Modell"}.png`;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      }, "image/png");
+    };
+    img.src = url;
+  };
 
   // Sanftes Eigendrehen bis zur ersten Interaktion (nicht bei reduced motion).
   useEffect(() => {
@@ -296,6 +329,28 @@ export default function Facade3D({ d }) {
           ))}
           <button style={btn} onClick={() => setZoom(z => Math.min(1.5, z + 0.15))}>＋</button>
           <button style={btn} onClick={() => setZoom(z => Math.max(0.6, z - 0.15))}>－</button>
+        </div>
+
+        <div>
+          <div style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: 1.2, color: "#8B939C", marginBottom: 5 }}>ANSICHT EXPORTIEREN</div>
+          <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+            <button style={btn} title="Aktuelle Ansicht als Anlage D in den Report aufnehmen" onClick={shotAdd}>＋ In Report</button>
+            <button style={btn} title="Isometrie, Front und Explosionsansicht als Anlage D aufnehmen" onClick={shotStandard}>Standard-Ansichten</button>
+            <button style={btn} title="Aktuelle Ansicht als PNG-Datei speichern" onClick={pngDownload}>PNG ↓</button>
+          </div>
+          {shots.length > 0 && <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 6 }}>
+            {shots.map((sh, i) => (
+              <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontFamily: MONO, fontSize: 9,
+                padding: "2px 7px", borderRadius: 9, border: "1px solid #3A424B", color: "#B7BEC6" }}>
+                Ansicht {i + 1}{sh.explode > 0.05 ? " · Expl." : ""}
+                <button onClick={() => shotDel(i)} title="Ansicht entfernen"
+                  style={{ border: "none", background: "none", color: "#8B939C", cursor: "pointer", fontSize: 11, padding: 0, lineHeight: 1 }}>×</button>
+              </span>
+            ))}
+          </div>}
+          <div style={{ fontSize: 9, color: "#7B838C", marginTop: 5 }}>
+            Aufgenommene Ansichten erscheinen als „Anlage D – Systemmodell" im Anlagen-PDF.
+          </div>
         </div>
 
         <div style={{ marginTop: "auto", fontSize: 9.5, color: "#7B838C", lineHeight: 1.5 }}>
