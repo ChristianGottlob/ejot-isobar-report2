@@ -3378,6 +3378,26 @@ export default function App(){
         </div>
         {fSK!=="ohne"&&<div style={{marginBottom:8}}><StrukturPanel f={f} d={d} updateF={updateF}/></div>}
 
+        {/* Live-Ergebnis aus dem Plan: macht sichtbar, dass LH/LV, Seilführung
+            und 1. Lage DIREKT auf das Plan-Raster wirken — die ermittelte
+            Anzahl lässt sich hier nachjustieren, ohne eine zweite
+            (schematische) Fassade anzulegen, die die Mengen verdoppeln würde. */}
+        {(()=>{
+          const hatPlanRaster=!!(f.plan&&f.annotations&&(f.annotations.facades||[]).length>0);
+          if(!hatPlanRaster)return null;
+          const st=calcFacadeStats(f,d);
+          const off=pf(f.lage1??d.Lage1)||0;
+          return(<div style={{display:"flex",gap:"6px 16px",flexWrap:"wrap",alignItems:"baseline",padding:"8px 12px",background:RL,border:`1px solid ${RM}`,borderRadius:6,margin:"2px 0 10px",fontSize:11.5}}>
+            <span style={{fontWeight:800,color:R}}>📐 Aus Plan ermittelt:</span>
+            <span><strong>{fmtInt(st.anker)}</strong> Iso-Bar ECO</span>
+            <span><strong>{fmtArea(st.area)}</strong> netto</span>
+            {st.sk>0&&<span><strong>{fmtInt(st.sk)}</strong> Seilkreuze</span>}
+            <span style={{color:GY}}>Raster {fm(pf(fLH))} × {fm(pf(fLV))} m{off>0?` · 1. Lage ${fm(off,2)} m`:""}</span>
+            <span style={{flexBasis:"100%",fontSize:10,color:GL}}>
+              LH/LV, Seilführung und „1. Lage" oben ändern dieses Plan-Raster live — bitte KEINE zusätzliche schematische Fassade für dieselbe Fläche anlegen, sonst zählt das Material doppelt.
+            </span>
+          </div>);})()}
+
         {/* Plan/Annotator in voller Kartenbreite */}
         <div style={{marginTop:4}}>
           <FacadePlanPanel facade={f} onUpdate={patch=>{
