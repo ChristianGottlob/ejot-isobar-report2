@@ -30,7 +30,7 @@ const MODE_LABELS = {
 };
 const MODE_HINTS = {
   pan:    "Klicken + halten, um den Plan zu verschieben. Strg + Mausrad zoomt.",
-  select: "Klicken wählt aus. Strg/Shift-Klick = Mehrfachauswahl. × löscht einzeln, Mittelmaus pannt jederzeit.",
+  select: "Klicken wählt aus · Fläche ziehen verschiebt · Eckgriffe ziehen ändern die Größe · Strg/Shift-Klick = Mehrfachauswahl · × löscht.",
   facade: "Rechtecke um jede zu begrünende Wandfläche ziehen. Mehrere sind erlaubt.",
   window: "Rechtecke um Fenster ziehen. Anker und Bewuchs sparen diese aus.",
   door:   "Rechtecke um Türen ziehen. Anker und Bewuchs sparen diese aus.",
@@ -69,6 +69,12 @@ export default function PlanAnnotator({ plan, annotations, onChange, height = 48
   const [hovered, setHovered] = useState(false);   // mouse is over this annotator
   const [scaleDraft, setScaleDraft] = useState(null); // {p1,p2} awaiting meters input
   const [scaleInput, setScaleInput] = useState("");   // text in the meters textbox
+  const [vollbild, setVollbild] = useState(false);    // Plan bildschirmfüllend bearbeiten
+  const [containerH, setContainerH] = useState(480);
+  // Auswählen-Modus: markiertes Rechteck ziehen = verschieben, Eckgriff
+  // ziehen = Größe ändern. Während des Zugs lebt die Geometrie in `edit`,
+  // committet wird EIN History-Eintrag beim Loslassen.
+  const [edit, setEdit] = useState(null);             // {kind,id,art,corner,start,cur,orig}
 
   // ── Undo / redo stacks (track annotations only) ──
   const [past, setPast] = useState([]);
@@ -127,12 +133,13 @@ export default function PlanAnnotator({ plan, annotations, onChange, height = 48
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const effHeight = vollbild ? Math.max(240, containerH - 12) : height;
   const fitScale = useMemo(() => {
     if (!plan) return 1;
     const sx = (containerW - 12) / plan.w;
-    const sy = height / plan.h;
+    const sy = effHeight / plan.h;
     return Math.max(0.05, Math.min(sx, sy));
-  }, [plan, containerW, height]);
+  }, [plan, containerW, effHeight]);
   const dispW = plan ? plan.w * fitScale * zoom : containerW;
   const dispH = plan ? plan.h * fitScale * zoom : height;
 
@@ -140,7 +147,9 @@ export default function PlanAnnotator({ plan, annotations, onChange, height = 48
     if (!wrapRef.current) return;
     const ro = new ResizeObserver(entries => {
       const w = entries[0].contentRect.width;
+      const h = entries[0].contentRect.height;
       if (w > 0) setContainerW(w);
+      if (h > 0) setContainerH(h);
     });
     ro.observe(wrapRef.current);
     return () => ro.disconnect();
@@ -158,6 +167,14 @@ export default function PlanAnnotator({ plan, annotations, onChange, height = 48
   }, [ann.facades.length]);
 
   useEffect(() => { setSelectedKeys(new Set()); setHover(null); }, [mode]);
+
+  // Im Vollbild scrollt nur der Plan, nicht die Seite dahinter.
+  useEffect(() => {
+    if (!vollbild) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, [vollbild]);
 
   // ── Pointer → plan-pixel coords via SVG CTM ──
   const pt = useCallback((e) => {
@@ -184,6 +201,19 @@ export default function PlanAnnotator({ plan, annotations, onChange, height = 48
     for (const f of ann.facades) if (pointInRect(p, f, slack)) return { kind: "facade", id: f.id };
     return null;
   }, [ann, fitScale, zoom]);
+
+  const findRect = useCallback((kind, id) => {
+    const list = kind === "facade" ? ann.facades : kind === "window" ? ann.windows : ann.doors;
+    return list.find(r => r.id === id) || null;
+  }, [ann]);
+  // Eckgriff unter dem Zeiger (Bildschirm-Toleranz, unabhängig vom Zoom)
+  const cornerAt = useCallback((r, p) => {
+    const sl = 12 / (fitScale * zoom);
+    for (const [cx, cy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
+      if (Math.abs(p.x - (r.x + cx * r.w)) <= sl && Math.abs(p.y - (r.y + cy * r.h)) <= sl) return { cx, cy };
+    }
+    return null;
+  }, [fitScale, zoom]);
 
   // ── Pan logic ──
   const startPan = (e) => {
@@ -223,6 +253,17 @@ export default function PlanAnnotator({ plan, annotations, onChange, height = 48
     if (mode === "select") {
       const hit = hitTest(p);
       const multi = e.shiftKey || e.ctrlKey || e.metaKey;
+      if (hit && !multi) {
+        // Einfacher Klick: auswählen und direkt bearbeitbar machen —
+        // Fläche ziehen verschiebt, Eckgriff ziehen ändert die Größe.
+        const r = findRect(hit.kind, hit.id);
+        setSelectedKeys(new Set([selKey(hit)]));
+        if (r) {
+          const corner = cornerAt(r, p);
+          setEdit({ kind: hit.kind, id: hit.id, art: corner ? "resize" : "move", corner, start: p, cur: null, orig: { x: r.x, y: r.y, w: r.w, h: r.h } });
+        }
+        return;
+      }
       setSelectedKeys(prev => {
         if (!hit) return multi ? prev : new Set();
         const k = selKey(hit);
@@ -236,15 +277,43 @@ export default function PlanAnnotator({ plan, annotations, onChange, height = 48
   };
   const onMove = (e) => {
     if (pan) { movePan(e); return; }
+    if (edit) { const p = pt(e); setEdit(ed => ed ? { ...ed, cur: p } : ed); return; }
     if (drag) { setDrag(d => ({ ...d, b: pt(e) })); return; }
     if (mode === "select") {
       const h = hitTest(pt(e));
       setHover(h);
     }
   };
+
+  // Live-Geometrie während eines Bearbeitungszugs (Verschieben/Resize)
+  const editRect = (() => {
+    if (!edit || !edit.cur || !plan) return null;
+    const dx = edit.cur.x - edit.start.x, dy = edit.cur.y - edit.start.y;
+    const o = edit.orig;
+    if (edit.art === "move") {
+      return { x: Math.max(0, Math.min(plan.w - o.w, o.x + dx)), y: Math.max(0, Math.min(plan.h - o.h, o.y + dy)), w: o.w, h: o.h };
+    }
+    let x1 = o.x, y1 = o.y, x2 = o.x + o.w, y2 = o.y + o.h;
+    if (edit.corner.cx === 0) x1 = Math.max(0, Math.min(x2 - 8, x1 + dx)); else x2 = Math.min(plan.w, Math.max(x1 + 8, x2 + dx));
+    if (edit.corner.cy === 0) y1 = Math.max(0, Math.min(y2 - 8, y1 + dy)); else y2 = Math.min(plan.h, Math.max(y1 + 8, y2 + dy));
+    return { x: x1, y: y1, w: x2 - x1, h: y2 - y1 };
+  })();
   const onUp = (e) => {
     if (pan) { endPan(e); return; }
     if (e) { try { e.currentTarget.releasePointerCapture(e.pointerId); } catch {} }
+    if (edit) {
+      const r = editRect, ed = edit;
+      setEdit(null);
+      if (r && (Math.abs(r.x - ed.orig.x) > 0.5 || Math.abs(r.y - ed.orig.y) > 0.5 || Math.abs(r.w - ed.orig.w) > 0.5 || Math.abs(r.h - ed.orig.h) > 0.5)) {
+        const upd = (list) => list.map(it => it.id === ed.id ? { ...it, x: r.x, y: r.y, w: r.w, h: r.h } : it);
+        const next = { ...ann };
+        if (ed.kind === "facade") next.facades = upd(ann.facades);
+        else if (ed.kind === "window") next.windows = upd(ann.windows);
+        else next.doors = upd(ann.doors);
+        commit(next);
+      }
+      return;
+    }
     if (!drag) return;
     const dStart = drag.a, dEnd = drag.b;
     setDrag(null);
@@ -368,7 +437,7 @@ export default function PlanAnnotator({ plan, annotations, onChange, height = 48
   // Declared AFTER all the action functions so the dep-array doesn't hit
   // the temporal dead zone for deleteSelected / zoomBy / zoomFit / zoomReal. ──
   useEffect(() => {
-    if (!hovered) return;
+    if (!hovered && !vollbild) return;
     const handler = (e) => {
       const t = e.target;
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
@@ -383,8 +452,10 @@ export default function PlanAnnotator({ plan, annotations, onChange, height = 48
         return;
       }
       if (k === "escape") {
-        if (drag) setDrag(null);
+        if (edit) setEdit(null);
+        else if (drag) setDrag(null);
         else if (selectedKeys.size > 0) setSelectedKeys(new Set());
+        else if (vollbild) setVollbild(false);
         return;
       }
       const modeMap = { v: "select", h: "pan", f: "facade", w: "window", t: "door", s: "scale" };
@@ -397,12 +468,14 @@ export default function PlanAnnotator({ plan, annotations, onChange, height = 48
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hovered, undo, redo, deleteSelected, selectedKeys.size, drag, zoom]);
+  }, [hovered, vollbild, edit, undo, redo, deleteSelected, selectedKeys.size, drag, zoom]);
 
   if (!plan) return null;
 
   const dragRect = drag ? rectFromDrag(drag.a, drag.b) : null;
-  const cursor = pan ? "grabbing" : mode === "pan" ? "grab" : mode === "select" ? "default" : "crosshair";
+  const cursor = pan ? "grabbing" : mode === "pan" ? "grab"
+    : mode === "select" ? (edit ? (edit.art === "move" ? "grabbing" : "nwse-resize") : hover ? "move" : "default")
+    : "crosshair";
   const pctLabel = Math.round(zoom * fitScale * 100);
   const isSelected = (kind, id) => selectedKeys.has(selKey({ kind, id }));
   const baseStroke = Math.max(1.5, plan.w / 600);
@@ -431,7 +504,9 @@ export default function PlanAnnotator({ plan, annotations, onChange, height = 48
   return (
     <div ref={rootRef}
       onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}>
+      onMouseLeave={() => setHovered(false)}
+      style={vollbild ? { position: "fixed", inset: 0, zIndex: 1000, background: "#15191EE6", padding: 14, display: "flex", flexDirection: "column" } : undefined}>
+      <div style={vollbild ? { background: WH, borderRadius: 10, padding: "12px 14px", display: "flex", flexDirection: "column", flex: 1, minHeight: 0, width: "100%", maxWidth: 1720, margin: "0 auto", boxShadow: "0 24px 70px rgba(0,0,0,.45)" } : undefined}>
       {/* Mode toolbar */}
       <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
         {Object.keys(MODE_LABELS).map(m => (
@@ -490,6 +565,15 @@ export default function PlanAnnotator({ plan, annotations, onChange, height = 48
             border: `1px solid ${BD}`, borderRadius: 6, cursor: "pointer",
             background: WH, color: GY,
           }}>↺ Reset</button>
+        <button onClick={() => { setVollbild(v => !v); setZoom(1); }}
+          title={vollbild ? "Vollbild beenden (Esc)" : "Plan bildschirmfüllend bearbeiten"}
+          style={{
+            padding: "6px 12px", fontSize: 11, fontWeight: 700,
+            border: `1.5px solid ${vollbild ? R : BD}`, borderRadius: 6, cursor: "pointer",
+            background: vollbild ? `${R}12` : WH, color: vollbild ? R : DK,
+          }}>
+          {vollbild ? "✕ Vollbild beenden" : "⛶ Vollbild"}
+        </button>
       </div>
 
       {/* Zoom toolbar */}
@@ -566,7 +650,9 @@ export default function PlanAnnotator({ plan, annotations, onChange, height = 48
       {/* Plan + overlay (scrollable, pannable) */}
       <div ref={wrapRef}
         style={{
-          width: "100%", height: height + 40, overflow: "auto",
+          width: "100%", height: vollbild ? "auto" : height + 40,
+          flex: vollbild ? "1 1 0" : undefined, minHeight: vollbild ? 160 : undefined,
+          overflow: "auto",
           background: "#2A2A2A", borderRadius: 6, padding: 6, position: "relative",
           cursor: pan ? "grabbing" : "default",
         }}>
@@ -598,7 +684,8 @@ export default function PlanAnnotator({ plan, annotations, onChange, height = 48
                   - NARROW       → compact "🌿N" badge in corner, dim rotated
                                    vertically down the left edge
                   - TINY         → just the badge */}
-            {ann.facades.map((r, i) => {
+            {ann.facades.map((r0, i) => {
+              const r = (edit && edit.kind === "facade" && edit.id === r0.id && editRect) ? { ...r0, ...editRect } : r0;
               const sel = isSelected("facade", r.id);
               const dim = pxPerM ? `${fmtM(r.w)} × ${fmtM(r.h)}` : null;
               const fs = Math.max(11, plan.w / 80);
@@ -671,7 +758,8 @@ export default function PlanAnnotator({ plan, annotations, onChange, height = 48
             {[
               { list: ann.windows, kind: "window", color: COL_WINDOW, letter: "F" },
               { list: ann.doors,   kind: "door",   color: COL_DOOR,   letter: "T" },
-            ].flatMap(({ list, kind, color, letter }) => list.map((r) => {
+            ].flatMap(({ list, kind, color, letter }) => list.map((r0) => {
+              const r = (edit && edit.kind === kind && edit.id === r0.id && editRect) ? { ...r0, ...editRect } : r0;
               const sel = isSelected(kind, r.id);
               const dim = pxPerM ? `${fmtM(r.w)} × ${fmtM(r.h)}` : null;
               const fs = Math.max(9, plan.w / 100);
@@ -772,6 +860,25 @@ export default function PlanAnnotator({ plan, annotations, onChange, height = 48
                 strokeWidth={0.8} vectorEffect="non-scaling-stroke"
                 strokeDasharray="3,2" pointerEvents="none" />
             )}
+            {/* Eckgriffe der ausgewählten Rechtecke (Auswählen-Modus): sichtbare
+                Anfasser zum Ändern der Größe */}
+            {mode === "select" && [...selectedKeys].map(k => {
+              const [kind, id] = k.split(":");
+              const r0 = findRect(kind, id);
+              if (!r0) return null;
+              const r = (edit && edit.kind === kind && edit.id === id && editRect) ? { ...r0, ...editRect } : r0;
+              const hs = 6 * screenPxToPlanPx;
+              const col = kind === "facade" ? COL_FACADE : kind === "window" ? COL_WINDOW : COL_DOOR;
+              return (
+                <g key={"griff-" + k} pointerEvents="none">
+                  {[[0, 0], [1, 0], [0, 1], [1, 1]].map(([cx, cy]) => (
+                    <rect key={cx + "-" + cy}
+                      x={r.x + cx * r.w - hs} y={r.y + cy * r.h - hs} width={2 * hs} height={2 * hs}
+                      fill={WH} stroke={col} strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+                  ))}
+                </g>
+              );
+            })}
             {/* Per-item × delete button (top-right corner of focused rect) */}
             {focusRect && focusItem && (
               <g transform={`translate(${focusRect.x + focusRect.w}, ${focusRect.y}) scale(${screenPxToPlanPx})`}>
@@ -796,7 +903,9 @@ export default function PlanAnnotator({ plan, annotations, onChange, height = 48
         <span style={{ fontSize: 9.5, color: GL }} title="Tastenkürzel (wirken, solange die Maus über dem Planbereich ist)">
           ⌨ <Kbd>V</Kbd> Ausw. · <Kbd>F</Kbd> Fläche · <Kbd>W</Kbd> Fenster · <Kbd>T</Kbd> Tür · <Kbd>S</Kbd> Maßstab · <Kbd>H</Kbd> Pan ·
           {" "}<Kbd>Entf</Kbd> · <Kbd>Strg+Z</Kbd>/<Kbd>Y</Kbd> · <Kbd>+</Kbd>/<Kbd>−</Kbd>/<Kbd>0</Kbd>/<Kbd>1</Kbd>
+          {vollbild && <> · <Kbd>Esc</Kbd> beendet Vollbild</>}
         </span>
+      </div>
       </div>
     </div>
   );
