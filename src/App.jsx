@@ -270,11 +270,6 @@ const KLEBSCHICHT_DICKEN=[
   {v:"5",l:"5 mm"},{v:"8",l:"8 mm"},{v:"10",l:"10 mm (Standard)"},
   {v:"15",l:"15 mm"},{v:"20",l:"20 mm"},{v:"25",l:"25 mm"},
 ];
-const GEOMETRIE_ARTEN=[
-  {v:"flaechig",l:"Flächige Begrünung (≤ 2 m breit)"},
-  {v:"schmal",  l:"Schmal flächig (≤ 1 m)"},
-  {v:"linear",  l:"Linear (≤ 0,7 m)"},
-];
 const FOLIAGE_MATURITY=[
   {v:"young",l:"Jung (1–3 Jahre)"},
   {v:"mature",l:"Etabliert (4–7 Jahre)"},
@@ -3302,7 +3297,6 @@ export default function App(){
       <Field label="Pflanze (deutsch)" value={d.pflanze_deutsch} onChange={setter("pflanze_deutsch")} half/>
       <Field label="Lastklasse" value={String(d.lastklasse||"3")} onChange={setter("lastklasse")} sel opts={LASTKLASSEN} half/>
       <Field label="ψ (Durchströmung)" value={d.psi} onChange={setter("psi")} half hint="Standard nach FLL Tab. 15"/>
-      <Field label="Geometrie/Begrünungsart" value={d.geometrie_art} onChange={setter("geometrie_art")} sel opts={[{v:"",l:"– bitte wählen –"},...GEOMETRIE_ARTEN]} full/>
     </div>
   </Sec>
 
