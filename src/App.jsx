@@ -989,82 +989,6 @@ function FacadeReportCard({d,facade,index,total,formCode,coverage,maturity}){
   </div>);
 }
 
-// Per-facade card for the MaterialSection — uses the technical RasterOverlay
-// (CAD anchors + Seilkreuze) rather than the foliage RealisticFacade.
-//
-// Layout: stacked vertically (plan on top, schematic below) so each gets the
-// FULL width and the Plan stays readable.  maxHeight props prevent narrow
-// facades from blowing up into multi-page-tall strips.
-// data-pdf-page makes the PDF exporter start a new page at this card.
-function FacadeRasterCard({d,facade,index,total}){
-  const fRaster=facade.seilfuehrung||d.seilfuehrung||"gitter";
-  const fSK=facade.seilkreuztyp||d.seilkreuztyp||"ohne";
-  const fStruk=facadeStruktur(facade,d);
-  const fLH=facade.lh||d.LH||"0.9";
-  const fLV=facade.lv||d.LV||"0.9";
-  const fLage1=facade.lage1??d.Lage1??"0";
-  const fW=facade.breite||"10";
-  const fH=facade.hoehe||"6";
-  const havePlan=!!(facade.plan&&facade.annotations&&(facade.annotations.facades||[]).length>0);
-  const stats=calcFacadeStats(facade,d);
-  const labelStyle={fontSize:10,fontWeight:700,color:GY,textTransform:"uppercase",letterSpacing:.4,marginBottom:6,display:"flex",justifyContent:"space-between"};
-  return(<div data-pdf-page="facade" style={{border:`1px solid ${BD}`,borderRadius:6,padding:14,marginBottom:14,background:"#FAFAF8",pageBreakInside:"avoid",breakInside:"avoid"}}>
-    <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:12,paddingBottom:8,borderBottom:`1px solid ${BD}`}}>
-      <div>
-        <span style={{fontWeight:800,fontSize:14,color:BK}}>
-          {total>1?<span style={{color:GL,fontWeight:600}}>Fassade {index+1} · </span>:null}
-          {facade.name||`Fassade ${index+1}`}
-        </span>
-        <span style={{fontSize:11,color:GY,marginLeft:8}}>· {fW} × {fH} m · LH {fLH} / LV {fLV}{(pf(fLage1)||0)>0?` · 1. Lage ${fm(pf(fLage1),2)} m`:""}</span>
-      </div>
-      <span style={{fontSize:10.5,color:GY,fontWeight:600}}>
-        {RASTER.find(r=>r.id===fRaster)?.l}
-        {fSK!=="ohne"&&<span style={{color:GL}}> + {SEILKREUZE.find(s=>s.id===fSK)?.l}</span>}
-      </span>
-    </div>
-    {havePlan&&<div style={{marginBottom:14}}>
-      <div style={labelStyle}>
-        <span>📐 Im Plan</span>
-        <span style={{fontWeight:500,color:GL,letterSpacing:0,textTransform:"none"}}>Anker + Kabel auf dem hochgeladenen Plan</span>
-      </div>
-      <div style={{display:"flex",justifyContent:"center"}}>
-        <RasterOverlay LH={fLH} LV={fLV} fW={fW} fH={fH} rasterType={fRaster}
-          lage1={fLage1} seilkreuztyp={fSK} nH={fStruk.nH} nV={fStruk.nV} size={820} maxHeight={620}
-          plan={facade.plan} annotations={facade.annotations}/>
-      </div>
-    </div>}
-    <div>
-      <div style={labelStyle}>
-        <span>▦ Schematische Rasterdarstellung</span>
-        <span style={{fontWeight:500,color:GL,letterSpacing:0,textTransform:"none"}}>Anker, Kabel{fSK!=="ohne"?" und Seilkreuze":""} im Detail</span>
-      </div>
-      <div style={{display:"flex",justifyContent:"center"}}>
-        <RasterOverlay LH={fLH} LV={fLV} fW={fW} fH={fH} rasterType={fRaster}
-          lage1={fLage1} seilkreuztyp={fSK} nH={fStruk.nH} nV={fStruk.nV} size={460} maxHeight={480} forceProcedural/>
-      </div>
-    </div>
-    {/* Enlarged detail crop — maximum spacings, clearly dimensioned */}
-    <div style={{marginTop:14}}>
-      <div style={labelStyle}>
-        <span>🔍 Detailausschnitt – Maximalabstände</span>
-        <span style={{fontWeight:500,color:GL,letterSpacing:0,textTransform:"none"}}>Vergrößerter Ausschnitt, maßgebliche Abstände bemaßt</span>
-      </div>
-      <div style={{display:"flex",justifyContent:"center"}}>
-        <DetailCrop LH={fLH} LV={fLV} rasterType={fRaster} seilkreuztyp={fSK} nH={fStruk.nH} nV={fStruk.nV} size={440}/>
-      </div>
-    </div>
-    {/* Per-facade material subtotal */}
-    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(110px,1fr))",gap:8,marginTop:12,paddingTop:10,borderTop:`1px solid ${BD}`,fontSize:11}}>
-      <div><span style={{color:GY,fontWeight:600,fontSize:9.5,textTransform:"uppercase",letterSpacing:.4,display:"block",marginBottom:1}}>Brutto</span><span style={{fontWeight:700,color:BK,fontSize:11.5}}>{fmtArea(stats.area_brutto)}</span></div>
-      {stats.area_excl>0&&<div><span style={{color:GY,fontWeight:600,fontSize:9.5,textTransform:"uppercase",letterSpacing:.4,display:"block",marginBottom:1}}>Aussparungen</span><span style={{fontWeight:700,color:AM,fontSize:11.5}}>− {fmtArea(stats.area_excl)}</span></div>}
-      <div><span style={{color:GY,fontWeight:600,fontSize:9.5,textTransform:"uppercase",letterSpacing:.4,display:"block",marginBottom:1}}>Netto</span><span style={{fontWeight:700,color:BK,fontSize:11.5}}>{fmtArea(stats.area)}</span></div>
-      <div><span style={{color:GY,fontWeight:600,fontSize:9.5,textTransform:"uppercase",letterSpacing:.4,display:"block",marginBottom:1}}>Iso-Bar ECO</span><span style={{fontWeight:700,color:R,fontSize:12}}>{fmtInt(stats.anker)} <span style={{fontSize:9.5,color:GY,fontWeight:600}}>Stk</span></span></div>
-      {stats.sk>0&&<div><span style={{color:GY,fontWeight:600,fontSize:9.5,textTransform:"uppercase",letterSpacing:.4,display:"block",marginBottom:1}}>Seilkreuze</span><span style={{fontWeight:700,color:"#1565C0",fontSize:12}}>{fmtInt(stats.sk)} <span style={{fontSize:9.5,color:GY,fontWeight:600}}>Stk</span></span></div>}
-      {(stats.sV+stats.sH+stats.sD)>0&&<div><span style={{color:GY,fontWeight:600,fontSize:9.5,textTransform:"uppercase",letterSpacing:.4,display:"block",marginBottom:1}}>Seil V+H+D</span><span style={{fontWeight:700,color:BK,fontSize:11.5}}>{fmtLen(stats.sV+stats.sH+stats.sD)}</span></div>}
-      {stats.fromPlan&&<div><span style={{color:GY,fontWeight:600,fontSize:9.5,textTransform:"uppercase",letterSpacing:.4,display:"block",marginBottom:1}}>Quelle</span><span style={{fontWeight:700,color:R,fontSize:11}}>📐 Plan</span></div>}
-    </div>
-  </div>);
-}
 
 function PreviewSection({d,maxNw,withRealistic=true}){
   const f0=(d.fassaden||[])[0]||{};
@@ -1437,9 +1361,7 @@ function MaterialSection({d,setD}){
   const fassaden=d.fassaden||[{name:"Fassade 1",breite:d.fassadenlaenge||"10",hoehe:d.fassadenhoehe||"6"}];
   const glh=pf(d.LH)||.9,glv=pf(d.LV)||.9;
   const f0=fassaden[0]||{};
-  // matRaster/matSK/etc were only used by the single-facade preview that
-  // has been replaced with the per-facade FacadeRasterCard loop below.
-  const matSK=f0.seilkreuztyp||d.seilkreuztyp||"ohne";   // still needed for the Stückliste's skInfo lookup
+  const matSK=f0.seilkreuztyp||d.seilkreuztyp||"ohne";   // für den skInfo-Lookup der Stückliste
   // Per-facade stats — plan-aware where annotations exist, simple formula otherwise.
   const facadeStats = fassaden.map(f => calcFacadeStats(f, d));
   const anyV = facadeStats.some(s => s.sV > 0);
@@ -1576,13 +1498,11 @@ function MaterialSection({d,setD}){
         </div>
       </div>
 
-      {fassaden.length>1&&<div style={{padding:"8px 12px",background:"#E8F5E9",border:"1px solid #2E7D3240",borderRadius:5,fontSize:10.5,color:"#1B5E20"}}>
-        Detaillierte Rasterdarstellung mit Plan und Schematik je Fassade auf den folgenden Seiten (eine Seite pro Fassade).
-      </div>}
     </div>
 
-    {/* PER-FACADE PAGES — each card has data-pdf-page="facade" */}
-    {fassaden.map((f,i)=><FacadeRasterCard key={i} d={d} facade={f} index={i} total={fassaden.length}/>)}
+    {/* Bewusst KEINE Raster-/Planvorschau je Fassade: die Materialermittlung
+        listet nur Mengen und Material — Darstellungen stehen im Vorbemessungs-
+        Report (Vorschau) und in den Anlagen. */}
 
     {showBreakdown&&<div data-pdf-page="breakdown" style={{borderTop:`6px solid ${BG}`,padding:"16px 24px"}}>
       <div style={{border:`1px solid ${BD}`,borderRadius:4,padding:12,marginBottom:14}}>
