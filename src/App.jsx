@@ -3385,8 +3385,26 @@ export default function App(){
               <input value={f.hoehe} onChange={e=>updateF("hoehe",e.target.value)}
                 style={{flex:1,border:"none",padding:"7px 8px",fontSize:12,fontWeight:600,background:"transparent",outline:"none",fontFamily:"inherit",minWidth:0}}/>
               <span style={{padding:"0 8px",fontSize:10,color:GL,alignSelf:"center"}}>m</span></div></div>
-          {(d.fassaden||[]).length>1&&<button onClick={()=>{const fa=[...(d.fassaden||[])];fa.splice(i,1);setD(x=>({...x,fassaden:fa}));}}
-            style={{padding:"7px 10px",fontSize:12,border:`1px solid ${BD}`,borderRadius:5,background:WH,cursor:"pointer",color:R,fontWeight:700}}>✕</button>}
+          {/* Fassade löschen: immer möglich — die letzte wird durch eine leere
+              ersetzt. Mit Plan/Markierungen erst nach Rückfrage (destruktiv). */}
+          <button onClick={()=>{
+              const hatInhalt=!!f.plan
+                ||(f.annotations?.facades?.length>0)
+                ||(f.annotations?.windows?.length>0)
+                ||(f.annotations?.doors?.length>0);
+              if(hatInhalt&&!window.confirm(`„${f.name||`Fassade ${i+1}`}" enthält einen Plan bzw. Markierungen. Fassade wirklich löschen?`))return;
+              setD(x=>{
+                const fa=[...(x.fassaden||[])];
+                fa.splice(i,1);
+                if(fa.length===0)fa.push({name:"Fassade 1",breite:"",hoehe:"",
+                  seilfuehrung:x.seilfuehrung||"gitter",seilkreuztyp:x.seilkreuztyp||"ohne"});
+                return {...x,fassaden:fa};
+              });
+            }}
+            title={(d.fassaden||[]).length>1?"Diese Fassade löschen":"Fassade leeren (letzte Fassade wird ersetzt)"}
+            style={{padding:"7px 12px",fontSize:11,border:`1px solid ${R}55`,borderRadius:5,background:WH,cursor:"pointer",color:R,fontWeight:700,whiteSpace:"nowrap"}}>
+            ✕ Löschen
+          </button>
         </div>
 
         <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:6}}>
