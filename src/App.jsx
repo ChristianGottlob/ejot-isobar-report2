@@ -1161,7 +1161,7 @@ function SystemIso({ d }){
   const putzMm=pf(d.vm_putz)||10;
   const isMW=d.vm_untergrund?d.vm_untergrund==="mauerwerk":!/beton/i.test(String(d.verankerungsgrund||"stein"));
   const S=0.24;
-  const T={wand:26,tol:Math.max(3,Math.min(18,tolMm*S)),daemm:Math.max(18,Math.min(70,wdvsMm*S)),putz:Math.max(3,Math.min(9,putzMm*S)),luft:34};
+  const T={wand:26,tol:Math.max(3,Math.min(18,tolMm*S)),daemm:Math.max(18,Math.min(70,wdvsMm*S)),putz:Math.max(3,Math.min(9,putzMm*S)),luft:48};
   const G=12;                                     // Explosionsspalt zwischen den Schichten
   const zTolIn=G, zTolOut=G+T.tol;
   const zDaeIn=zTolOut+G, zDaeOut=zDaeIn+T.daemm;
@@ -1204,17 +1204,30 @@ function SystemIso({ d }){
   // auf der Achse gezeichnet (gedrehte Rechtecke wirkten wie schwebende Balken).
   const Kopf=({ax,ay})=>{
     const at=(dz)=>{const c=P(ax,ay,zPutzOut+dz);return c;};
-    const c0=at(0), cW=at(2.6), cLoch=at(zSeil-zPutzOut), cEnde=at(zSeil-zPutzOut+7.5);
+    const c0=at(0), cW=at(2.6), cLoch=at(zSeil-zPutzOut), cEnde=at(zSeil-zPutzOut+8);
     return(<g>
       <ellipse cx={c0[0]+5} cy={c0[1]+7} rx="10" ry="4.5" fill="rgba(20,25,30,.13)"/>
       <ellipse cx={c0[0]} cy={c0[1]} rx="7.4" ry="6.8" fill="url(#siDarkR)" stroke="rgba(0,0,0,.4)" strokeWidth=".5"/>
       <ellipse cx={cW[0]} cy={cW[1]} rx="5.2" ry="4.8" fill="url(#siSteelR)" stroke="rgba(20,25,30,.25)" strokeWidth=".5"/>
-      <Teil ax={ax} ay={ay} z0={zPutzOut+3} z1={zSeil-15} dia={4.6} fill="url(#siSteel)" rx={2.3}/>
-      <Teil ax={ax} ay={ay} z0={zPutzOut+3} z1={zSeil-15} dia={4.6} fill="url(#siThread)" rx={2.3}/>
-      <Teil ax={ax} ay={ay} z0={zSeil-15} z1={zSeil-7} dia={12} fill="url(#siSteel)" rx={1.5}/>
-      <Teil ax={ax} ay={ay} z0={zSeil-7} z1={zSeil+7.5} dia={9.5} fill="url(#siSteel)" rx={4.5}/>
+      {/* Gewindestift */}
+      <Teil ax={ax} ay={ay} z0={zPutzOut+3} z1={zSeil-26} dia={4.2} fill="url(#siSteel)" rx={2.1}/>
+      <Teil ax={ax} ay={ay} z0={zPutzOut+3} z1={zSeil-26} dia={4.2} fill="url(#siThread)" rx={2.1}/>
+      {/* Sechskant: kompakter Block mit harten Facetten */}
+      <Teil ax={ax} ay={ay} z0={zSeil-26} z1={zSeil-16} dia={13} fill="url(#siHex)" rx={1}
+        kinder={<g stroke="rgba(20,25,30,.25)" strokeWidth=".5">
+          <line x1="0" y1="-3.25" x2={(10*sclZ).toFixed(1)} y2="-3.25"/>
+          <line x1="0" y1="3.25" x2={(10*sclZ).toFixed(1)} y2="3.25"/>
+        </g>}/>
+      {/* Zylinder: laenger als der Sechskant, Querbohrung nahe der Stirn */}
+      <Teil ax={ax} ay={ay} z0={zSeil-16} z1={zSeil+8} dia={9.5} fill="url(#siSteel)" rx={3.5}
+        kinder={<line x1="1" y1="-3.4" x2={(23*sclZ).toFixed(1)} y2="-3.4" stroke="rgba(255,255,255,.55)" strokeWidth=".8"/>}/>
+      {/* Querbohrung mit Fase, exakt am Seilkreuz */}
+      <circle cx={cLoch[0]} cy={cLoch[1]} r="3" fill="none" stroke="rgba(20,25,30,.3)" strokeWidth=".8"/>
       <circle cx={cLoch[0]} cy={cLoch[1]} r="2.3" fill="#26292D"/>
-      <ellipse cx={cEnde[0]} cy={cEnde[1]} rx="4.9" ry="4.5" fill="url(#siKopfR)" stroke="rgba(20,25,30,.3)" strokeWidth=".5"/>
+      <circle cx={cLoch[0]-0.7} cy={cLoch[1]-0.8} r="0.9" fill="#5A6067"/>
+      {/* Fase + Stirnflaeche mit Innensechskant-Senkung */}
+      <ellipse cx={cEnde[0]-1.2} cy={cEnde[1]+0.4} rx="5" ry="4.7" fill="#E8EBEE"/>
+      <ellipse cx={cEnde[0]} cy={cEnde[1]} rx="4.9" ry="4.6" fill="url(#siKopfR)" stroke="rgba(20,25,30,.3)" strokeWidth=".5"/>
     </g>);
   };
   // Nummerierte Positionsmarken + Legende
@@ -1253,6 +1266,12 @@ function SystemIso({ d }){
         <radialGradient id="siSteelR" cx="35%" cy="30%" r="80%">
           <stop offset="0" stopColor="#F2F4F6"/><stop offset=".55" stopColor="#C9CED3"/><stop offset="1" stopColor="#82898F"/>
         </radialGradient>
+        <linearGradient id="siHex" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#A9AFB6"/><stop offset=".25" stopColor="#A9AFB6"/>
+          <stop offset=".25" stopColor="#E3E7EA"/><stop offset=".5" stopColor="#E3E7EA"/>
+          <stop offset=".5" stopColor="#969DA4"/><stop offset=".75" stopColor="#969DA4"/>
+          <stop offset=".75" stopColor="#C9CED3"/><stop offset="1" stopColor="#C9CED3"/>
+        </linearGradient>
         <radialGradient id="siKopfR" cx="42%" cy="38%" r="75%">
           <stop offset="0" stopColor="#26292D"/><stop offset=".3" stopColor="#26292D"/>
           <stop offset=".42" stopColor="#4E545B"/><stop offset=".62" stopColor="#D7DBDF"/>
