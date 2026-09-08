@@ -2648,39 +2648,63 @@ export default function App(){
       const mmPerPx=contentW/rootWpx;
       const pageHpx=pageContentH/mmPerPx;
 
-      // WICHTIG: jede data-pdf-page-Gruppe wird EINZELN gerendert.  Eine
-      // Gesamtaufnahme der Sektion sprengte bei großen Projekten (z. B.
-      // 27 Fassaden-Seiten mit Plänen) die Canvas-Höhengrenze des Browsers
-      // — der Export brach dann kommentarlos ab.  Ohne Gruppen (Statik)
-      // fällt der Export auf die Gesamtaufnahme zurück.
+      // Jede data-pdf-page-Gruppe wird EINZELN gerendert (eine Gesamtaufnahme
+      // sprengte bei großen Projekten die Canvas-Grenze des Browsers).  Die
+      // Gruppen werden dabei GEPACKT: passt eine Gruppe komplett in den
+      // Restplatz des aktuellen Blatts, wird sie darunter gesetzt statt ein
+      // neues Blatt zu beginnen — das vermeidet halbleere Seiten, ohne je
+      // eine Tabelle/Gruppe mitten im Inhalt zu zerschneiden.  Nur Gruppen,
+      // die höher als ein Blatt sind, werden blockbewusst geschnitten und
+      // beginnen auf einem frischen Blatt; hinter ihrem letzten Teil wird
+      // weitergepackt.  Ohne Gruppen (Statik) gilt die Gesamtaufnahme.
       const gruppen=[...root.querySelectorAll("[data-pdf-page]")];
       const teile=gruppen.length?gruppen:[root];
-      let erstesBlatt=true;
+      const GAP=4;                               // mm Abstand zwischen Gruppen auf einem Blatt
+      let yMm=margin;                            // Schreibposition auf dem aktuellen Blatt
+      let blattLeer=true;
+      const neuesBlatt=()=>{pdf.addPage();yMm=margin;blattLeer=true;};
       for(const el of teile){
-        // Schnittpunkte an Blockgrenzen (nie mitten durch Zeile/Grafik).
-        const cuts=pdfPageCuts(el,pageHpx);
-        const canvas=await snapdom.toCanvas(el,{scale:SCALE,backgroundColor:"#FFFFFF"});
-        const elWpx=el.getBoundingClientRect().width||rootWpx;
-        const pxScale=canvas.width/elWpx;         // Canvas-Pixel je DOM-Pixel (≈ SCALE)
-        for(let i=0;i<cuts.length-1;i++){
-          const y0=cuts[i],y1=cuts[i+1];
-          const hPx=y1-y0;
-          if(hPx<=1) continue;
-          if(!erstesBlatt) pdf.addPage();
-          erstesBlatt=false;
-          const sy=Math.round(y0*pxScale);
-          const sh=Math.min(Math.round(hPx*pxScale),canvas.height-sy);
-          if(sh<=0) continue;
-          const tmp=document.createElement("canvas");
-          tmp.width=canvas.width;tmp.height=sh;
-          const ctx=tmp.getContext("2d");
-          ctx.fillStyle="#FFFFFF";ctx.fillRect(0,0,tmp.width,tmp.height);
-          ctx.drawImage(canvas,0,sy,canvas.width,sh,0,0,canvas.width,sh);
-          pdf.addImage(tmp,"PNG",margin,margin,contentW,(sh/pxScale)*mmPerPx,"","FAST");
-          tmp.width=tmp.height=0;                 // Slice-Leinwand freigeben
-          await new Promise(r=>setTimeout(r,0));  // Event-Loop atmen lassen
+        const elRect=el.getBoundingClientRect();
+        if(elRect.height<1) continue;
+        const elWpx=elRect.width||rootWpx;
+        const elHmm=elRect.height*mmPerPx;
+        if(elHmm<=pageContentH+0.5){
+          // Passt komplett auf ein Blatt → als Ganzes setzen (nie schneiden)
+          if(!blattLeer&&elHmm>pdfH-margin-yMm) neuesBlatt();
+          const canvas=await snapdom.toCanvas(el,{scale:SCALE,backgroundColor:"#FFFFFF"});
+          const pxScale=canvas.width/elWpx;
+          const hMm=(canvas.height/pxScale)*mmPerPx;
+          pdf.addImage(canvas,"PNG",margin,yMm,contentW,hMm,"","FAST");
+          canvas.width=canvas.height=0;
+          yMm+=hMm+GAP;blattLeer=false;
+        }else{
+          // Höher als ein Blatt → frisches Blatt + Schnitte an Blockgrenzen
+          if(!blattLeer) neuesBlatt();
+          const cuts=pdfPageCuts(el,pageHpx);
+          const canvas=await snapdom.toCanvas(el,{scale:SCALE,backgroundColor:"#FFFFFF"});
+          const pxScale=canvas.width/elWpx;
+          for(let i=0;i<cuts.length-1;i++){
+            const y0=cuts[i],y1=cuts[i+1];
+            const hPx=y1-y0;
+            if(hPx<=1) continue;
+            if(!blattLeer) neuesBlatt();
+            const sy=Math.round(y0*pxScale);
+            const sh=Math.min(Math.round(hPx*pxScale),canvas.height-sy);
+            if(sh<=0) continue;
+            const tmp=document.createElement("canvas");
+            tmp.width=canvas.width;tmp.height=sh;
+            const ctx=tmp.getContext("2d");
+            ctx.fillStyle="#FFFFFF";ctx.fillRect(0,0,tmp.width,tmp.height);
+            ctx.drawImage(canvas,0,sy,canvas.width,sh,0,0,canvas.width,sh);
+            const hMm=(sh/pxScale)*mmPerPx;
+            pdf.addImage(tmp,"PNG",margin,yMm,contentW,hMm,"","FAST");
+            tmp.width=tmp.height=0;               // Slice-Leinwand freigeben
+            yMm+=hMm;blattLeer=false;             // hinter dem letzten Teil weiterpacken
+            await new Promise(r=>setTimeout(r,0));// Event-Loop atmen lassen
+          }
+          canvas.width=canvas.height=0;           // Capture-Leinwand freigeben
+          yMm+=GAP;
         }
-        canvas.width=canvas.height=0;             // Capture-Leinwand freigeben
         await new Promise(r=>setTimeout(r,0));
       }
 
