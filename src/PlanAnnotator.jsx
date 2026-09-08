@@ -412,6 +412,41 @@ export default function PlanAnnotator({ plan, annotations, onChange, height = 48
     });
   };
 
+  // ── Einzelauswahl: Breite/Höhe numerisch in Metern bearbeiten ──
+  const selEinzel = (mode === "select" && selectedKeys.size === 1) ? (() => {
+    const k = [...selectedKeys][0];
+    const [kind, id] = k.split(":");
+    const r = findRect(kind, id);
+    return r ? { kind, id, r, key: k } : null;
+  })() : null;
+  const [massEdit, setMassEdit] = useState({ key: null, b: "", h: "" });
+  useEffect(() => {
+    if (!selEinzel || !pxPerM) { setMassEdit(m => (m.key === null ? m : { key: null, b: "", h: "" })); return; }
+    setMassEdit({
+      key: selEinzel.key,
+      b: (selEinzel.r.w / pxPerM).toFixed(2).replace(".", ","),
+      h: (selEinzel.r.h / pxPerM).toFixed(2).replace(".", ","),
+    });
+    // Aktualisiert bei Auswahlwechsel und nach Drag-Resize; während des
+    // Tippens ändert sich das Rechteck nicht → kein Überschreiben.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selEinzel?.key, selEinzel?.r.w, selEinzel?.r.h, pxPerM]);
+  const masseAnwenden = useCallback(() => {
+    if (!selEinzel || !pxPerM || !plan) return;
+    const bM = parseNum(massEdit.b), hM = parseNum(massEdit.h);
+    if (!(bM > 0) || !(hM > 0)) return;
+    const r = selEinzel.r;
+    const w = Math.max(8, Math.min(plan.w - r.x, bM * pxPerM));
+    const h = Math.max(8, Math.min(plan.h - r.y, hM * pxPerM));
+    if (Math.abs(w - r.w) < 0.5 && Math.abs(h - r.h) < 0.5) return;
+    const upd = (list) => list.map(it => it.id === selEinzel.id ? { ...it, w, h } : it);
+    const next = { ...ann };
+    if (selEinzel.kind === "facade") next.facades = upd(ann.facades);
+    else if (selEinzel.kind === "window") next.windows = upd(ann.windows);
+    else next.doors = upd(ann.doors);
+    commit(next);
+  }, [selEinzel, pxPerM, plan, massEdit, ann, commit]);
+
   // ── Zoom buttons ──
   const zoomBy = (factor) => {
     const cont = wrapRef.current;
@@ -596,6 +631,40 @@ export default function PlanAnnotator({ plan, annotations, onChange, height = 48
       <div style={{ fontSize: 11, color: GY, marginBottom: 8, padding: "6px 10px", background: BG, borderRadius: 5 }}>
         <strong style={{ color: DK }}>{MODE_LABELS[mode]}:</strong> {MODE_HINTS[mode]}
       </div>
+
+      {/* Maß-Leiste der Einzelauswahl: Breite/Höhe in Metern setzen —
+          verankert an der linken oberen Ecke des Rechtecks */}
+      {selEinzel && (() => {
+        const kindL = selEinzel.kind === "facade" ? "Begrünungsfläche" : selEinzel.kind === "window" ? "Fenster" : "Tür";
+        const kindC = selEinzel.kind === "facade" ? COL_FACADE : selEinzel.kind === "window" ? COL_WINDOW : COL_DOOR;
+        const inp = (feld) => (
+          <div style={{ display: "flex", border: `1px solid ${BD}`, borderRadius: 5, background: WH }}>
+            <input value={massEdit[feld]}
+              onChange={e => setMassEdit(m => ({ ...m, [feld]: e.target.value }))}
+              onKeyDown={e => { if (e.key === "Enter") masseAnwenden(); }}
+              style={{ width: 64, border: "none", padding: "5px 8px", fontSize: 12.5, fontWeight: 700, outline: "none", fontFamily: "inherit", color: BK }} />
+            <span style={{ padding: "0 8px", fontSize: 10.5, color: GY, alignSelf: "center" }}>m</span>
+          </div>
+        );
+        return (
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "8px 12px", marginBottom: 8,
+            background: WH, border: `1.5px solid ${kindC}`, borderRadius: 6 }}>
+            <span style={{ fontSize: 11.5, fontWeight: 700, color: kindC }}>▣ {kindL} ausgewählt</span>
+            {pxPerM ? (<>
+              <span style={{ fontSize: 11, color: GY }}>Breite</span>{inp("b")}
+              <span style={{ fontSize: 11, color: GY }}>× Höhe</span>{inp("h")}
+              <button onClick={masseAnwenden}
+                style={{ padding: "6px 12px", fontSize: 11, fontWeight: 700, border: `1px solid ${kindC}`, borderRadius: 5,
+                  background: kindC, color: WH, cursor: "pointer" }}>Übernehmen</button>
+              <span style={{ fontSize: 10, color: GL }}>Enter übernimmt · linke obere Ecke bleibt fest · Ecken ziehen geht weiterhin</span>
+            </>) : (
+              <span style={{ fontSize: 11, color: GY }}>
+                Für Maße in Metern zuerst den <strong>Maßstab</strong> kalibrieren (oder Fassaden-Breite × Höhe tippen).
+              </span>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Scale-status banner */}
       <div style={{
