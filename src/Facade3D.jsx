@@ -14,7 +14,7 @@
 // ─────────────────────────────────────────────────────────────────
 import { Fragment, useEffect, useRef, useState } from "react";
 import { parseNum } from "./num.js";
-import { szeneSVGInner } from "./modellSzene.js";
+import { szeneSVGInner, WAND_MATERIALIEN, wandMaterialVonProjekt } from "./modellSzene.js";
 
 const pf = parseNum;
 const MONO = "'IBM Plex Mono',ui-monospace,Consolas,monospace";
@@ -131,7 +131,8 @@ export default function Facade3D({ d, setD }) {
   const lh = pf(f0.lh) || pf(d.LH) || 0.9;
   const lv = pf(f0.lv) || pf(d.LV) || 0.9;
   const projFuehrung = f0.seilfuehrung || d.seilfuehrung || "gitter";
-  const isMW = d.vm_untergrund ? d.vm_untergrund === "mauerwerk" : !/beton/i.test(String(d.verankerungsgrund || "stein"));
+  const projWand = wandMaterialVonProjekt(d);
+  const wand = WAND_MATERIALIEN[d.modell_wand] ? d.modell_wand : projWand;
   const oberflaeche = KLINKER[d.modell_oberflaeche] ? d.modell_oberflaeche : "putz";
   const produkt = String(d.produkt || "").replace(/\D/g, "");
 
@@ -160,21 +161,21 @@ export default function Facade3D({ d, setD }) {
 
   // ── Ansicht exportieren: Shots fuer Anlage D im Report + PNG-Download ──
   const shots = Array.isArray(d.modell_shots) ? d.modell_shots : [];
-  const shotJetzt = () => ({ rx: Math.round(rot.x), ry: Math.round(rot.y % 360), explode: +explode.toFixed(2), fuehrung, oberflaeche });
+  const shotJetzt = () => ({ rx: Math.round(rot.x), ry: Math.round(rot.y % 360), explode: +explode.toFixed(2), fuehrung, oberflaeche, wand });
   // Chip-Klick: gespeicherte Ansicht im Modell zeigen (Winkel, Explosion, Seile, Oberflaeche)
   const shotZeigen = (sh) => {
     idle.current = false;
     setRot({ x: sh.rx ?? -16, y: sh.ry ?? -32 });
     setExplode(sh.explode || 0);
     if (sh.fuehrung) setFWahl(sh.fuehrung);
-    if (setD) setD((x) => ({ ...x, modell_oberflaeche: sh.oberflaeche || "putz" }));
+    if (setD) setD((x) => ({ ...x, modell_oberflaeche: sh.oberflaeche || "putz", modell_wand: sh.wand || null }));
   };
   const shotAdd = () => setD && setD((x) => ({ ...x, modell_shots: [...(Array.isArray(x.modell_shots) ? x.modell_shots : []).slice(-3), shotJetzt()] }));
   const shotDel = (i) => setD && setD((x) => ({ ...x, modell_shots: (x.modell_shots || []).filter((_, j) => j !== i) }));
   const shotStandard = () => setD && setD((x) => ({ ...x, modell_shots: [
-    { rx: -16, ry: -32, explode: 0, fuehrung, oberflaeche },
-    { rx: -2, ry: 0, explode: 0, fuehrung, oberflaeche },
-    { rx: -14, ry: -28, explode: 0.85, fuehrung, oberflaeche },
+    { rx: -16, ry: -32, explode: 0, fuehrung, oberflaeche, wand },
+    { rx: -2, ry: 0, explode: 0, fuehrung, oberflaeche, wand },
+    { rx: -14, ry: -28, explode: 0.85, fuehrung, oberflaeche, wand },
   ] }));
   const pngDownload = () => {
     const { inner, vb } = szeneSVGInner(d, shotJetzt());
@@ -240,9 +241,15 @@ export default function Facade3D({ d, setD }) {
   const hatH = fuehrung === "gitter" || fuehrung === "horizontal";
   const hatD = fuehrung === "diagonal";
 
-  const wandFarbe = isMW
-    ? "repeating-linear-gradient(180deg,#C3897B 0 14px,#EDE6DE 14px 16px), #C3897B"
-    : "radial-gradient(rgba(20,25,30,.08) 1px, transparent 1.4px) 0 0/9px 9px, #B8B4AD";
+  // Schematische Texturen je Verankerungsgrund
+  const WAND_CSS = {
+    beton:         "radial-gradient(rgba(20,25,30,.08) 1px, transparent 1.4px) 0 0/9px 9px, #B8B4AD",
+    ziegel:        "repeating-linear-gradient(180deg,#C3897B 0 14px,#EDE6DE 14px 16px), #C3897B",
+    kalksandstein: "repeating-linear-gradient(180deg,#E3E1DB 0 18px,#C9C7C0 18px 20px), #E3E1DB",
+    leichtbeton:   "radial-gradient(rgba(20,25,30,.10) 1.2px, transparent 1.6px) 0 0/7px 7px, repeating-linear-gradient(180deg,#B7B2A6 0 18px,#D3CFC5 18px 20px), #B7B2A6",
+    porenbeton:    "repeating-linear-gradient(180deg,#F0EDE4 0 24px,#D9D5C9 24px 26px), #F0EDE4",
+  };
+  const wandFarbe = WAND_CSS[wand];
 
   const mm = (v) => (v ? `${v} mm` : "–");
   const btn = { padding: "5px 10px", fontSize: 10.5, fontWeight: 600, border: "1px solid #3A424B", borderRadius: 5, background: "transparent", color: "#C9CFD6", cursor: "pointer" };
@@ -307,10 +314,10 @@ export default function Facade3D({ d, setD }) {
           {SCHICHT_INFO.map((s) => (
             <div key={s.key} onMouseEnter={() => setHi(s.key)} onMouseLeave={() => setHi(null)}
               style={{ display: "flex", alignItems: "center", gap: 9, padding: "5px 7px", borderRadius: 5, cursor: "default", background: hi === s.key ? "rgba(200,16,46,.14)" : "transparent" }}>
-              <span style={{ width: 11, height: 11, borderRadius: 2, background: s.key === "putz" && oberflaeche !== "putz" ? KLINKER[oberflaeche].chip : s.farbe, boxShadow: "inset 0 0 0 1px rgba(0,0,0,.25)" }} />
+              <span style={{ width: 11, height: 11, borderRadius: 2, background: s.key === "putz" && oberflaeche !== "putz" ? KLINKER[oberflaeche].chip : s.key === "wand" ? WAND_MATERIALIEN[wand].flat : s.farbe, boxShadow: "inset 0 0 0 1px rgba(0,0,0,.25)" }} />
               <span style={{ flex: 1, fontSize: 11.5 }}>{s.key === "putz" && oberflaeche !== "putz" ? KLINKER[oberflaeche].l : s.l}</span>
               <span style={{ fontFamily: MONO, fontSize: 10.5, color: "#B7BEC6" }}>
-                {s.key === "wand" ? (isMW ? "Mauerwerk" : "Beton")
+                {s.key === "wand" ? WAND_MATERIALIEN[wand].l
                   : s.key === "tol" ? mm(tolMm)
                   : s.key === "daemm" ? mm(wdvsMm)
                   : s.key === "putz" ? mm(putzMm)
@@ -333,6 +340,25 @@ export default function Facade3D({ d, setD }) {
           </div>
           {fWahl && fWahl !== projFuehrung && <div style={{ fontSize: 9, color: "#8B939C", marginTop: 4 }}>
             Nur Ansicht — im Projekt eingestellt: {projFuehrung}.
+          </div>}
+        </div>
+
+        <div>
+          <div style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: 1.2, color: "#8B939C", marginBottom: 5 }}>VERANKERUNGSGRUND</div>
+          <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+            {Object.entries(WAND_MATERIALIEN).map(([id, m]) => {
+              const akt = wand === id;
+              return (<button key={id} onClick={() => setD && setD((x) => ({ ...x, modell_wand: id }))}
+                title={`Wand schematisch als ${m.l} darstellen`}
+                style={{ ...btn, padding: "4px 8px", display: "inline-flex", alignItems: "center", gap: 5,
+                  borderColor: akt ? "#C8102E" : "#3A424B", background: akt ? "rgba(200,16,46,.18)" : "transparent",
+                  color: akt ? "#FFB3BF" : "#C9CFD6" }}>
+                <span style={{ width: 9, height: 9, borderRadius: 2, background: m.flat, boxShadow: "inset 0 0 0 1px rgba(0,0,0,.3)" }}/>{m.l}
+              </button>);
+            })}
+          </div>
+          {wand !== projWand && <div style={{ fontSize: 9, color: "#8B939C", marginTop: 4 }}>
+            Nur Ansicht — im Projekt eingestellt: {WAND_MATERIALIEN[projWand].l}.
           </div>}
         </div>
 

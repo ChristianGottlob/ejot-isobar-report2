@@ -17,6 +17,28 @@ const F = {
   tol: "#C9A86A", daemm: "#EDE5D2", putz: "#F4F1EA",
   rod: "#EFE8D5", dicht: "#26282B", stahl: "#C9CED3", seil: "#79828B",
 };
+// Verankerungsgrund → schematisches Wandmaterial.  Abgeleitet aus der
+// Vorbemessung (vm_untergrund/vm_steinart) bzw. dem Verankerungsgrund des
+// PDF-Imports; im 3D-Tab zusätzlich per Hand umschaltbar (d.modell_wand).
+export const WAND_MATERIALIEN = {
+  beton:         { l: "Beton",         flat: "#B8B4AD", top: "#C6C2BA", side: "#9A958D" },
+  ziegel:        { l: "Ziegel",        flat: "#C3897B", top: "#D5A79A", side: "#A87A6E" },
+  kalksandstein: { l: "Kalksandstein", flat: "#E0DED8", top: "#ECEAE5", side: "#BDBBB4" },
+  leichtbeton:   { l: "Leichtbeton",   flat: "#B7B2A6", top: "#C9C4B9", side: "#98937F" },
+  porenbeton:    { l: "Porenbeton",    flat: "#EFECE2", top: "#F7F5EE", side: "#CBC7BB" },
+};
+export function wandMaterialVonProjekt(d) {
+  const grund = d?.vm_untergrund === "beton" ? "beton"
+    : d?.vm_untergrund === "mauerwerk" ? String(d.vm_steinart || "ks_vollstein")
+    : String(d?.vm_steinart || d?.verankerungsgrund || "ks_vollstein");
+  if (/leicht|lbv|hbl/i.test(grund)) return "leichtbeton";
+  if (/poren|^pp$/i.test(grund)) return "porenbeton";
+  if (/beton/i.test(grund)) return "beton";
+  if (/ziegel|hlz/i.test(grund)) return "ziegel";
+  if (/ks|kalksand/i.test(grund)) return "kalksandstein";
+  return "kalksandstein";
+}
+
 // Aussenschicht-Varianten (Vorschau): Putz oder Klinker in drei Farbwelten
 export const OBERFLAECHEN = {
   putz: { l: "Putz", farbe: F.putz },
@@ -33,14 +55,14 @@ function shade(hex, f) {
 }
 
 // ── Szene: Liste aus Quads {q:[p×4], farbe} und Segmenten {s:[a,b], farbe, w} ──
-export function bauSzene(d, { fuehrung = "gitter", explode = 0, oberflaeche = "putz" } = {}) {
+export function bauSzene(d, { fuehrung = "gitter", explode = 0, oberflaeche = "putz", wand = null } = {}) {
   const wdvsMm = pf(d.vm_daemm) || pf(d.wdvs_dicke) || 0;
   const tolMm = pf(d.dicke_klebschicht) || 0;
   const putzMm = pf(d.vm_putz) || 0;
   const f0 = (d.fassaden || [])[0] || {};
   const lh = pf(f0.lh) || pf(d.LH) || 0.9;
   const lv = pf(f0.lv) || pf(d.LV) || 0.9;
-  const isMW = d.vm_untergrund ? d.vm_untergrund === "mauerwerk" : !/beton/i.test(String(d.verankerungsgrund || "stein"));
+  const wandKey = WAND_MATERIALIEN[wand] ? wand : wandMaterialVonProjekt(d);
 
   const S = 0.42;
   const g = {
@@ -101,7 +123,7 @@ export function bauSzene(d, { fuehrung = "gitter", explode = 0, oberflaeche = "p
   const seg = (a, b, w = 2.2) => prim.push({ s: [a, b], farbe: F.seil, w });
 
   // Schichten
-  quader(0, 0, -g.wand / 2, g.W, g.H, g.wand, isMW ? F.wandMW : F.wandBeton);
+  quader(0, 0, -g.wand / 2, g.W, g.H, g.wand, WAND_MATERIALIEN[wandKey].flat);
   quader(0, 0, zTol, g.W, g.H, g.tol, F.tol);
   quader(0, 0, zDaemm, g.W, g.H, g.daemm, F.daemm);
   quader(0, 0, zPutz, g.W, g.H, g.putz, (OBERFLAECHEN[oberflaeche] || OBERFLAECHEN.putz).farbe);
@@ -135,8 +157,8 @@ export function bauSzene(d, { fuehrung = "gitter", explode = 0, oberflaeche = "p
 }
 
 // ── Rendern: SVG-Innencode + passende viewBox ──
-export function szeneSVGInner(d, { rx = -16, ry = -32, explode = 0, fuehrung = "gitter", oberflaeche = "putz" } = {}) {
-  const prim = bauSzene(d, { fuehrung, explode, oberflaeche });
+export function szeneSVGInner(d, { rx = -16, ry = -32, explode = 0, fuehrung = "gitter", oberflaeche = "putz", wand = null } = {}) {
+  const prim = bauSzene(d, { fuehrung, explode, oberflaeche, wand });
   const a = rx * Math.PI / 180, b = ry * Math.PI / 180;
   const ca = Math.cos(a), sa = Math.sin(a), cb = Math.cos(b), sb = Math.sin(b);
   // CSS `rotateX(rx) rotateY(ry)`: erst Ry, dann Rx auf den Punkt

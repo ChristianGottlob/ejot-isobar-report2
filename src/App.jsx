@@ -5,7 +5,7 @@ import { useState, useRef, useCallback, useMemo, useEffect } from "react";
 // einliest — nicht beim Öffnen der Seite.
 import { buildDocument, leeresDokument, FIELD_LABELS } from "./pdfFields.js";
 import { baueProjektPayload, leseProjektdatei, projektDateiname } from "./projektdatei.js";
-import { szeneSVGInner } from "./modellSzene.js";
+import { szeneSVGInner, WAND_MATERIALIEN, wandMaterialVonProjekt } from "./modellSzene.js";
 import RealisticFacade from "./RealisticFacade";
 import Facade3D from "./Facade3D";
 import RasterOverlay from "./RasterOverlay";
@@ -1121,7 +1121,8 @@ function SystemIso({ d }){
   const wdvsMm=pf(d.vm_daemm)||pf(d.wdvs_dicke)||200;
   const tolMm=pf(d.dicke_klebschicht)||10;
   const putzMm=pf(d.vm_putz)||10;
-  const isMW=d.vm_untergrund?d.vm_untergrund==="mauerwerk":!/beton/i.test(String(d.verankerungsgrund||"stein"));
+  const wm=wandMaterialVonProjekt(d);
+  const wmDef=WAND_MATERIALIEN[wm];
   const S=0.24;
   const T={wand:26,tol:Math.max(3,Math.min(18,tolMm*S)),daemm:Math.max(18,Math.min(70,wdvsMm*S)),putz:Math.max(3,Math.min(9,putzMm*S)),luft:48};
   const G=12;                                     // Explosionsspalt zwischen den Schichten
@@ -1208,7 +1209,6 @@ function SystemIso({ d }){
     <circle cx={x} cy={y} r="8" fill={WH} stroke="#8B939C" strokeWidth=".9"/>
     <text x={x} y={y+2.8} textAnchor="middle" fontFamily={MONO_F} fontSize="8.5" fontWeight="700" fill="#333">{n}</text>
   </g>);
-  const wandFront=isMW?"#C08A7D":"#B8B4AD";
   return(
     <svg viewBox="0 0 560 312" width="100%" style={{display:"block",maxWidth:660,margin:"0 auto"}} aria-label="Systemdarstellung wie im 3D-Modell">
       <defs>
@@ -1258,7 +1258,7 @@ function SystemIso({ d }){
         </pattern>
       </defs>
       {/* Schichten von hinten nach vorn, dazwischen die Rippenstab-Segmente */}
-      {slab(-T.wand,0,isMW?"url(#siZiegel)":wandFront,isMW?"#D5A79A":"#C6C2BA",isMW?"#A87A6E":"#9A958D","wand")}
+      {slab(-T.wand,0,wm==="ziegel"?"url(#siZiegel)":wmDef.flat,wmDef.top,wmDef.side,"wand")}
       {axs.map(ax=>ays.map(ay=><RodSeg key={`r0-${ax}-${ay}`} ax={ax} ay={ay} z0={gaps[0][0]} z1={gaps[0][1]}/>))}
       {slab(zTolIn,zTolOut,"#C9A86A","#DCBE86","#B39355","tol")}
       {axs.map(ax=>ays.map(ay=><RodSeg key={`r1-${ax}-${ay}`} ax={ax} ay={ay} z0={gaps[1][0]} z1={gaps[1][1]}/>))}
@@ -1358,7 +1358,7 @@ function AnlagenSection({d}){
             <div key={i} style={{border:`1px solid ${BD}`,borderRadius:4,padding:"8px 8px 4px",breakInside:"avoid"}}>
               <svg viewBox={rr.vb} width="100%" style={{display:"block"}} dangerouslySetInnerHTML={{__html:rr.inner}}/>
               <div style={{fontSize:9,color:GL,marginTop:4}}>
-                Ansicht {i+1} · Seilführung {FUEHRUNG_L[sh.fuehrung]||sh.fuehrung}{sh.explode>0.05?" · Explosionsansicht":""}{sh.oberflaeche&&sh.oberflaeche!=="putz"?` · Oberfläche Klinker (${sh.oberflaeche.split("_")[1]})`:""}
+                Ansicht {i+1} · Seilführung {FUEHRUNG_L[sh.fuehrung]||sh.fuehrung}{sh.wand&&WAND_MATERIALIEN[sh.wand]?` · ${WAND_MATERIALIEN[sh.wand].l}`:""}{sh.explode>0.05?" · Explosionsansicht":""}{sh.oberflaeche&&sh.oberflaeche!=="putz"?` · Oberfläche Klinker (${sh.oberflaeche.split("_")[1]})`:""}
               </div>
             </div>);})}
         </div>
