@@ -844,6 +844,25 @@ function Stat({label,value,unit,hint,accent,color,valueSize=22}){
   </div>);
 }
 
+// Pflichthinweise — Wortlaut der originalen EJOT-Vorbemessungs-Ausgabe
+// (Absicherung: es handelt sich um eine Vorbemessung, NICHT um eine Statik).
+function VorbemessungsHinweise(){
+  const punkte=[
+    "Die ermittelte Anzahl an Verbindungselementen ist lediglich als Vorbemessung auf Grundlage der gültigen Wind- und Schneelastnormen zu verstehen. Sie ersetzt nicht den statischen Nachweis und erfolgt ausschließlich aufgrund der vom Kunden mitgeteilten Daten, die von EJOT weder auf Vollständigkeit noch auf Richtigkeit zu überprüfen waren.",
+    "Abstand und Raster erfüllen lediglich die statischen Anforderungen. Die Anforderungen aus Pflanzensicht (siehe Anhang Tabelle 15) sind gesondert durch Fachpersonal mit Pflanzenkunde zu berücksichtigen und können von uns nicht beurteilt werden.",
+    "Die benötigte Stückzahl muss für jedes Bauvorhaben vom Auftraggeber separat geprüft werden, da die Mengen entsprechend des Verankerungsschemas von unserer Empfehlung abweichen können.",
+    "Diese Vorbemessung betrachtet lediglich den Nachweis zum Lastabtrag gemäß Z-21.8-2083. Weitere Nachweise zur Verwendung des Systems, z. B. Einhaltung von Brandschutzanforderungen, sind nicht Bestandteil dieser Vorbemessung und müssen separat mit den Bauverantwortlichen abgestimmt werden.",
+  ];
+  return(<div style={{border:`1.5px solid ${AM}`,borderRadius:5,padding:"9px 12px",background:"#FFF8E1",breakInside:"avoid"}}>
+    <div style={{fontSize:10,fontWeight:800,color:"#7A4A00",textTransform:"uppercase",letterSpacing:.5,marginBottom:5}}>
+      ⚠ Hinweise — Vorbemessung, kein statischer Nachweis
+    </div>
+    <ol style={{margin:0,paddingLeft:16,fontSize:9,color:DK,lineHeight:1.5}}>
+      {punkte.map((t,i)=><li key={i} style={{marginBottom:i<punkte.length-1?3:0}}>{t}</li>)}
+    </ol>
+  </div>);
+}
+
 function PageHead({title,subtitle}){
   return(<div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14}}>
     <span style={{fontWeight:900,fontSize:22,color:R}}>EJOT<sup style={{fontSize:7}}>®</sup></span>
@@ -1053,8 +1072,7 @@ function PreviewSection({d,maxNw,withRealistic=true}){
       {unannotatedPlans.length>0&&<div style={{padding:"6px 10px",background:"#FFF8E1",border:`1px solid ${AM}40`,borderRadius:5,fontSize:10.5,color:DK,marginBottom:10}}>
         ⓘ {unannotatedPlans.length} {unannotatedPlans.length===1?"Plan ist":"Pläne sind"} hochgeladen, aber noch keine Begrünungsfläche markiert.
       </div>}
-      <div style={{fontSize:9,color:GL,lineHeight:1.5,borderTop:`1px solid ${BD}`,paddingTop:6}}>
-        Hinweis: Diese Vorbemessung dient als Orientierung und ersetzt keinen objektspezifischen statischen Nachweis.</div>
+      <VorbemessungsHinweise/>
     </div>
 
     {/* PER-FACADE PAGES — each FacadeReportCard already has data-pdf-page="facade" */}
@@ -1675,7 +1693,9 @@ function MaterialSection({d,setD}){
 
       <div style={{padding:10,background:"#FFF8E1",borderRadius:4,border:`1px solid ${AM}40`,fontSize:9.5,color:DK}}>
         <strong style={{color:AM}}>⚠ Hinweis:</strong> Die Stückzahlen sind überschlägig. Für die Ausführung ist eine planbasierte Materialermittlung unter Berücksichtigung
-        von Rand-/Eckbereichen, Fenster-/Türöffnungen und Systemdetails erforderlich.</div>
+        von Rand-/Eckbereichen, Fenster-/Türöffnungen und Systemdetails erforderlich. Die benötigte Stückzahl muss für jedes
+        Bauvorhaben vom Auftraggeber separat geprüft werden, da die Mengen entsprechend des Verankerungsschemas von unserer
+        Empfehlung abweichen können.</div>
       <div style={{borderTop:`1px solid ${BD}`,marginTop:14,padding:"6px 0 0",display:"flex",justifyContent:"space-between",fontSize:9,color:GL}}>
         <span>EJOT · ISO-Bar ECO · Materialermittlung</span><span>{d.dokNr}</span></div>
     </div>
@@ -2180,7 +2200,7 @@ function StatikSection({ d }){
 
   return (
     <div style={{ background: WH, padding: "20px 26px", fontFamily: "'Segoe UI',system-ui,sans-serif", color: BK }}>
-      <PageHead title="Vorbemessung – Statik" subtitle="Iso-Bar ECO · statischer Nachweis (Vorbemessung)" />
+      <PageHead title="Vorbemessung – Detailberechnung" subtitle="Iso-Bar ECO · rechnerische Vorbemessung — kein statischer Nachweis" />
 
       {/* Kopf */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 14, fontSize: 11 }}>
@@ -2203,7 +2223,7 @@ function StatikSection({ d }){
       {fehlt?.length > 0 && (
         <div style={{ padding: "11px 13px", background: "#FFF8E1", border: "1px solid #FFB30055",
           borderRadius: 6, color: "#7A5900", fontSize: 12, marginBottom: 12, breakInside: "avoid" }}>
-          <div style={{ fontWeight: 800, marginBottom: 3 }}>Statischer Nachweis noch nicht möglich</div>
+          <div style={{ fontWeight: 800, marginBottom: 3 }}>Vorbemessung noch nicht möglich</div>
           Es fehlen: <strong>{fehlt.join(" · ")}</strong>
           <div style={{ fontSize: 10.5, color: GL, marginTop: 4 }}>
             Diese Angaben im Reiter „Vorbemessung“ eintragen — sie gehen direkt in Windlast,
@@ -2409,6 +2429,8 @@ function StatikSection({ d }){
             </Block>
           );
         })()}
+
+        <div style={{ marginTop: 12 }}><VorbemessungsHinweise/></div>
 
         <div style={{ fontSize: 8.5, color: GL, marginTop: 10, lineHeight: 1.5, borderTop: `1px solid ${BD}`, paddingTop: 8 }}>
           Quelle: {isAT ? "ÖNORM B 1991-1-4" : "DIN EN 1991-1-4/NA"} (Wind) · Zulassung Z-21.8-2083 (Befestiger) ·
@@ -2721,7 +2743,7 @@ export default function App(){
   const exportAll=useCallback(async()=>{
     setExporting("all");setShowExportMenu(false);
     try{
-      const sections=[{ref:previewRef,name:"Vorbemessung"},{ref:statikRef,name:"Statik"},{ref:anlagenRef,name:"Anlagen"},{ref:materialRef,name:"Material"}];
+      const sections=[{ref:previewRef,name:"Vorbemessung"},{ref:statikRef,name:"Vorbemessung-Detail"},{ref:anlagenRef,name:"Anlagen"},{ref:materialRef,name:"Material"}];
       for(const sec of sections){
         if(!sec.ref.current)continue;
         await exportPdf(sec.name,sec.ref,`EJOT_IsoBar_${sec.name}_${d.dokNr||"Report"}.pdf`);
@@ -2732,7 +2754,7 @@ export default function App(){
 
   const handleExport=(which)=>{
     setShowExportMenu(false);
-    const map={preview:{ref:previewRef,name:"Vorbemessung"},statik:{ref:statikRef,name:"Statik"},anlagen:{ref:anlagenRef,name:"Anlagen"},material:{ref:materialRef,name:"Material"}};
+    const map={preview:{ref:previewRef,name:"Vorbemessung"},statik:{ref:statikRef,name:"Vorbemessung-Detail"},anlagen:{ref:anlagenRef,name:"Anlagen"},material:{ref:materialRef,name:"Material"}};
     const sec=map[which];
     if(sec)exportPdf(which,sec.ref,`EJOT_IsoBar_${sec.name}_${d.dokNr||"Report"}.pdf`);
   };
@@ -3085,7 +3107,7 @@ export default function App(){
     {id:"edit",l:"Bearbeiten",icon:"✎"},
     {id:"modell",l:"3D-Modell",icon:"◈"},
     {id:"preview",l:"Vorschau",icon:"◐"},
-    {id:"statik",l:"Statik",icon:"∑"},
+    {id:"statik",l:"Vorbemessung",icon:"∑"},
     {id:"anlagen",l:"Anlagen",icon:"☰"},
     {id:"material",l:"Material",icon:"⚙"},
   ];
@@ -3169,7 +3191,7 @@ export default function App(){
             {showExportMenu&&!exporting&&<div className="menuPop" style={{position:"absolute",right:0,top:"100%",marginTop:6,background:WH,border:`1px solid ${BD}`,borderRadius:8,
               boxShadow:"0 8px 24px rgba(0,0,0,.14)",zIndex:200,minWidth:240,padding:5,fontSize:11}} onClick={e=>e.stopPropagation()}>
               <div style={{padding:"7px 11px",fontWeight:700,fontSize:9.5,color:GL,textTransform:"uppercase",letterSpacing:.5}}>Einzeln exportieren</div>
-              {[["preview","Vorbemessung (Seite 1+2)"],["statik","Statik – Detailberechnung"],["anlagen","Anlagen (Lastklassen, Pflanze, System)"],["material","Materialbedarfsermittlung"]].map(([id,label])=>
+              {[["preview","Vorbemessung (Seite 1+2)"],["statik","Vorbemessung – Detailberechnung"],["anlagen","Anlagen (Lastklassen, Pflanze, System)"],["material","Materialbedarfsermittlung"]].map(([id,label])=>
                 <button key={id} onClick={()=>handleExport(id)} style={{display:"block",width:"100%",padding:"8px 11px",background:"none",border:"none",
                   textAlign:"left",cursor:"pointer",borderRadius:5,fontSize:11.5,color:DK}}
                   onMouseEnter={e=>e.currentTarget.style.background=BG}
@@ -3548,7 +3570,7 @@ export default function App(){
 {step==="preview"&&<PaperView label="VORBEMESSUNG"><PreviewSection d={d} maxNw={maxNw}/></PaperView>}
 
 {/* ═══ STATIK ═══ */}
-{step==="statik"&&<PaperView label="STATIK"><StatikSection d={d}/></PaperView>}
+{step==="statik"&&<PaperView label="VORBEMESSUNG"><StatikSection d={d}/></PaperView>}
 
 {/* ═══ ANLAGEN ═══ */}
 {step==="anlagen"&&<PaperView label="ANLAGEN"><AnlagenSection d={d}/></PaperView>}
